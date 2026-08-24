@@ -21,12 +21,28 @@ import (
 )
 
 type mutation struct {
-	Path             string  `json:"path"`
-	SetInteger       *string `json:"set_integer"`
-	SetNumber        *string `json:"set_number"`
-	SetString        *string `json:"set_string"`
-	SetNull          *bool   `json:"set_null"`
-	DuplicateElement *int    `json:"duplicate_element"`
+	Path               string         `json:"path"`
+	SetInteger         *string        `json:"set_integer"`
+	SetNumber          *string        `json:"set_number"`
+	SetString          *string        `json:"set_string"`
+	SetNull            *bool          `json:"set_null"`
+	DuplicateElement   *int           `json:"duplicate_element"`
+	RemoveArrayElement *int           `json:"remove_array_element"`
+	PutMapEntry        *mapEntry      `json:"put_map_entry"`
+	RemoveMapEntry     *string        `json:"remove_map_entry"`
+	SetAbsent          *bool          `json:"set_absent"`
+	SetBytes           []byte         `json:"set_bytes"`
+	SetDuration        *durationValue `json:"set_duration"`
+}
+
+type mapEntry struct {
+	Key   string          `json:"key"`
+	Value json.RawMessage `json:"value"`
+}
+
+type durationValue struct {
+	Seconds     int64 `json:"seconds"`
+	Nanoseconds int64 `json:"nanoseconds"`
 }
 
 type probe struct {
@@ -223,10 +239,60 @@ func applyMutation(model reflect.Value, m mutation) error {
 		target.Set(reflect.Append(target, target.Index(*m.DuplicateElement)))
 		return nil
 	}
+	if m.RemoveArrayElement != nil {
+		if target.Kind() != reflect.Slice {
+			return fmt.Errorf("%s is not a slice", m.Path)
+		}
+		at := *m.RemoveArrayElement
+		if at < 0 || at >= target.Len() {
+			return fmt.Errorf("array index %d is out of range for %s", at, m.Path)
+		}
+		target.Set(reflect.AppendSlice(target.Slice(0, at), target.Slice(at+1, target.Len())))
+		return nil
+	}
+	if m.PutMapEntry != nil {
+		target = typedMap(target)
+		if target.Kind() != reflect.Map {
+			return fmt.Errorf("%s is not a map", m.Path)
+		}
+		value := reflect.New(target.Type().Elem())
+		if err := json.Unmarshal(m.PutMapEntry.Value, value.Interface()); err != nil {
+			return err
+		}
+		target.SetMapIndex(reflect.ValueOf(m.PutMapEntry.Key).Convert(target.Type().Key()), value.Elem())
+		return nil
+	}
+	if m.RemoveMapEntry != nil {
+		target = typedMap(target)
+		if target.Kind() != reflect.Map {
+			return fmt.Errorf("%s is not a map", m.Path)
+		}
+		target.SetMapIndex(reflect.ValueOf(*m.RemoveMapEntry).Convert(target.Type().Key()), reflect.Value{})
+		return nil
+	}
 	return assign(target, m)
 }
 
+// Typed additional properties are represented directly as a map in some
+// positions and as a generated object with an AdditionalProperties field in
+// others. The mutation protocol intentionally hides that target detail.
+func typedMap(target reflect.Value) reflect.Value {
+	for target.Kind() == reflect.Pointer || target.Kind() == reflect.Interface {
+		target = target.Elem()
+	}
+	if target.Kind() == reflect.Struct {
+		if field := target.FieldByName("AdditionalProperties"); field.IsValid() {
+			return field
+		}
+	}
+	return target
+}
+
 func assign(target reflect.Value, m mutation) error {
+	if m.SetAbsent != nil {
+		target.Set(reflect.Zero(target.Type()))
+		return nil
+	}
 	if m.SetNull != nil {
 		if target.Kind() != reflect.Pointer && target.Kind() != reflect.Slice && target.Kind() != reflect.Map {
 			return fmt.Errorf("%s is not nullable", m.Path)
@@ -241,6 +307,16 @@ func assign(target reflect.Value, m mutation) error {
 		target = target.Elem()
 	}
 	switch {
+	case m.SetBytes != nil:
+		if target.Kind() != reflect.Slice || target.Type().Elem().Kind() != reflect.Uint8 {
+			return fmt.Errorf("%s is not native bytes", m.Path)
+		}
+		target.SetBytes(m.SetBytes)
+	case m.SetDuration != nil:
+		if target.Kind() != reflect.Int64 {
+			return fmt.Errorf("%s is not a native duration", m.Path)
+		}
+		target.SetInt(m.SetDuration.Seconds*1_000_000_000 + m.SetDuration.Nanoseconds)
 	case m.SetInteger != nil:
 		parsed, err := strconv.ParseInt(*m.SetInteger, 10, 64)
 		if err != nil {

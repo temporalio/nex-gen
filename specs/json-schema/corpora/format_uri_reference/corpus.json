@@ -1,0 +1,33 @@
+{
+  "note": "RFC 3986 ASCII URI-reference corpus. Accepted references round-trip verbatim because the format remains string-shaped.",
+  "cases": [
+    {
+      "id": "absolute",
+      "wire": "https://example.com/a?b=c#d",
+      "expect_valid": true
+    },
+    { "id": "relative-path", "wire": "a/b/c", "expect_valid": true },
+    { "id": "absolute-path", "wire": "/a/b/c", "expect_valid": true },
+    {
+      "id": "network-path",
+      "wire": "//example.com/path",
+      "expect_valid": true
+    },
+    { "id": "query", "wire": "?q=one/two", "expect_valid": true },
+    { "id": "fragment", "wire": "#frag", "expect_valid": true },
+    { "id": "empty", "wire": "", "expect_valid": true },
+    { "id": "dot-segments", "wire": "../a/./b", "expect_valid": true },
+    { "id": "escaped-unicode", "wire": "/%E2%98%83", "expect_valid": true },
+    { "id": "escaped-reserved", "wire": "a%20b%2Fc", "expect_valid": true },
+    { "id": "raw-unicode", "wire": "/snowman/☃", "expect_valid": false },
+    { "id": "bad-percent-short", "wire": "/%2", "expect_valid": false },
+    { "id": "bad-percent-hex", "wire": "/%GG", "expect_valid": false },
+    { "id": "raw-space", "wire": "/a b", "expect_valid": false },
+    {
+      "id": "malformed-ipv6-host",
+      "wire": "//[1::2::3]/x",
+      "expect_valid": false
+    },
+    { "id": "unclosed-host", "wire": "//[::1/x", "expect_valid": false }
+  ]
+}

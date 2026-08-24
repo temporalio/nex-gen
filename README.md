@@ -256,6 +256,22 @@ $defs:
 and Python have no equivalent, because there a constant or enum member *is* its
 literal value.
 
+## Known cross-language divergences
+
+Three edge cases do not yet behave identically in every target:
+
+- **Negative zero:** TypeScript serializes JSON `-0` as `0`. Go, Java, and
+  Python preserve the sign.
+- **A very large fractional integer:** the JSON number
+  `4503599627370496.5` is rounded before validation by Python and TypeScript,
+  so they accept it as an integer. Go and Java retain the original `.5` and
+  reject it.
+- **Nanosecond timestamps in Python:** Python timestamps hold only six
+  fractional digits, so a value such as `.123456789` is re-emitted as
+  `.123456`. Go, Java, and TypeScript preserve all nine digits.
+
+The conformance tests pin these differences so that any change is noticed.
+
 ## Supported JSON Schema features
 
 Support levels: **Full** (works as specified), **Partial** (a documented subset),

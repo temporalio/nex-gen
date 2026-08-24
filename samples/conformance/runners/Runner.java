@@ -7,6 +7,7 @@ import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.nio.file.Files;
 import java.nio.file.Paths;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
@@ -56,7 +57,7 @@ public final class Runner {
             try {
                 model = Class.forName(
                         "conformance." + testCase.get("dir").asText() + "."
-                                + testCase.get("model").asText());
+                                + testCase.get("java_model").asText());
             } catch (Throwable error) {
                 String message = "import failed: " + describe(error);
                 for (JsonNode probe : testCase.get("probes")) {
@@ -176,6 +177,27 @@ public final class Runner {
             sequence.add(sequence.get(mutation.get("duplicate_element").asInt()));
             return;
         }
+        if (mutation.has("remove_array_element")) {
+            List<Object> sequence = (List<Object>) read(owner, last);
+            sequence.remove(mutation.get("remove_array_element").asInt());
+            return;
+        }
+        if (mutation.has("put_map_entry")) {
+            Map<String, Object> map = typedMap(read(owner, last));
+            JsonNode entry = mutation.get("put_map_entry");
+            Object replacement;
+            if (!map.isEmpty()) {
+                replacement = MAPPER.treeToValue(entry.get("value"), map.values().iterator().next().getClass());
+            } else {
+                replacement = MAPPER.treeToValue(entry.get("value"), Object.class);
+            }
+            map.put(entry.get("key").asText(), replacement);
+            return;
+        }
+        if (mutation.has("remove_map_entry")) {
+            typedMap(read(owner, last)).remove(mutation.get("remove_map_entry").asText());
+            return;
+        }
         Object replacement;
         if (mutation.has("set_integer")) {
             replacement = coerceInteger(slotType(owner, last), mutation.get("set_integer").asText());
@@ -185,10 +207,30 @@ public final class Runner {
             replacement = mutation.get("set_string").asText();
         } else if (mutation.has("set_null")) {
             replacement = null;
+        } else if (mutation.has("set_absent")) {
+            replacement = null;
+        } else if (mutation.has("set_bytes")) {
+            JsonNode bytes = mutation.get("set_bytes");
+            replacement = new byte[bytes.size()];
+            for (int index = 0; index < bytes.size(); index++) {
+                ((byte[]) replacement)[index] = (byte) bytes.get(index).asInt();
+            }
+        } else if (mutation.has("set_duration")) {
+            JsonNode duration = mutation.get("set_duration");
+            replacement = Duration.ofSeconds(
+                    duration.get("seconds").asLong(), duration.get("nanoseconds").asLong());
         } else {
             throw new IllegalArgumentException("unknown mutation " + mutation);
         }
         write(owner, last, replacement);
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> typedMap(Object value) throws Exception {
+        if (value instanceof Map<?, ?>) {
+            return (Map<String, Object>) value;
+        }
+        return (Map<String, Object>) fieldOf(value.getClass(), "additionalProperties").get(value);
     }
 
     private static Object coerceInteger(Class<?> type, String text) {

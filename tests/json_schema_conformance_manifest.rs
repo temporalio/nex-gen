@@ -51,7 +51,7 @@ struct Case {
     /// Prose stating what the case pins. Not asserted; read by whoever the
     /// driver's output lands on.
     intent: String,
-    schema: String,
+    schemas: Vec<String>,
     /// The generated model every wire value is driven through. Conformance
     /// schemas keep this name identical in all four targets.
     model: Option<String>,
@@ -110,6 +110,8 @@ enum DivergenceStatus {
 struct ExpectedLoad {
     result: LoadResult,
     diagnostic: Option<String>,
+    #[serde(default)]
+    covers: Vec<String>,
 }
 
 #[derive(Debug, Deserialize, PartialEq, Eq)]
@@ -127,6 +129,9 @@ struct AcceptedWireValue {
     /// The wire every target must re-emit, when it is not the input itself
     /// (canonicalizing inputs: lowercase `t`/`z`, `PT90M`, `+00:00`).
     expected_wire: Option<String>,
+    #[serde(default)]
+    mutations: Vec<Value>,
+    covers: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -134,6 +139,7 @@ struct AcceptedWireValue {
 struct ParseFailure {
     wire_json: String,
     expected_paths: Vec<String>,
+    covers: Vec<String>,
 }
 
 /// A serialize-side rejection: parse `from_wire`, mutate the **native** value,
@@ -147,7 +153,238 @@ struct SerializeFailure {
     from_fixture: Option<String>,
     mutations: Vec<Value>,
     expected_paths: Vec<String>,
+    covers: Vec<String>,
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum CoveragePhase {
+    Load,
+    Parse,
+    RoundTrip,
+    Serialize,
+}
+
+impl CoveragePhase {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Load => "load",
+            Self::Parse => "parse",
+            Self::RoundTrip => "round_trip",
+            Self::Serialize => "serialize",
+        }
+    }
+}
+
+/// Every supported wire-affecting feature and every phase at which its contract
+/// can fail. Annotation-only keywords are intentionally absent: they have no
+/// wire verdict to drive and remain compile/import probes.
+const COVERAGE_REQUIREMENTS: &[(&str, &[CoveragePhase])] = &[
+    (
+        "type",
+        &[
+            CoveragePhase::Parse,
+            CoveragePhase::RoundTrip,
+            CoveragePhase::Serialize,
+        ],
+    ),
+    (
+        "integer",
+        &[
+            CoveragePhase::Parse,
+            CoveragePhase::RoundTrip,
+            CoveragePhase::Serialize,
+        ],
+    ),
+    ("required", &[CoveragePhase::Parse]),
+    (
+        "nullability",
+        &[
+            CoveragePhase::Parse,
+            CoveragePhase::RoundTrip,
+            CoveragePhase::Serialize,
+        ],
+    ),
+    ("minimum", &[CoveragePhase::Parse, CoveragePhase::Serialize]),
+    ("maximum", &[CoveragePhase::Parse, CoveragePhase::Serialize]),
+    (
+        "exclusiveMinimum",
+        &[CoveragePhase::Parse, CoveragePhase::Serialize],
+    ),
+    (
+        "exclusiveMaximum",
+        &[CoveragePhase::Parse, CoveragePhase::Serialize],
+    ),
+    (
+        "multipleOf",
+        &[CoveragePhase::Parse, CoveragePhase::Serialize],
+    ),
+    (
+        "minLength",
+        &[CoveragePhase::Parse, CoveragePhase::Serialize],
+    ),
+    (
+        "maxLength",
+        &[CoveragePhase::Parse, CoveragePhase::Serialize],
+    ),
+    ("pattern", &[CoveragePhase::Parse, CoveragePhase::Serialize]),
+    ("items", &[CoveragePhase::Parse, CoveragePhase::Serialize]),
+    (
+        "minItems",
+        &[CoveragePhase::Parse, CoveragePhase::Serialize],
+    ),
+    (
+        "maxItems",
+        &[CoveragePhase::Parse, CoveragePhase::Serialize],
+    ),
+    (
+        "uniqueItems",
+        &[CoveragePhase::Parse, CoveragePhase::Serialize],
+    ),
+    (
+        "contains",
+        &[CoveragePhase::Parse, CoveragePhase::Serialize],
+    ),
+    (
+        "minContains",
+        &[CoveragePhase::Parse, CoveragePhase::Serialize],
+    ),
+    (
+        "maxContains",
+        &[CoveragePhase::Parse, CoveragePhase::Serialize],
+    ),
+    (
+        "additionalProperties",
+        &[
+            CoveragePhase::Parse,
+            CoveragePhase::RoundTrip,
+            CoveragePhase::Serialize,
+        ],
+    ),
+    (
+        "minProperties",
+        &[CoveragePhase::Parse, CoveragePhase::Serialize],
+    ),
+    (
+        "maxProperties",
+        &[CoveragePhase::Parse, CoveragePhase::Serialize],
+    ),
+    (
+        "propertyNames",
+        &[CoveragePhase::Parse, CoveragePhase::Serialize],
+    ),
+    (
+        "dependentRequired",
+        &[CoveragePhase::Parse, CoveragePhase::Serialize],
+    ),
+    (
+        "allOf",
+        &[
+            CoveragePhase::Parse,
+            CoveragePhase::RoundTrip,
+            CoveragePhase::Serialize,
+        ],
+    ),
+    (
+        "ref.local",
+        &[
+            CoveragePhase::Parse,
+            CoveragePhase::RoundTrip,
+            CoveragePhase::Serialize,
+        ],
+    ),
+    (
+        "ref.cross_file",
+        &[
+            CoveragePhase::Parse,
+            CoveragePhase::RoundTrip,
+            CoveragePhase::Serialize,
+        ],
+    ),
+    (
+        "ref.recursive",
+        &[
+            CoveragePhase::Parse,
+            CoveragePhase::RoundTrip,
+            CoveragePhase::Serialize,
+        ],
+    ),
+    (
+        "oneOf.token",
+        &[
+            CoveragePhase::Parse,
+            CoveragePhase::RoundTrip,
+            CoveragePhase::Serialize,
+        ],
+    ),
+    (
+        "oneOf.discriminator",
+        &[
+            CoveragePhase::Parse,
+            CoveragePhase::RoundTrip,
+            CoveragePhase::Serialize,
+        ],
+    ),
+    (
+        "oneOf.branch_constraints",
+        &[CoveragePhase::Parse, CoveragePhase::Serialize],
+    ),
+    ("const", &[CoveragePhase::Parse, CoveragePhase::Serialize]),
+    ("enum", &[CoveragePhase::Parse, CoveragePhase::Serialize]),
+    (
+        "default",
+        &[CoveragePhase::RoundTrip, CoveragePhase::Serialize],
+    ),
+    (
+        "contentEncoding",
+        &[
+            CoveragePhase::Parse,
+            CoveragePhase::RoundTrip,
+            CoveragePhase::Serialize,
+        ],
+    ),
+    (
+        "format",
+        &[
+            CoveragePhase::Parse,
+            CoveragePhase::RoundTrip,
+            CoveragePhase::Serialize,
+        ],
+    ),
+    (
+        "duration",
+        &[
+            CoveragePhase::Parse,
+            CoveragePhase::RoundTrip,
+            CoveragePhase::Serialize,
+        ],
+    ),
+    (
+        "uri-reference",
+        &[
+            CoveragePhase::Parse,
+            CoveragePhase::RoundTrip,
+            CoveragePhase::Serialize,
+        ],
+    ),
+    ("strict.anyOf", &[CoveragePhase::Load]),
+    ("strict.not", &[CoveragePhase::Load]),
+    ("strict.conditional", &[CoveragePhase::Load]),
+    ("strict.dependentSchemas", &[CoveragePhase::Load]),
+    ("strict.patternProperties", &[CoveragePhase::Load]),
+    ("strict.prefixItems", &[CoveragePhase::Load]),
+    ("strict.unevaluatedItems", &[CoveragePhase::Load]),
+    ("strict.unevaluatedProperties", &[CoveragePhase::Load]),
+    ("strict.contentMediaType", &[CoveragePhase::Load]),
+    ("strict.contentSchema", &[CoveragePhase::Load]),
+    ("strict.readOnly", &[CoveragePhase::Load]),
+    ("strict.writeOnly", &[CoveragePhase::Load]),
+    ("strict.deferredFormat", &[CoveragePhase::Load]),
+    ("strict.deferredEncoding", &[CoveragePhase::Load]),
+    ("strict.fractional_multipleOf", &[CoveragePhase::Load]),
+    ("strict.mixedEnum", &[CoveragePhase::Load]),
+    ("strict.compositeClosedValue", &[CoveragePhase::Load]),
+    ("strict.undecidableOneOf", &[CoveragePhase::Load]),
+];
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -229,6 +466,162 @@ fn assert_unique_nonempty_paths(paths: &[String], context: &str) {
     }
 }
 
+fn assert_valid_mutation(mutation: &Value, context: &str) {
+    let object = mutation
+        .as_object()
+        .unwrap_or_else(|| panic!("{context} mutation must be an object"));
+    assert_nonempty(
+        object
+            .get("path")
+            .and_then(Value::as_str)
+            .unwrap_or_default(),
+        &format!("{context} mutation path"),
+    );
+    let operators = [
+        "set_integer",
+        "set_number",
+        "set_string",
+        "set_null",
+        "duplicate_element",
+        "remove_array_element",
+        "put_map_entry",
+        "remove_map_entry",
+        "set_absent",
+        "set_bytes",
+        "set_duration",
+    ];
+    let present = operators
+        .iter()
+        .filter(|operator| object.contains_key(**operator))
+        .count();
+    assert_eq!(
+        present, 1,
+        "{context} mutation must declare exactly one known operator: {mutation}"
+    );
+    assert!(
+        object
+            .keys()
+            .all(|key| key == "path" || operators.contains(&key.as_str())),
+        "{context} mutation contains an unknown key: {mutation}"
+    );
+}
+
+fn required_coverage() -> BTreeSet<String> {
+    COVERAGE_REQUIREMENTS
+        .iter()
+        .flat_map(|(feature, phases)| {
+            phases
+                .iter()
+                .map(move |phase| format!("{feature}.{}", phase.name()))
+        })
+        .collect()
+}
+
+fn assert_coverage_claims(
+    claims: &[String],
+    phases: &[CoveragePhase],
+    context: &str,
+    required: &BTreeSet<String>,
+    seen: &mut BTreeMap<String, String>,
+) {
+    let mut local = BTreeSet::new();
+    for claim in claims {
+        assert_nonempty(claim, context);
+        assert!(
+            phases
+                .iter()
+                .any(|phase| claim.ends_with(&format!(".{}", phase.name()))),
+            "{context} claim {claim:?} is phase-incompatible; expected one of {:?}",
+            phases.iter().map(|phase| phase.name()).collect::<Vec<_>>()
+        );
+        assert!(
+            required.contains(claim),
+            "{context} has unknown or stale coverage claim {claim:?}"
+        );
+        assert!(
+            local.insert(claim),
+            "{context} repeats coverage claim {claim:?}"
+        );
+        assert!(
+            seen.insert(claim.clone(), context.to_string()).is_none(),
+            "coverage claim {claim:?} is duplicated; each requirement needs one live owner"
+        );
+    }
+}
+
+fn corpus_document(root: &Path, name: &str) -> Value {
+    let path = root
+        .join("specs/json-schema/corpora")
+        .join(name)
+        .join("corpus.json");
+    serde_json::from_slice(
+        &fs::read(&path)
+            .unwrap_or_else(|error| panic!("read coverage corpus {}: {error}", path.display())),
+    )
+    .unwrap_or_else(|error| panic!("parse coverage corpus {}: {error}", path.display()))
+}
+
+fn seed_corpus_coverage(
+    root: &Path,
+    required: &BTreeSet<String>,
+    seen: &mut BTreeMap<String, String>,
+) {
+    let pattern = corpus_document(root, "pattern_conformance");
+    let pairs = pattern["pairs"].as_array().expect("pattern corpus pairs");
+    let gate = pairs
+        .iter()
+        .filter(|row| row["expect_gate_reject"].as_bool() == Some(true))
+        .count();
+    assert_eq!(
+        pairs.len() - gate,
+        102,
+        "pattern runtime corpus anchor drifted"
+    );
+    assert_eq!(gate, 38, "pattern loader-gate corpus anchor drifted");
+
+    for (name, array) in [
+        ("format_conformance", "pairs"),
+        ("format_duration", "cases"),
+        ("format_uri_reference", "cases"),
+        ("format_materialize_clock", "date-time"),
+    ] {
+        let document = corpus_document(root, name);
+        assert!(
+            document[array]
+                .as_array()
+                .is_some_and(|rows| !rows.is_empty()),
+            "{name} corpus anchor is empty or absent"
+        );
+    }
+
+    for (claim, phase) in [
+        ("pattern.parse", CoveragePhase::Parse),
+        ("format.parse", CoveragePhase::Parse),
+        ("format.round_trip", CoveragePhase::RoundTrip),
+        ("duration.parse", CoveragePhase::Parse),
+        ("duration.round_trip", CoveragePhase::RoundTrip),
+        ("uri-reference.parse", CoveragePhase::Parse),
+        ("uri-reference.round_trip", CoveragePhase::RoundTrip),
+    ] {
+        assert_coverage_claims(
+            &[claim.to_string()],
+            &[phase],
+            &format!("{claim} corpus anchor"),
+            required,
+            seen,
+        );
+    }
+}
+
+fn assert_complete_coverage(required: &BTreeSet<String>, coverage: &BTreeMap<String, String>) {
+    let covered = coverage.keys().cloned().collect::<BTreeSet<_>>();
+    let missing = required.difference(&covered).cloned().collect::<Vec<_>>();
+    assert!(
+        missing.is_empty(),
+        "conformance coverage is incomplete; missing claims: {missing:?}"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Structural test
 // ---------------------------------------------------------------------------
@@ -239,7 +632,7 @@ fn json_schema_conformance_manifest_is_structural_and_consumed() {
     let manifest = load_manifest();
 
     assert_eq!(
-        manifest.version, 2,
+        manifest.version, 3,
         "unsupported conformance manifest version"
     );
     assert!(!manifest.cases.is_empty(), "manifest must contain cases");
@@ -249,6 +642,9 @@ fn json_schema_conformance_manifest_is_structural_and_consumed() {
         .map(Target::name)
         .collect::<BTreeSet<_>>();
     let mut case_ids = BTreeSet::new();
+    let required = required_coverage();
+    let mut coverage = BTreeMap::new();
+    seed_corpus_coverage(&root, &required, &mut coverage);
 
     for case in &manifest.cases {
         assert_nonempty(&case.id, "case id");
@@ -266,13 +662,21 @@ fn json_schema_conformance_manifest_is_structural_and_consumed() {
         );
         assert_nonempty(&case.intent, &format!("{} intent", case.id));
 
-        let schema_path = repository_path(&root, &case.schema);
-        assert!(
-            schema_path.is_file(),
-            "{} schema does not exist: {}",
-            case.id,
-            case.schema
-        );
+        assert!(!case.schemas.is_empty(), "{} must declare schemas", case.id);
+        let mut schema_paths = BTreeSet::new();
+        for schema in &case.schemas {
+            let schema_path = repository_path(&root, schema);
+            assert!(
+                schema_path.is_file(),
+                "{} schema does not exist: {schema}",
+                case.id
+            );
+            assert!(
+                schema_paths.insert(schema),
+                "{} repeats schema input {schema}",
+                case.id
+            );
+        }
 
         match case.expected_load.result {
             LoadResult::Accepted => {
@@ -293,6 +697,11 @@ fn json_schema_conformance_manifest_is_structural_and_consumed() {
                     "{} accepted load must declare at least one wire value",
                     case.id
                 );
+                assert!(
+                    case.expected_load.covers.is_empty(),
+                    "{} accepted load must not declare load coverage",
+                    case.id
+                );
             }
             LoadResult::Rejected => {
                 assert!(
@@ -305,6 +714,18 @@ fn json_schema_conformance_manifest_is_structural_and_consumed() {
                 assert_nonempty(
                     case.expected_load.diagnostic.as_deref().unwrap_or_default(),
                     &format!("{} rejected-load diagnostic", case.id),
+                );
+                assert!(
+                    !case.expected_load.covers.is_empty(),
+                    "{} rejected load must declare coverage",
+                    case.id
+                );
+                assert_coverage_claims(
+                    &case.expected_load.covers,
+                    &[CoveragePhase::Load],
+                    &format!("{} expected_load", case.id),
+                    &required,
+                    &mut coverage,
                 );
             }
         }
@@ -337,12 +758,29 @@ fn json_schema_conformance_manifest_is_structural_and_consumed() {
             if let Some(expected) = &value.expected_wire {
                 assert_valid_json(expected, &format!("{context} expected_wire"));
             }
+            for (mutation_index, mutation) in value.mutations.iter().enumerate() {
+                assert_valid_mutation(mutation, &format!("{context} mutations[{mutation_index}]"));
+            }
+            assert_coverage_claims(
+                &value.covers,
+                &[CoveragePhase::RoundTrip, CoveragePhase::Serialize],
+                &context,
+                &required,
+                &mut coverage,
+            );
         }
 
         for (index, failure) in case.parse_failures.iter().enumerate() {
             let context = format!("{} parse_failures[{index}]", case.id);
             assert_valid_json(&failure.wire_json, &context);
             assert_unique_nonempty_paths(&failure.expected_paths, &context);
+            assert_coverage_claims(
+                &failure.covers,
+                &[CoveragePhase::Parse],
+                &context,
+                &required,
+                &mut coverage,
+            );
         }
 
         for (index, failure) in case.serialize_failures.iter().enumerate() {
@@ -366,7 +804,17 @@ fn json_schema_conformance_manifest_is_structural_and_consumed() {
                 !failure.mutations.is_empty(),
                 "{context} must declare a native mutation"
             );
+            for (mutation_index, mutation) in failure.mutations.iter().enumerate() {
+                assert_valid_mutation(mutation, &format!("{context} mutations[{mutation_index}]"));
+            }
             assert_unique_nonempty_paths(&failure.expected_paths, &context);
+            assert_coverage_claims(
+                &failure.covers,
+                &[CoveragePhase::Serialize],
+                &context,
+                &required,
+                &mut coverage,
+            );
         }
 
         for (index, collapse) in case
@@ -451,6 +899,45 @@ fn json_schema_conformance_manifest_is_structural_and_consumed() {
             }
         }
     }
+
+    assert_complete_coverage(&required, &coverage);
+}
+
+#[test]
+#[should_panic(expected = "conformance coverage is incomplete")]
+fn structural_coverage_rejects_a_removed_requirement_claim() {
+    let required = required_coverage();
+    let mut coverage = required
+        .iter()
+        .map(|claim| (claim.clone(), "test".to_string()))
+        .collect::<BTreeMap<_, _>>();
+    coverage.remove(required.first().expect("coverage requirement"));
+    assert_complete_coverage(&required, &coverage);
+}
+
+#[test]
+#[should_panic(expected = "pattern runtime corpus anchor drifted")]
+fn structural_coverage_rejects_a_removed_corpus_anchor() {
+    let root = repository_root();
+    let mut pattern = corpus_document(&root, "pattern_conformance");
+    let pairs = pattern["pairs"]
+        .as_array_mut()
+        .expect("pattern corpus pairs");
+    let at = pairs
+        .iter()
+        .position(|row| row["expect_gate_reject"].as_bool() != Some(true))
+        .expect("runtime pattern row");
+    pairs.remove(at);
+    let pairs = pattern["pairs"].as_array().expect("pattern corpus pairs");
+    let gate = pairs
+        .iter()
+        .filter(|row| row["expect_gate_reject"].as_bool() == Some(true))
+        .count();
+    assert_eq!(
+        pairs.len() - gate,
+        102,
+        "pattern runtime corpus anchor drifted"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -498,6 +985,15 @@ fn sorted(paths: &[String]) -> Vec<String> {
 fn prepare(root: &Path, case: &Case) -> Prepared {
     let dir = case_dir(&case.id);
     let model = case.model.clone().expect("accepted case names a model");
+    let java_model = if case.schemas.len() > 1 {
+        let module = Path::new(&case.schemas[0])
+            .file_stem()
+            .expect("schema file stem")
+            .to_string_lossy();
+        format!("{module}.{model}")
+    } else {
+        model.clone()
+    };
     let mut probes = Vec::new();
     let mut expectations = Vec::new();
 
@@ -508,7 +1004,7 @@ fn prepare(root: &Path, case: &Case) -> Prepared {
             id: probe_id.clone(),
             kind: ProbeKind::RoundTrip,
             wire: wire.clone(),
-            mutations: Vec::new(),
+            mutations: value.mutations.clone(),
         });
         expectations.push(Expectation {
             probe_id,
@@ -572,6 +1068,7 @@ fn prepare(root: &Path, case: &Case) -> Prepared {
             id: case.id.clone(),
             dir,
             model,
+            java_model,
             probes,
         },
         expectations,
@@ -718,24 +1215,30 @@ fn json_schema_conformance_cases_agree_across_targets() {
     let mut structural_pins: Vec<String> = Vec::new();
 
     for case in &manifest.cases {
-        let schema = repository_path(&root, &case.schema);
+        let schemas = case
+            .schemas
+            .iter()
+            .map(|schema| repository_path(&root, schema))
+            .collect::<Vec<_>>();
         if case.expected_load.result == LoadResult::Rejected {
             let diagnostic = case
                 .expected_load
                 .diagnostic
                 .clone()
                 .expect("structural test requires a diagnostic");
-            let outcome = workspace.generate(Target::Go, &schema, &case_dir(&case.id));
-            match outcome {
-                Ok(_) => hard_failures.push(format!(
-                    "{}: schema loaded but the manifest declares it rejected",
-                    case.id
-                )),
-                Err(error) if !error.contains(&diagnostic) => hard_failures.push(format!(
-                    "{}: load diagnostic does not mention {diagnostic:?}:\n{error}",
-                    case.id
-                )),
-                Err(_) => {}
+            for target in TARGETS {
+                let outcome = workspace.generate_schemas(target, &schemas, &case_dir(&case.id));
+                match outcome {
+                    Ok(_) => hard_failures.push(format!(
+                        "{}: {target} loaded the schema but the manifest declares it rejected",
+                        case.id
+                    )),
+                    Err(error) if !error.contains(&diagnostic) => hard_failures.push(format!(
+                        "{}: {target} load diagnostic does not mention {diagnostic:?}:\n{error}",
+                        case.id
+                    )),
+                    Err(_) => {}
+                }
             }
             continue;
         }
@@ -748,8 +1251,12 @@ fn json_schema_conformance_cases_agree_across_targets() {
     let mut generation_failures: BTreeMap<Target, BTreeMap<String, String>> = BTreeMap::new();
     for target in TARGETS {
         for (case, item) in &prepared {
-            let schema = repository_path(&root, &case.schema);
-            if let Err(error) = workspace.generate(target, &schema, &item.plan.dir) {
+            let schemas = case
+                .schemas
+                .iter()
+                .map(|schema| repository_path(&root, schema))
+                .collect::<Vec<_>>();
+            if let Err(error) = workspace.generate_schemas(target, &schemas, &item.plan.dir) {
                 generation_failures
                     .entry(target)
                     .or_default()

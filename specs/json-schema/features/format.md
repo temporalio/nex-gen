@@ -26,11 +26,11 @@ Beyond validation, the temporal formats (`date-time`, `date`, `time`,
 value, and the wire is produced by **re-serializing** it — with **no
 truncation** (offset and sub-second precision preserved to each type's
 resolution), `date-time` being the one format whose round-trip may lose
-information, and only at a target type's genuine limit. Every rule below was
-verified value-for-value across all four runtime targets **plus** the Rust
-gate and the prospective .NET / Ruby targets by conformance corpora
-covering UUID/IP/date-time, email, hostname, duration, URI, and clock/
-duration materialization.
+information, and only at a target type's genuine limit. The shipped rules are
+executed by `tests/json_schema_corpus_runtime.rs` across Go, Java, Python, and
+default TypeScript; format rows additionally run the `typescript-date` and
+`typescript-temporal` profiles. The Rust gate consumes the same pinned data.
+Prospective targets are design analysis, not part of this executable claim.
 
 ## Spec summary
 
@@ -495,21 +495,26 @@ compiled constant; the load gate proves it compiles, so the emitted
 
 ### Runtime fixtures (validator + round-trip)
 
-Per-format accept/reject is exercised by the conformance corpora that exist
-today: `json-schema/corpora/format_conformance/` (124 pairs, covering `date`,
+Per-format accept/reject is exercised by `tests/json_schema_corpus_runtime.rs`
+over `json-schema/corpora/format_conformance/` (124 pairs, covering `date`,
 `time`, `date-time`, `ipv4`, `ipv6`, `uuid`), `json-schema/corpora/format_email/`
 (56), `json-schema/corpora/format_hostname/` (41) and
 `json-schema/corpora/format_uri/` (72, driven as `uri`). The materialization
 round-trips are tabulated by `json-schema/corpora/format_materialize_clock/`
-(`date-time` / `date` / `time` sections), which records the expected
-offset-preserving, no-truncation behavior per target — including Python's
-sub-µs truncation, the legacy TS `date` UTC fold, and the `:60` skip.
+(`date-time` / `date` / `time` sections). Each valid row has a common canonical
+wire plus a `typescript_date_wire` override where legacy `Date` intentionally
+folds to UTC/milliseconds. `:60` rows are executable common rejections, not
+skips. Python's nanosecond-to-microsecond loss remains the live `09#8`
+divergence and is reported on every run rather than accepted as an override.
 
-**Planned, not yet present:** a `duration` corpus (accept/reject plus
-canonicalization pairs) and a `uri-reference` corpus; and a per-language runner
-that drives each corpus through generated code. The corpora are currently data
-consumed by the Rust unit tests only, so a corpus row is a specification of the
-expected result, not evidence that four languages were measured against it.
+`json-schema/corpora/format_duration/` covers canonical values, `PT90M` and
+`PT3600S` normalization, the common overflow edge, and malformed, calendar,
+signed, and fractional rejections. `json-schema/corpora/format_uri_reference/`
+covers absolute and relative references, queries, fragments, the empty
+reference, escaping, raw Unicode, and malformed hosts. Accepted rows in both
+corpora are round-tripped through generated code. Format execution uses six
+profiles: the four default targets plus `typescript-date` and
+`typescript-temporal`.
 
 Representative cases:
 

@@ -1,0 +1,7 @@
+$schema: https://json-schema.org/draft/2020-12/schema
+title: RejectFractionalMultiple
+type: object
+properties:
+  value:
+    type: number
+    multipleOf: 0.1

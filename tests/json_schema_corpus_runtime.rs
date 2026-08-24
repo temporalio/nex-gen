@@ -14,11 +14,11 @@
 //! * `pattern_conformance` — each pair's `expect_match` is the verdict all four
 //!   must produce. Pairs flagged `expect_gate_reject` are the gate's business,
 //!   not a runtime's, and are skipped.
-//! * `format_conformance`, `format_email`, `format_hostname`, `format_uri` —
-//!   each row's expected validity is the verdict all four must produce.
-//! * `format_materialize_clock` — every row is round-tripped, and the four
-//!   re-emitted wires must be identical. The corpus declares no canonical form,
-//!   so agreement *is* the contract.
+//! * The format corpora — each row's expected validity is the verdict all four
+//!   base targets and both additional TypeScript temporal profiles must produce.
+//! * `format_materialize_clock` and the duration/URI-reference corpora — every
+//!   accepted row is round-tripped against its declared common canonical wire,
+//!   with explicit overrides only for legacy TypeScript `Date` capacity loss.
 
 mod toolchain;
 
@@ -26,6 +26,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::PathBuf;
 
+use nexgen::generator::TsDateTimeTypes;
 use serde_json::{Value, json};
 
 use toolchain::{
@@ -58,6 +59,7 @@ fn text<'a>(row: &'a Value, key: &str) -> &'a str {
 }
 
 /// One member of a corpus model, plus the rows it judges.
+#[derive(Clone)]
 struct Member {
     name: String,
     schema: Value,
@@ -65,13 +67,19 @@ struct Member {
 
 /// A single row: which member it goes to, the wire string, and the verdict every
 /// target must produce.
+#[derive(Clone)]
 struct Row {
     id: String,
     member: String,
     instance: String,
     expected: Expectation,
+    /// Canonical field wire for a round-trip row.
+    expected_wire: Option<String>,
+    /// Intentional legacy `Date` loss, where it differs from the common wire.
+    typescript_date_wire: Option<String>,
 }
 
+#[derive(Clone, Copy)]
 enum Expectation {
     Accepted,
     Rejected,
@@ -178,6 +186,7 @@ fn run_corpus(
         id: case_id.to_string(),
         dir: dir.to_string(),
         model: model.to_string(),
+        java_model: model.to_string(),
         probes,
     }];
 
@@ -226,6 +235,23 @@ fn run_corpus(
                     }
                 ));
             }
+            if matches!(row.expected, Expectation::Agree)
+                && verdict.outcome == "accepted"
+                && let (Some(expected), Some(actual)) = (&row.expected_wire, &verdict.wire)
+            {
+                let expected = serde_json::to_string(&json!({ &row.member: expected }))
+                    .expect("render expected corpus wire");
+                if toolchain::canonical_json(actual) != toolchain::canonical_json(&expected) {
+                    findings.push(format!(
+                        "{} ({}={:?}): {target} re-emitted {}, expected {}",
+                        row.id,
+                        row.member,
+                        row.instance,
+                        toolchain::canonical_json(actual),
+                        toolchain::canonical_json(&expected)
+                    ));
+                }
+            }
         }
 
         let signatures: BTreeMap<Target, String> = observed
@@ -255,6 +281,101 @@ fn run_corpus(
                     .collect::<Vec<_>>()
                     .join("  |  ")
             ));
+        }
+    }
+    findings
+}
+
+fn run_typescript_profile(
+    profile: &str,
+    repr: TsDateTimeTypes,
+    model: &str,
+    dir: &str,
+    members: &[Member],
+    corpus_rows: &[Row],
+) -> Vec<String> {
+    let workspace = Workspace::new(profile);
+    let schema = write_schema(&workspace, model, members);
+    if let Err(error) =
+        workspace.generate_with_typescript_profile(Target::TypeScript, &[schema], dir, repr)
+    {
+        return vec![format!(
+            "{profile}: generation failed: {}",
+            toolchain::brief(&error)
+        )];
+    }
+    let probes = corpus_rows
+        .iter()
+        .enumerate()
+        .map(|(index, row)| Probe {
+            id: format!("row{index}"),
+            kind: match row.expected {
+                Expectation::Agree => ProbeKind::RoundTrip,
+                _ => ProbeKind::Parse,
+            },
+            wire: serde_json::to_string(&json!({ &row.member: &row.instance }))
+                .expect("render profile wire"),
+            mutations: Vec::new(),
+        })
+        .collect();
+    let plan = vec![PlanCase {
+        id: profile.to_string(),
+        dir: dir.to_string(),
+        model: model.to_string(),
+        java_model: model.to_string(),
+        probes,
+    }];
+    let verdicts = match toolchain::run_target(&workspace, Target::TypeScript, &plan) {
+        Ok(verdicts) => verdicts,
+        Err(error) => return vec![format!("{profile}: {}", toolchain::brief(&error))],
+    };
+    let mut findings = Vec::new();
+    for (index, row) in corpus_rows.iter().enumerate() {
+        let Some(verdict) = verdicts
+            .get(profile)
+            .and_then(|case| case.get(&format!("row{index}")))
+        else {
+            findings.push(format!("{}: {profile} reported no verdict", row.id));
+            continue;
+        };
+        let accepted = matches!(row.expected, Expectation::Accepted | Expectation::Agree);
+        let wanted = if accepted {
+            "accepted"
+        } else {
+            "parse_rejected"
+        };
+        if verdict.outcome != wanted {
+            findings.push(format!(
+                "{} ({}={:?}): {profile} {}, corpus says {wanted}",
+                row.id,
+                row.member,
+                row.instance,
+                verdict.summary()
+            ));
+            continue;
+        }
+        if matches!(row.expected, Expectation::Agree) {
+            let expected_field = if profile == "typescript-date" {
+                row.typescript_date_wire
+                    .as_ref()
+                    .or(row.expected_wire.as_ref())
+            } else {
+                row.expected_wire.as_ref()
+            };
+            if let (Some(expected_field), Some(actual)) = (expected_field, &verdict.wire) {
+                let expected = serde_json::to_string(&json!({ &row.member: expected_field }))
+                    .expect("render profile expected wire");
+                if toolchain::canonical_json(actual) != toolchain::canonical_json(&expected) {
+                    findings.push(format!(
+                        "{} ({}={:?}): {profile} re-emitted {}, expected {}",
+                        row.id,
+                        row.member,
+                        row.instance,
+                        toolchain::canonical_json(actual),
+                        toolchain::canonical_json(&expected)
+                    ));
+                }
+            }
         }
     }
     findings
@@ -302,6 +423,8 @@ fn pattern_corpus_matches_identically_in_every_runtime() {
             } else {
                 Expectation::Rejected
             },
+            expected_wire: None,
+            typescript_date_wire: None,
         });
     }
 
@@ -338,6 +461,8 @@ fn format_corpora_hold_in_every_runtime() {
         ("email", "email"),
         ("hostname", "hostname"),
         ("uri", "uri"),
+        ("uriReference", "uri-reference"),
+        ("duration", "duration"),
     ]
     .into_iter()
     .map(|(name, format)| Member {
@@ -358,6 +483,8 @@ fn format_corpora_hold_in_every_runtime() {
             member: member_for(text(row, "format")),
             instance: text(row, "value").to_string(),
             expected: expectation(row, "expect_valid"),
+            expected_wire: None,
+            typescript_date_wire: None,
         });
     }
     for row in rows(&corpus("format_email"), "pairs") {
@@ -366,6 +493,8 @@ fn format_corpora_hold_in_every_runtime() {
             member: "email".to_string(),
             instance: text(row, "instance").to_string(),
             expected: expectation(row, "expect_valid"),
+            expected_wire: None,
+            typescript_date_wire: None,
         });
     }
     for row in rows(&corpus("format_hostname"), "cases") {
@@ -374,6 +503,8 @@ fn format_corpora_hold_in_every_runtime() {
             member: "hostname".to_string(),
             instance: text(row, "instance").to_string(),
             expected: expectation(row, "valid"),
+            expected_wire: None,
+            typescript_date_wire: None,
         });
     }
     for row in rows(&corpus("format_uri"), "pairs") {
@@ -382,6 +513,24 @@ fn format_corpora_hold_in_every_runtime() {
             member: "uri".to_string(),
             instance: text(row, "value").to_string(),
             expected: expectation(row, "expect"),
+            expected_wire: None,
+            typescript_date_wire: None,
+        });
+    }
+
+    for row in rows(&corpus("format_uri_reference"), "cases") {
+        let valid = expectation(row, "expect_valid");
+        corpus_rows.push(Row {
+            id: format!("format_uri_reference/{}", text(row, "id")),
+            member: "uriReference".to_string(),
+            instance: text(row, "wire").to_string(),
+            expected_wire: matches!(valid, Expectation::Accepted)
+                .then(|| text(row, "wire").to_string()),
+            expected: match valid {
+                Expectation::Accepted => Expectation::Agree,
+                other => other,
+            },
+            typescript_date_wire: None,
         });
     }
 
@@ -405,12 +554,50 @@ fn format_corpora_hold_in_every_runtime() {
                     Some(false) => Expectation::Rejected,
                     _ => Expectation::Agree,
                 },
+                expected_wire: (row.get("expect_valid").and_then(Value::as_bool) != Some(false))
+                    .then(|| text(row, "expected_wire").to_string()),
+                typescript_date_wire: row
+                    .get("typescript_date_wire")
+                    .and_then(Value::as_str)
+                    .map(str::to_string),
             });
         }
     }
 
+    for row in rows(&corpus("format_duration"), "cases") {
+        let valid = expectation(row, "expect_valid");
+        corpus_rows.push(Row {
+            id: format!("format_duration/{}", text(row, "id")),
+            member: "duration".to_string(),
+            instance: text(row, "wire").to_string(),
+            expected_wire: matches!(valid, Expectation::Accepted)
+                .then(|| text(row, "expected_wire").to_string()),
+            expected: match valid {
+                Expectation::Accepted => Expectation::Agree,
+                other => other,
+            },
+            typescript_date_wire: None,
+        });
+    }
+
+    let date_findings = run_typescript_profile(
+        "typescript-date",
+        TsDateTimeTypes::Date,
+        "FormatCorpus",
+        "format_corpus",
+        &members,
+        &corpus_rows,
+    );
+    let temporal_findings = run_typescript_profile(
+        "typescript-temporal",
+        TsDateTimeTypes::Temporal,
+        "FormatCorpus",
+        "format_corpus",
+        &members,
+        &corpus_rows,
+    );
     let workspace = Workspace::new("format-corpus");
-    let findings = run_corpus(
+    let mut findings = run_corpus(
         &workspace,
         "format-conformance",
         "FormatCorpus",
@@ -418,6 +605,8 @@ fn format_corpora_hold_in_every_runtime() {
         members,
         corpus_rows,
     );
+    findings.extend(date_findings);
+    findings.extend(temporal_findings);
     let (unexpected, open, structural) = triage(findings, OPEN_FORMAT_ROWS);
     report_open(&open, &structural);
     assert!(
@@ -447,6 +636,7 @@ enum RowStatus {
     /// A defect, or a gap in unimplemented spec surface. Expected to close.
     Open,
     /// A permanent limitation of a target. Documented, not fixed.
+    #[allow(dead_code)]
     Structural,
 }
 

@@ -1,0 +1,64 @@
+{
+  "note": "Materialized time-only duration runtime corpus. Valid rows declare the common canonical wire; invalid rows exercise the narrowed grammar and the shared Go-sized overflow boundary.",
+  "cases": [
+    {
+      "id": "zero",
+      "wire": "PT0S",
+      "expect_valid": true,
+      "expected_wire": "PT0S"
+    },
+    {
+      "id": "seconds",
+      "wire": "PT15S",
+      "expect_valid": true,
+      "expected_wire": "PT15S"
+    },
+    {
+      "id": "minutes",
+      "wire": "PT30M",
+      "expect_valid": true,
+      "expected_wire": "PT30M"
+    },
+    {
+      "id": "hours",
+      "wire": "PT2H",
+      "expect_valid": true,
+      "expected_wire": "PT2H"
+    },
+    {
+      "id": "mixed",
+      "wire": "PT1H30M15S",
+      "expect_valid": true,
+      "expected_wire": "PT1H30M15S"
+    },
+    {
+      "id": "normalize-minutes",
+      "wire": "PT90M",
+      "expect_valid": true,
+      "expected_wire": "PT1H30M"
+    },
+    {
+      "id": "normalize-seconds",
+      "wire": "PT3600S",
+      "expect_valid": true,
+      "expected_wire": "PT1H"
+    },
+    {
+      "id": "overflow-boundary",
+      "wire": "PT2562047H47M16S",
+      "expect_valid": true,
+      "expected_wire": "PT2562047H47M16S"
+    },
+    { "id": "overflow", "wire": "PT2562047H47M17S", "expect_valid": false },
+    { "id": "empty-time", "wire": "PT", "expect_valid": false },
+    { "id": "calendar-year", "wire": "P1Y", "expect_valid": false },
+    { "id": "calendar-month", "wire": "P1M", "expect_valid": false },
+    { "id": "calendar-week", "wire": "P4W", "expect_valid": false },
+    { "id": "calendar-day", "wire": "P1D", "expect_valid": false },
+    { "id": "leading-sign", "wire": "-PT1S", "expect_valid": false },
+    { "id": "component-sign", "wire": "PT-1S", "expect_valid": false },
+    { "id": "fractional", "wire": "PT1.5S", "expect_valid": false },
+    { "id": "wrong-order", "wire": "PT1S1M", "expect_valid": false },
+    { "id": "lowercase", "wire": "pt1s", "expect_valid": false }
+  ]
+}

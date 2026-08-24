@@ -1,0 +1,53 @@
+$schema: https://json-schema.org/draft/2020-12/schema
+title: RuntimeConstraints
+description: String, array, object, dependency, and default constraints in both directions.
+type: object
+additionalProperties: false
+required: [name, values, bag, dependent, requiredList]
+properties:
+  name:
+    type: string
+    minLength: 2
+    maxLength: 4
+    pattern: "^[a-z]+$"
+  values:
+    type: array
+    minItems: 2
+    maxItems: 3
+    uniqueItems: true
+    items:
+      type: integer
+      minimum: 0
+    contains:
+      type: integer
+      minimum: 2
+    minContains: 1
+    maxContains: 2
+  bag:
+    type: object
+    minProperties: 1
+    maxProperties: 2
+    propertyNames:
+      type: string
+      pattern: "^[a-z]+$"
+    additionalProperties:
+      type: integer
+      minimum: 1
+  dependent:
+    type: object
+    additionalProperties: false
+    properties:
+      primary:
+        type: string
+      secondary:
+        type: string
+    dependentRequired:
+      primary: [secondary]
+  requiredList:
+    type: array
+    items:
+      type: string
+  retries:
+    type: integer
+    minimum: 1
+    default: 3

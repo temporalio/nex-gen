@@ -1,0 +1,66 @@
+$schema: https://json-schema.org/draft/2020-12/schema
+title: CompositionMain
+description: Local, cross-file, recursive, flattened, and union composition.
+type: object
+additionalProperties: false
+required: [combined, external, tree, token, discriminated]
+properties:
+  combined:
+    $ref: "#/$defs/Combined"
+  external:
+    $ref: "composition_support.yaml#/$defs/External"
+  tree:
+    $ref: "composition_support.yaml#/$defs/Node"
+  token:
+    oneOf:
+      - type: string
+        minLength: 2
+      - type: integer
+        minimum: 1
+  discriminated:
+    oneOf:
+      - $ref: "#/$defs/Alpha"
+      - $ref: "#/$defs/Beta"
+$defs:
+  Named:
+    type: object
+    additionalProperties: false
+    required: [name]
+    properties:
+      name:
+        type: string
+        minLength: 2
+  Counted:
+    type: object
+    additionalProperties: false
+    required: [count]
+    properties:
+      count:
+        type: integer
+        minimum: 1
+  Combined:
+    allOf:
+      - $ref: "#/$defs/Named"
+      - $ref: "#/$defs/Counted"
+  Alpha:
+    type: object
+    additionalProperties: false
+    required: [kind, value]
+    properties:
+      kind:
+        type: string
+        const: alpha
+      value:
+        type: string
+        minLength: 2
+  Beta:
+    type: object
+    additionalProperties: false
+    required: [kind, count]
+    properties:
+      kind:
+        type: string
+        const: beta
+      count:
+        type: integer
+        minimum: 1

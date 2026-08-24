@@ -301,11 +301,12 @@ the gate must reject; a row's expectation is data, never a special case
 carried in a test's source. That corpus is this keyword's regression suite —
 new edge cases are added there, not enumerated here.
 
-Today the only consumer is the Rust gate, which checks the reject/normalize
-decisions. **Planned:** a per-language corpus runner (Go / TypeScript /
-Python / Java) that applies each target's emit transform and asserts the
-match result, which is what would turn "the four runtimes agree" from a
-design claim into a measured one.
+`tests/json_schema_corpus_runtime.rs` is the executable consumer: it generates
+one member per accepted pattern and runs all 102 runtime rows through Go,
+TypeScript, Python, and Java. The 38 `expect_gate_reject` rows remain shared
+loader coverage because no runtime pattern is emitted for a rejected schema.
+`tests/json_schema_conformance_manifest.rs` adds the integration/serialize
+case and records `pattern.parse` in its fixed coverage ledger.
 
 Fixtures outside the corpus (validator integration, not pure matching):
 - Combined with a failing [[minLength]]/[[maxLength]] or sibling field →
@@ -351,13 +352,11 @@ The known cross-engine divergences are now all handled — the compile gate
 (lookaround/backref, inline flags, and the narrow `\S`-in-multi-member-class
 case) and **normalize** `\s`/`\S` (→ explicit ASCII class) and `$` (→ per-
 target end-anchor), which is what makes the four runtimes agree
-value-for-value. The **residual risk** is an edge the corpus does not yet
-cover (e.g. some `\b` word-boundary or `.`-newline corner), plus the rows it
-does cover that no per-language runner executes yet; the corpus
-(`json-schema/corpora/pattern_conformance/`) is the regression guard and grows into the
-[[type]] cross-language conformance-suite item. Since the gate is the Rust
-`regex` crate rather than the four runtime engines themselves, any
-*acceptance* edge it and a target disagree on also lands there.
+value-for-value. The **residual risk** is an edge the corpus does not yet cover
+(for example a `\b` word-boundary or `.`-newline corner). Every accepted row the
+corpus does contain is executed in all four current runtimes; every rejected
+row is rechecked by the Rust loader gate. New acceptance edges belong in that
+corpus before the gate is widened.
 
 ### Prospective targets (.NET, Ruby)
 

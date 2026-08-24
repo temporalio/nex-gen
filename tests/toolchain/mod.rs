@@ -30,6 +30,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::sync::OnceLock;
 
+use nexgen::generator::TsDateTimeTypes;
 use nexgen::language::Language;
 use nexgen::{GenerateRequest, generate_to_file};
 use serde::Deserialize;
@@ -119,20 +120,45 @@ impl Workspace {
     /// f-string that is a `SyntaxError` below Python 3.12 reached the samples
     /// without any test noticing.
     pub fn generate(&self, target: Target, schema: &Path, dir: &str) -> Result<PathBuf, String> {
+        self.generate_schemas(target, &[schema.to_path_buf()], dir)
+    }
+
+    /// Generate an ordered schema set into one target package. The input order
+    /// is intentionally retained because it is part of the public generation
+    /// request and cross-file `$ref` conformance needs to exercise the real
+    /// multi-input path.
+    pub fn generate_schemas(
+        &self,
+        target: Target,
+        schemas: &[PathBuf],
+        dir: &str,
+    ) -> Result<PathBuf, String> {
+        self.generate_with_typescript_profile(target, schemas, dir, TsDateTimeTypes::default())
+    }
+
+    /// Generate with an explicit TypeScript temporal representation. Other
+    /// targets ignore this option, matching the production request contract.
+    pub fn generate_with_typescript_profile(
+        &self,
+        target: Target,
+        schemas: &[PathBuf],
+        dir: &str,
+        ts_date_time_types: TsDateTimeTypes,
+    ) -> Result<PathBuf, String> {
         let output_path = self.package_path(target, dir);
         if let Some(parent) = output_path.parent() {
             fs::create_dir_all(parent).map_err(|error| error.to_string())?;
         }
         generate_to_file(&GenerateRequest {
             language: target.language(),
-            input_paths: vec![schema.to_path_buf()],
+            input_paths: schemas.to_vec(),
             support_paths: Vec::new(),
             descriptor_paths: Vec::new(),
             output_path: output_path.clone(),
             format: false,
             generate_native_api: false,
             java_package_name: (target == Target::Java).then(|| format!("conformance.{dir}")),
-            ts_date_time_types: Default::default(),
+            ts_date_time_types,
         })
         .map_err(|error| error.to_string())?;
         Ok(output_path)
@@ -193,6 +219,9 @@ pub struct PlanCase {
     pub id: String,
     pub dir: String,
     pub model: String,
+    /// Fully qualified below the case package for Java's per-input modules.
+    /// Other runners use `model` from the generated root barrel/package.
+    pub java_model: String,
     pub probes: Vec<Probe>,
 }
 
@@ -202,6 +231,7 @@ impl PlanCase {
             "id": self.id,
             "dir": self.dir,
             "model": self.model,
+            "java_model": self.java_model,
             "probes": self.probes.iter().map(|probe| json!({
                 "id": probe.id,
                 "kind": probe.kind.name(),

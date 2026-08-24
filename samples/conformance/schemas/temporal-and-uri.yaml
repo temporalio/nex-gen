@@ -1,0 +1,16 @@
+$schema: https://json-schema.org/draft/2020-12/schema
+title: TemporalAndUri
+description: Native duration construction and URI-reference serialization validation.
+type: object
+additionalProperties: false
+required: [span, reference, payload]
+properties:
+  span:
+    type: string
+    format: duration
+  reference:
+    type: string
+    format: uri-reference
+  payload:
+    type: string
+    contentEncoding: base64

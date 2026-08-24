@@ -30,6 +30,12 @@ type Mutation = {
   set_string?: string;
   set_null?: boolean;
   duplicate_element?: number;
+  remove_array_element?: number;
+  put_map_entry?: { key: string; value: unknown };
+  remove_map_entry?: string;
+  set_absent?: boolean;
+  set_bytes?: number[];
+  set_duration?: { seconds: number; nanoseconds: number };
 };
 type Case = { id: string; dir: string; model: string; probes: Probe[] };
 type Verdict = Record<string, unknown>;
@@ -129,6 +135,14 @@ function numberOf(spec: string): number {
   return Number(spec);
 }
 
+function typedMap(value: unknown): Record<string, unknown> {
+  const candidate = value as Record<string, unknown>;
+  if (candidate.additionalProperties !== undefined) {
+    return candidate.additionalProperties as Record<string, unknown>;
+  }
+  return candidate;
+}
+
 function applyMutation(model: any, mutation: Mutation): void {
   const steps = stepsOf(mutation.path);
   let owner = model;
@@ -141,6 +155,21 @@ function applyMutation(model: any, mutation: Mutation): void {
     sequence.push(sequence[mutation.duplicate_element]);
     return;
   }
+  if (mutation.remove_array_element !== undefined) {
+    const sequence = read(owner, last) as unknown[];
+    sequence.splice(mutation.remove_array_element, 1);
+    return;
+  }
+  if (mutation.put_map_entry !== undefined) {
+    const map = typedMap(read(owner, last));
+    map[mutation.put_map_entry.key] = mutation.put_map_entry.value;
+    return;
+  }
+  if (mutation.remove_map_entry !== undefined) {
+    const map = typedMap(read(owner, last));
+    delete map[mutation.remove_map_entry];
+    return;
+  }
   let value: unknown;
   if (mutation.set_integer !== undefined) {
     value = Number(mutation.set_integer);
@@ -150,6 +179,36 @@ function applyMutation(model: any, mutation: Mutation): void {
     value = mutation.set_string;
   } else if (mutation.set_null !== undefined) {
     value = null;
+  } else if (mutation.set_absent !== undefined) {
+    value = undefined;
+  } else if (mutation.set_bytes !== undefined) {
+    value = Uint8Array.from(mutation.set_bytes);
+  } else if (mutation.set_duration !== undefined) {
+    const { seconds, nanoseconds } = mutation.set_duration;
+    const temporal = (
+      globalThis as typeof globalThis & {
+        Temporal?: {
+          Duration: { from(value: Record<string, number>): unknown };
+        };
+      }
+    ).Temporal;
+    const current = read(owner, last);
+    if (typeof current === "string") {
+      if (nanoseconds === 0) {
+        const hours = Math.floor(seconds / 3600);
+        const minutes = Math.floor((seconds % 3600) / 60);
+        const remainder = seconds % 60;
+        value = `PT${hours === 0 ? "" : `${hours}H`}${minutes === 0 ? "" : `${minutes}M`}${remainder === 0 ? "" : `${remainder}S`}`;
+        if (value === "PT") value = "PT0S";
+      } else {
+        const fraction = `.${String(nanoseconds).padStart(9, "0").replace(/0+$/, "")}`;
+        value = `PT${seconds}${fraction}S`;
+      }
+    } else if (temporal !== undefined) {
+      value = temporal.Duration.from({ seconds, nanoseconds });
+    } else {
+      throw new Error("Temporal.Duration is unavailable");
+    }
   } else {
     throw new Error(`unknown mutation ${JSON.stringify(mutation)}`);
   }

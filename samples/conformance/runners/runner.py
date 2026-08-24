@@ -13,6 +13,7 @@ Usage: ``python runner.py <plan.json> <result.json> <generated-root>``
 from __future__ import annotations
 
 import importlib
+import datetime
 import json
 import math
 import re
@@ -89,6 +90,15 @@ def _number(spec: str) -> float:
     return _SPECIAL_NUMBERS[spec] if spec in _SPECIAL_NUMBERS else float(spec)
 
 
+def _typed_map(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    found = getattr(value, "additional_properties", None)
+    if isinstance(found, dict):
+        return found
+    raise AssertionError(f"{type(value).__name__} is not a typed map")
+
+
 def apply_mutation(model: Any, mutation: dict[str, Any]) -> None:
     steps = steps_of(mutation["path"])
     owner = model
@@ -99,6 +109,17 @@ def apply_mutation(model: Any, mutation: dict[str, Any]) -> None:
         sequence = _read(owner, last)
         sequence.append(sequence[int(mutation["duplicate_element"])])
         return
+
+    if "remove_array_element" in mutation:
+        del _read(owner, last)[int(mutation["remove_array_element"])]
+        return
+    if "put_map_entry" in mutation:
+        entry = mutation["put_map_entry"]
+        _typed_map(_read(owner, last))[entry["key"]] = entry["value"]
+        return
+    if "remove_map_entry" in mutation:
+        del _typed_map(_read(owner, last))[mutation["remove_map_entry"]]
+        return
     if "set_integer" in mutation:
         value: Any = int(mutation["set_integer"])
     elif "set_number" in mutation:
@@ -107,6 +128,16 @@ def apply_mutation(model: Any, mutation: dict[str, Any]) -> None:
         value = mutation["set_string"]
     elif "set_null" in mutation:
         value = None
+    elif "set_absent" in mutation:
+        value = None
+    elif "set_bytes" in mutation:
+        value = bytes(mutation["set_bytes"])
+    elif "set_duration" in mutation:
+        duration = mutation["set_duration"]
+        value = datetime.timedelta(
+            seconds=int(duration["seconds"]),
+            microseconds=int(duration["nanoseconds"]) // 1_000,
+        )
     else:
         raise AssertionError(f"unknown mutation: {mutation!r}")
     _write(owner, last, value)
