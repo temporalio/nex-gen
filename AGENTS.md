@@ -12,19 +12,11 @@
   full script passing. It covers Rust formatting and tests plus the checked-in
   Python, TypeScript, and Go sample projects.
 
-- When running Rust tests directly, pass the feature flag:
+- When running Rust tests directly, pass the feature flag to test the "advanced" features:
 
   ```sh
   cargo test --all-features
   ```
-
-  A bare `cargo test` is not a smaller version of the gate — it is a different
-  run that skips every test behind the `advanced` feature, including
-  `python_example_suite_type_checks_and_runs`, the **only** thing that puts
-  basedpyright over `samples/python`. A type error in a Python sample test is
-  invisible without the flag and fails in CI. `validate.sh` runs the equivalent
-  `cargo test --features advanced`; `advanced` is currently the only feature, so
-  the two spellings match.
 
 ## Generated samples
 
