@@ -24,23 +24,6 @@ validate_rust() {
   run cargo test --features advanced
 }
 
-require_gradle_java() {
-  if ! command -v java >/dev/null 2>&1; then
-    echo "Java 17 or later is required to launch the sample Gradle builds." >&2
-    echo "CI and the Gradle toolchains use Java 21; set JAVA_HOME and PATH accordingly." >&2
-    exit 1
-  fi
-
-  local java_version java_major
-  java_version="$(java -version 2>&1 | sed -n '1s/.*version "\([^"]*\)".*/\1/p')"
-  java_major="${java_version%%.*}"
-  if [[ ! "$java_major" =~ ^[0-9]+$ ]] || ((java_major < 17)); then
-    echo "Java 17 or later is required to launch the sample Gradle builds; found ${java_version:-unknown}." >&2
-    echo "CI and the Gradle toolchains use Java 21; set JAVA_HOME and PATH accordingly." >&2
-    exit 1
-  fi
-}
-
 validate_python() {
   for tier in samples advanced/samples; do
     run_in "$tier/python" uv sync --locked
@@ -68,7 +51,6 @@ validate_go() {
 }
 
 validate_java() {
-  require_gradle_java
   for tier in samples advanced/samples; do
     run_in "$tier/java" ./gradlew build --no-daemon
   done
