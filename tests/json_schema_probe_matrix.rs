@@ -816,7 +816,8 @@ fn check_python(
     }
 
     let result_path = root.join("smoke.json");
-    let execution = run(command(&toolchain::python_interpreter().to_string_lossy())
+    let execution = run(toolchain::python_runtime_command()
+        .expect("provision the Python probe runtime")
         .current_dir(&root)
         .arg(&runner)
         .arg(&result_path)

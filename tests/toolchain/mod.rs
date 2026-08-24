@@ -591,6 +591,39 @@ pub fn python_interpreter() -> PathBuf {
     PathBuf::from("python3")
 }
 
+/// Resolve an interpreter with the generated models' runtime dependencies.
+///
+/// Rust validation runs before the Python sample validation in CI, so a clean
+/// checkout does not have the sample virtual environment yet. Provision it
+/// from the lockfile on demand instead of silently falling back to a system
+/// interpreter that cannot import `temporalio`.
+pub fn python_runtime_command() -> Result<Command, String> {
+    if let Some(explicit) = std::env::var_os("NEXGEN_CONFORMANCE_PYTHON") {
+        return Ok(command(&PathBuf::from(explicit).to_string_lossy()));
+    }
+
+    let sample_root = repository_root().join("samples/python");
+    let venv = sample_root.join(".venv/bin/python");
+    if !venv.is_file() {
+        let sync = run(command("uv")
+            .current_dir(&sample_root)
+            .args(["sync", "--locked"]));
+        if !sync.ok {
+            return Err(format!(
+                "failed to provision Python conformance dependencies:\n{}",
+                sync.detail
+            ));
+        }
+    }
+    if !venv.is_file() {
+        return Err(format!(
+            "uv sync did not create the Python interpreter at {}",
+            venv.display()
+        ));
+    }
+    Ok(command(&venv.to_string_lossy()))
+}
+
 pub fn run_python(workspace: &Workspace, cases: &[PlanCase]) -> Result<TargetVerdicts, String> {
     let root = workspace.target_root(Target::Python);
     fs::create_dir_all(&root).map_err(|error| error.to_string())?;
@@ -603,7 +636,7 @@ pub fn run_python(workspace: &Workspace, cases: &[PlanCase]) -> Result<TargetVer
     let plan_path = root.join("plan.json");
     let result_path = root.join("result.json");
     write_plan(&plan_path, cases)?;
-    let execution = run(command(&python_interpreter().to_string_lossy())
+    let execution = run(python_runtime_command()?
         .current_dir(&root)
         .arg(&runner)
         .arg(&plan_path)
