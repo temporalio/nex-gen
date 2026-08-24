@@ -117,71 +117,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Breaking Changes
 
-- JSON Schema (Java): a `const`/`enum` value constant is now named after the
-  **value** rather than the declaring member — `Circle.Kind.CIRCLE` instead of
-  `Circle.Kind.KIND`, `Status.PENDING` instead of `Status.STATUS_PENDING`, and
-  `Tier.V_1` instead of `Tier.TIER_1` (numeric tokens take the `V_` guard, since
-  a Java constant is class-scoped and has no type prefix to supply a leading
-  letter). The value class already carries the member in its own name, and a
-  single-valued `const` previously dropped the value from the constant
-  altogether. The change is also what makes P15's escape hatches match their
-  fix-its: a member-derived constant moved under `x-java-name` as well as
-  `x-java-const-name`, so a value-constant collision had two remedies while the
-  diagnostic named one — which now points at `x-java-const-name` /
-  `x-java-enum-names` for the constant scope. Go is unaffected (it already named
-  constants `{Type}{Value}`), as are constants given an explicit
-  `x-java-const-name` / `x-java-enum-names` override.
-- JSON Schema (Python): a `type: number` value is now narrowed to binary64 in
-  both directions instead of being stored exactly as it arrived. Python is the
-  one target whose `int` is unbounded, so a `number` past 2^53 kept its exact
-  value there while Go, TypeScript and Java rounded it into their
-  `float64`/`number`/`double` — the same payload reading back as a *different*
-  number. A `number` member now always holds the `float` its annotation
-  promises, and the re-emitted lexeme follows (`5` → `5.0`), which is the same
-  JSON value: a number's spelling is not part of JSON identity. `type: integer`
-  members are unaffected and stay a plain `int`.
-
-- JSON Schema (Go, Java): a numeric value constant's name now derives from the
-  value rather than its authored spelling, so `const: 1`, `const: 1.0` and
-  `const: 1e0` all name one constant (`Score1` / `V_1`) instead of `Score1_0` /
-  `V_1_0` for the fractional spellings. P1 makes those one mathematical number,
-  so re-spelling a `const` is a no-op on the wire and must not rename a public
-  constant (P13).
-
-- JSON Schema: the `pattern` portability gate now verifies that a pattern is
-  portable across all four target regex engines, not merely that Rust's `regex`
-  can compile it. Patterns that previously loaded and then failed — or silently
-  matched differently — in a target now reject at load with a named fix-it:
-  non-portable escapes (`\-`, `\_`, `\a`, `\v`, octal, `\x{…}`, `\p{…}`),
-  lone `{`/`}`/`]`, `\A`/`\z`, named capture groups, POSIX classes, nested
-  character classes, and the class set operators `&&`/`--`/`~~`. An ordinary
-  `^\d{3}\-\d{4}$` previously emitted TypeScript that threw `SyntaxError` at
-  module import. A bare `.` is now normalized to `[^\n]` so the four engines
-  agree on `\r`, U+0085, U+2028 and U+2029.
-- JSON Schema: patterns whose unbounded quantifiers can backtrack exponentially
-  (for example `^(a+)+$`) now reject at load. Such a pattern is linear in Go and
-  Rust but was measured at 39 s for a 31-character input in Python, so an
-  accepted schema was a remote denial of service in three of four targets.
-- JSON Schema: `contentEncoding` now accepts only the canonical encoding. A
-  value with non-canonical trailing bits (`aGl=`, `AB==`, base64url `aGl`)
-  previously decoded and then re-serialized to a *different* wire string,
-  contradicting the documented byte-identical round trip.
-- JSON Schema: a materializing temporal `format` inside `propertyNames` or a
-  `contains` matcher now rejects at load. It previously emitted an unenforced
-  key check (and, in Go and Python, output that did not compile or import).
-- JSON Schema: these now reject at load rather than producing silently wrong or
-  uncompilable output — a `default` on a sum-type `oneOf`; an empty `fqn` on a
-  service or operation; a service or operation key that is a reserved word in an
-  emitted target; two operation keys that recase to one identifier (previously
-  duplicate members *and* a duplicate wire name); an input file whose module path
-  segment is a target keyword (`class.json` emitted `from .class import Class`);
-  a member colliding with a generated Go method, Java nested class, Java
-  generated local, or Java `get<Field>OrDefault`; `enum` members equal by
-  mathematical value (`[1, 1.0]`, `[0, -0.0]`); a `oneOf` branch that is a
-  shapeless `object`/`array`; a `propertyNames` subschema carrying object or
-  array applicators; a `number` field whose `multipleOf` admits no value in its
-  range; and a non-string `title`/`description` on a nested schema or an
-  envelope service/operation description, which previously coerced silently.
+- JSON Schema: generated value-constant names have changed. Java `const` and
+  `enum` constants now derive from the value instead of the member name, and Go
+  and Java give mathematically equal numeric spellings the same constant name.
+  Explicit `x-<lang>-const-name` and `x-<lang>-enum-names` overrides are unchanged.
+- JSON Schema (Python): `number` values are now stored and emitted as binary64
+  `float`s. Large integers may lose precision and integral values may serialize
+  with a `.0` suffix; `integer` values remain Python `int`s.
+- JSON Schema: `pattern` now rejects expressions that are not portable across
+  all target regex engines or that permit exponential backtracking. Portable
+  expressions are normalized where necessary so their behavior agrees.
+- JSON Schema: `contentEncoding` now rejects non-canonical encodings instead of
+  decoding them to bytes that serialize to a different wire value.
+- JSON Schema: unsupported or ambiguous schemas that previously produced wrong
+  or uncompilable output now reject at load. This includes materializing temporal
+  formats in `propertyNames` or `contains`, defaults on sum-type `oneOf`s,
+  invalid or colliding emitted names, mathematically duplicate enum values,
+  shapeless union branches, invalid `propertyNames` applicators, impossible
+  numeric ranges, and non-string schema documentation.
 
 - Python: JSON Schema output now uses slotted, keyword-only dataclasses instead
   of Pydantic and works with the default Temporal converter, removing the
@@ -208,85 +161,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- JSON Schema: constraints declared on the non-null branch of a nullable
-  `oneOf: [T, null]` are enforced again in Go and Java. Both read the wrapper
-  rather than the branch, silently dropping `minLength`, `maxLength`, `pattern`,
-  `format`, `enum`, `const`, numeric bounds and `contains` — so Java accepted
-  payloads TypeScript and Python rejected, and Go emitted code that did not
-  compile for any nullable non-string member. Element-level nullability
-  (`items: {oneOf: [T, null]}`) is fixed in Java at every array depth.
-- JSON Schema: Go no longer accepts a quoted numeric token. `encoding/json`
-  decodes `"7"` into `json.Number` silently, so `{"n": "7"}` was accepted for
-  `type: integer` and `type: number` where the other three targets rejected it —
-  affecting every numeric member.
-- JSON Schema: `multipleOf` on a `number` field is IEEE `fmod` in Go, matching
-  the other three. Go previously used exact rational arithmetic over the
-  shortest decimal spelling, so `1e23 % 5` was Go-accepted and others-rejected,
-  and `1e300 % 3` the reverse.
-- JSON Schema: discriminated unions dispatch on the JSON *value* in Go and Java.
-  Go switched on the raw wire text, so `{"kind": 1.0}` missed a `const: 1` tag it
-  matched elsewhere; Java gated dispatch on `isTextual()`, so an integer or
-  boolean tag never selected a branch at all.
-- JSON Schema: `uniqueItems` compares values, not representations. Java's
-  serialize side treated `-0.0` and `0.0` as distinct; TypeScript and Java
-  compared materialized elements (`Uint8Array`, `Temporal`, `byte[]`) by
-  reference, so byte-equal duplicates serialized cleanly and were then rejected
-  on read; Go emitted uncompilable code over any materialized element. All four
-  now key on the canonical wire value.
-- JSON Schema: the serialize-side ±(2^53−1) integer cap is enforced in all four
-  targets. It existed only in Go, so TypeScript, Python and Java emitted an
-  over-cap integer that every parser — including their own — then rejected.
-- JSON Schema: a fractional second wider than a target's resolution is accepted
-  and truncated in every target, rather than rejected by some. Java previously
-  rejected 10-or-more digits (raising a bare `DateTimeParseException` for
-  `time`), and the TypeScript `temporal` representation raised a bare
-  `RangeError`; both now truncate to nanoseconds and aggregate a `Violation`.
-- JSON Schema: `contains` matcher semantics agree across targets. Python derived
-  the element type guard from the first `const`/`enum` literal, so a mixed-kind
-  matcher's verdict depended on member order; Go omitted the integer cap;
-  TypeScript emitted no guard for a typeless matcher, throwing a bare `TypeError`
-  instead of aggregating; and a fractional bound over integer elements was
-  truncated inconsistently, with Java disagreeing with itself across serialize
-  and deserialize.
-- JSON Schema: `const`/`enum` on a materialized `format` or `contentEncoding`
-  member compare the canonical wire string in all four targets. Go compared
-  decoded bytes and native temporal values, so it accepted values the others
-  rejected, and a model parsed from a non-canonical literal could not be
-  serialized at all elsewhere. Temporal literals are canonicalized at load.
-- JSON Schema: Go and Java validate temporal values before emitting. Neither had
-  a serialize-side predicate for `duration`, `time` or offsets, so a negative
-  `Duration` emitted the ill-formed `"PT-1H-30M"`, a sub-second duration
-  silently became `"PT0S"`, a sub-minute offset rounded to `"+00:00"`, and a
-  year past 9999 emitted a five-digit year.
-- JSON Schema: a `.0`-valued count bound (`minItems: 2.0`, `maxLength: 10.0`,
-  `minProperties: 1.0`, `minContains: 2.0`) now generates. The loader accepted it
-  per spec and every emitter then aborted with an unlocated internal error.
-- JSON Schema: generated output compiles and imports in cases that previously
-  did not — TypeScript emitted `if () {` for a closed empty object and could not
-  assign an optional `const` member; Python emitted an unterminated docstring for
-  any documentation ending in `"`, a nested same-quote f-string that is a
-  `SyntaxError` before 3.12, and a `NameError` on import for any package with a
-  deprecated operation; Go emitted string checks against `[]byte`, empty loop
-  bodies for collections of `time`/`duration`, and a pointer-to-interface for a
-  cross-module union; Java emitted an unsatisfiable type constraint for a
-  typed-map union branch.
-- JSON Schema: cross-file `$ref` union branches resolve in Go, TypeScript and
-  Python. All three searched only the declaring module, so a named cross-file
-  union emitted an empty type and a property-level one collapsed to its first
-  branch. Go also no longer drops a service binding when the module declares no
-  models of its own.
-- JSON Schema: the recursive `allOf` merge no longer discards a child-position
-  `$ref` or `oneOf`. Two branches declaring the same property lost the
-  referenced type's fields and required set, and a nullable property merged with
-  a constrained sibling silently became non-nullable.
-- JSON Schema: Java re-paths nested violations on serialize, gives `byte[]`
-  value equality in `equals`/`hashCode`/`toString`, places member Javadoc on the
-  getter, and round-trips temporal and binary collection elements under a stock
-  `ObjectMapper` (they previously required the jsr310 module to be registered
-  externally, and Jackson silently wrote a non-canonical base64 variant).
-- JSON Schema: `x-<lang>-enum-names` now applies to numeric and boolean members
-  in Go and Java; the lookup keyed on string members only, so the sole escape
-  hatch for a numeric or boolean value-constant collision did not exist.
+- JSON Schema: Go and Java now enforce constraints from nullable schemas, and
+  Java supports nested nullable array elements. Recursive `allOf` merges no
+  longer discard `$ref` or `oneOf` children.
+- JSON Schema: cross-file union branches now resolve in Go, TypeScript, and
+  Python. Go also preserves services from modules that declare no local models.
+- JSON Schema: numeric validation is consistent across targets. Go rejects
+  quoted numbers and uses the shared floating-point `multipleOf` semantics; all
+  targets enforce the safe-integer limit and accept integral count bounds such
+  as `minItems: 2.0`.
+- JSON Schema: discriminated unions, `uniqueItems`, `contains`, and `const`/`enum`
+  constraints now evaluate canonical JSON values consistently across targets.
+  Numeric and boolean `x-<lang>-enum-names` overrides also work in Go and Java.
+- JSON Schema: temporal and binary values now validate and round-trip
+  consistently. Over-precision fractional seconds are truncated, Go and Java
+  validate temporal values before serialization, and Java supports temporal and
+  binary collections with a stock `ObjectMapper`.
+- JSON Schema: generated output now compiles or imports for closed and optional
+  `const` objects in TypeScript, quoted documentation and deprecated operations
+  in Python, binary/temporal collections and cross-module unions in Go, and
+  typed-map union branches in Java.
+- JSON Schema (Java): nested serialization violations now carry the correct
+  path, `byte[]` members use value semantics, and member Javadoc is emitted on
+  getters.
 
 - Java now rejects numeric JSON tokens outside the finite binary64 domain (for
   example `1e400`) with an aggregated, fully pathed violation in ordinary
