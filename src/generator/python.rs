@@ -290,7 +290,7 @@ fn leaf_export_names(
         .chain(plan.flags().map(|(_, flag_set)| flag_set.name.clone()))
         .chain(plan.variants().map(|(_, variant)| variant.name.clone()))
         .chain(plan.external_types().filter_map(|(_, binding)| {
-            let ExternalTypeSpec::Json(json_type) = &binding.external_type else {
+            let Some(json_type) = binding.json_model() else {
                 return None;
             };
             if model_hoists.is_hoisted(&plan.module_path, &json_type.model_name) {
@@ -1645,7 +1645,7 @@ impl<'a> ApiPlanner<'a> {
         Ok(())
     }
 
-    fn ensure_rendered_enum(&mut self, enum_spec: &EnumSpec) {
+    fn ensure_rendered_enum(&mut self, enum_spec: &EnumSpec<PlannedFamily>) {
         self.enums
             .entry(enum_spec.full_name.clone())
             .or_insert_with(|| RenderedEnum {
@@ -1661,7 +1661,7 @@ impl<'a> ApiPlanner<'a> {
             });
     }
 
-    fn ensure_rendered_flags(&mut self, flags_spec: &FlagsSpec) {
+    fn ensure_rendered_flags(&mut self, flags_spec: &FlagsSpec<PlannedFamily>) {
         self.flags
             .entry(flags_spec.full_name.clone())
             .or_insert_with(|| RenderedFlags {
@@ -2935,7 +2935,7 @@ fn branch_has_json_models(branch: &ApiSpecBranch<PlannedFamily>) -> bool {
             .spec
             .external_types()
             .map(|(_, binding)| binding)
-            .any(|binding| matches!(binding.external_type, ExternalTypeSpec::Json(_))),
+            .any(|binding| binding.json_model().is_some()),
         ApiSpecNode::Branch(branch) => branch_has_json_models(branch),
     })
 }
@@ -6510,9 +6510,9 @@ fn planned_record_for_external_source<'a>(
 ) -> Option<&'a RecordSpec<PlannedFamily>> {
     api_plan.records().map(|(_, record)| record).find(|record| {
         record
-            .source_type
+            .source
             .as_ref()
-            .is_some_and(|source_type| planned_external_sources_match(source_type, external))
+            .is_some_and(|source| planned_external_sources_match(&source.external_type, external))
     })
 }
 

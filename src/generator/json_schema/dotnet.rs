@@ -12,7 +12,7 @@ use crate::generator::dotnet::{
     WireValueConversion, csharp_parameter_name, csharp_string_literal, csharp_type_name,
 };
 use crate::planning::{PlannedFamily, PlannedJsonType, PlannedSpec};
-use crate::spec::{ExternalTypeSpec, RecordSpec};
+use crate::spec::RecordSpec;
 
 const GENERATED_CODE_ATTRIBUTE: &str = "[GeneratedCode(\"nexgen\", null)]";
 
@@ -61,10 +61,7 @@ impl ExternalModelBackend<PlannedJsonType> for ModelBackend {
         self.json_models = api_plan
             .external_types()
             .map(|(_, binding)| binding)
-            .filter_map(|binding| match &binding.external_type {
-                ExternalTypeSpec::Json(json_type) => Some(json_type.clone()),
-                _ => None,
-            })
+            .filter_map(|binding| binding.json_model().cloned())
             .collect();
         Ok(())
     }

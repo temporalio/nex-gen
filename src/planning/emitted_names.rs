@@ -19,7 +19,7 @@ use crate::error::{Error, Result};
 use crate::language::Language;
 use crate::parser::{ManifestModel, ManifestService, NameManifest, build_name_manifest};
 use crate::spec::{ApiSpecLeaf, ApiSpecNode, ApiSpecTransform, ApiSpecTree, CompilerPass};
-use crate::spec::{ExternalTypeSpec, LanguageStringSpec, ModulePath};
+use crate::spec::{LanguageStringSpec, ModulePath};
 
 use super::{
     PlannedAliasType, PlannedEnumType, PlannedFamily, PlannedFieldData, PlannedFlagsType,
@@ -234,10 +234,7 @@ fn collect_tree_manifest_inputs(
 fn manifest_models(api_plan: &PlannedSpec) -> Vec<ManifestModel> {
     api_plan
         .external_types()
-        .filter_map(|(_full_name, binding)| match &binding.external_type {
-            ExternalTypeSpec::Json(json) => Some(manifest_model(json)),
-            _ => None,
-        })
+        .filter_map(|(_full_name, binding)| binding.json_model().map(manifest_model))
         .collect()
 }
 

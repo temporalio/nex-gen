@@ -1178,10 +1178,7 @@ impl ExternalModelBackend<PlannedValueType> for ModelBackend {
         self.json_models = api_plan
             .external_types()
             .map(|(_, binding)| binding)
-            .filter_map(|binding| match &binding.external_type {
-                ExternalTypeSpec::Json(json_type) => Some(json_type.clone()),
-                _ => None,
-            })
+            .filter_map(|binding| binding.json_model().cloned())
             .map(|mut json_type| {
                 if let Some(resolved) = self.manifest.type_name(&json_type.full_name) {
                     json_type.model_name = resolved.to_string();

@@ -793,7 +793,9 @@ fn collect_interface_types(
                 });
             }
         }
-        if let Some(enumeration) = build_wit_enum_spec(resolve, *type_id, type_def) {
+        if let Some(enumeration) =
+            build_wit_enum_spec(resolve, *type_id, type_def, path, &interface_name)?
+        {
             if types
                 .insert(
                     enumeration.full_name.clone(),
@@ -810,7 +812,9 @@ fn collect_interface_types(
                 });
             }
         }
-        if let Some(flag_set) = build_wit_flags_spec(resolve, *type_id, type_def) {
+        if let Some(flag_set) =
+            build_wit_flags_spec(resolve, *type_id, type_def, path, &interface_name)?
+        {
             if types
                 .insert(
                     flag_set.full_name.clone(),
@@ -844,6 +848,15 @@ fn collect_interface_types(
                     ),
                 });
             }
+        }
+        if matches!(
+            type_def.kind,
+            TypeDefKind::Record(_)
+                | TypeDefKind::Enum(_)
+                | TypeDefKind::Flags(_)
+                | TypeDefKind::Variant(_)
+        ) {
+            continue;
         }
         let Some((proto_name, external_type)) =
             build_external_type_binding(resolve, type_def, path, &interface_name, language)?
@@ -907,13 +920,19 @@ fn validate_type_parameter_directive(
     Ok(())
 }
 
-fn build_wit_enum_spec(resolve: &Resolve, type_id: TypeId, type_def: &TypeDef) -> Option<EnumSpec> {
+fn build_wit_enum_spec(
+    resolve: &Resolve,
+    type_id: TypeId,
+    type_def: &TypeDef,
+    path: &Path,
+    interface_name: &str,
+) -> Result<Option<EnumSpec>> {
     let TypeDefKind::Enum(enumeration) = &type_def.kind else {
-        return None;
+        return Ok(None);
     };
 
     let type_name = type_def.name.as_deref().unwrap_or("unnamed-type");
-    Some(EnumSpec {
+    Ok(Some(EnumSpec {
         name: type_name.to_upper_camel_case(),
         full_name: wit_type_full_name(resolve, type_id),
         values: enumeration
@@ -926,20 +945,23 @@ fn build_wit_enum_spec(resolve: &Resolve, type_id: TypeId, type_def: &TypeDef) -
                 number: i32::try_from(index).expect("WIT enum case index should fit in i32"),
             })
             .collect(),
-    })
+        source: build_native_source(type_def, path, interface_name)?,
+    }))
 }
 
 fn build_wit_flags_spec(
     resolve: &Resolve,
     type_id: TypeId,
     type_def: &TypeDef,
-) -> Option<FlagsSpec> {
+    path: &Path,
+    interface_name: &str,
+) -> Result<Option<FlagsSpec>> {
     let TypeDefKind::Flags(flags) = &type_def.kind else {
-        return None;
+        return Ok(None);
     };
 
     let type_name = type_def.name.as_deref().unwrap_or("unnamed-type");
-    Some(FlagsSpec {
+    Ok(Some(FlagsSpec {
         name: type_name.to_upper_camel_case(),
         full_name: wit_type_full_name(resolve, type_id),
         flags: flags
@@ -951,7 +973,8 @@ fn build_wit_flags_spec(
                 bit: index,
             })
             .collect(),
-    })
+        source: build_native_source(type_def, path, interface_name)?,
+    }))
 }
 
 fn build_wit_variant_spec(
@@ -991,6 +1014,7 @@ fn build_wit_variant_spec(
         name: type_name.to_upper_camel_case(),
         full_name: wit_type_full_name(resolve, type_id),
         cases,
+        source: build_native_source(type_def, path, "")?,
     }))
 }
 
@@ -1010,19 +1034,7 @@ fn build_wit_record_spec(
     let context = format!("type `{interface_name}.{type_name}`");
     let directives = parse_directives(type_def.docs.contents.as_deref(), path, &context)?;
     let experimental = experimental_directive(&directives, path, &context)?;
-    let source_type = directive(&directives, "proto", path, &context)?
-        .map(|proto_directive| {
-            proto_directive
-                .value("value")
-                .map(|proto_name| ExternalTypeSpec::Proto(Symbol::new(proto_name.to_string())))
-                .ok_or_else(|| Error::InvalidWitDirective {
-                    path: path.to_path_buf(),
-                    context: context.clone(),
-                    directive: "@nexus.proto".to_string(),
-                    reason: "missing required proto type name".to_string(),
-                })
-        })
-        .transpose()?;
+    let source = build_native_source(type_def, path, interface_name)?;
     let flatten_in_api = directive(&directives, "flatten-in-api", path, &context)?.is_some();
     if directive(&directives, "omit", path, &context)?.is_some() {
         return Err(Error::InvalidWitDirective {
@@ -1050,11 +1062,74 @@ fn build_wit_record_spec(
         name: type_name.to_upper_camel_case(),
         full_name: wit_type_full_name(resolve, type_id),
         doc,
-        source_type,
+        source,
         experimental,
         flatten_in_api,
         fields,
         data: (),
+    }))
+}
+
+fn build_native_source(
+    type_def: &TypeDef,
+    path: &Path,
+    interface_name: &str,
+) -> Result<Option<ExternalSourceSpec>> {
+    let type_name = type_def.name.as_deref().unwrap_or("unnamed-type");
+    let context = if interface_name.is_empty() {
+        format!("type `{type_name}`")
+    } else {
+        format!("type `{interface_name}.{type_name}`")
+    };
+    let directives = parse_directives(type_def.docs.contents.as_deref(), path, &context)?;
+    let Some(proto_directive) = directive(&directives, "proto", path, &context)? else {
+        return Ok(None);
+    };
+    if directive(&directives, "flatten-in-api", path, &context)?.is_some()
+        && !matches!(type_def.kind, TypeDefKind::Record(_))
+    {
+        return Err(Error::InvalidWitDirective {
+            path: path.to_path_buf(),
+            context,
+            directive: "@nexus.flatten-in-api".to_string(),
+            reason: "only supported on record types".to_string(),
+        });
+    }
+    if directive(&directives, "omit", path, &context)?.is_some() {
+        return Err(Error::InvalidWitDirective {
+            path: path.to_path_buf(),
+            context,
+            directive: "@nexus.omit".to_string(),
+            reason: "mark record fields with `@nexus.omit`; type-level omit is no longer supported"
+                .to_string(),
+        });
+    }
+    if directive(&directives, "type", path, &context)?.is_some() {
+        return Err(Error::InvalidWitDirective {
+            path: path.to_path_buf(),
+            context,
+            directive: "@nexus.type".to_string(),
+            reason: "cannot be combined with `@nexus.proto` on a native WIT declaration"
+                .to_string(),
+        });
+    }
+    let Some(proto_name) = proto_directive.value("value") else {
+        return Err(Error::InvalidWitDirective {
+            path: path.to_path_buf(),
+            context,
+            directive: "@nexus.proto".to_string(),
+            reason: "missing required proto type name".to_string(),
+        });
+    };
+    let mut reference = LanguageStringSpec {
+        default: Some(proto_name.to_string()),
+        ..Default::default()
+    };
+    apply_directive_imports(&mut reference, proto_directive);
+    Ok(Some(ExternalSourceSpec {
+        external_type: ExternalTypeSpec::Proto(Symbol::new(proto_name.to_string())),
+        reference,
+        type_name: directive_prefixed_language_string(proto_directive, "type"),
     }))
 }
 
@@ -1127,14 +1202,14 @@ fn build_external_type_binding(
         });
     }
 
-    let external_type = ExternalTypeBindingSpec {
-        external_type: ExternalTypeSpec::Proto(Symbol::new(proto_name.clone())),
+    let external_type = ExternalTypeBindingSpec::ProtoAlias(ProtoAliasBindingSpec {
+        proto: Symbol::new(proto_name.clone()),
         reference,
         type_name,
         replacement,
         authored_type: resolve_authored_type_def_kind(resolve, type_def, path, &context)?
             .map(|field_type| authored_field_type_for_language(field_type, language)),
-    };
+    });
 
     Ok(Some((proto_name, external_type)))
 }
@@ -1740,22 +1815,21 @@ fn build_field_default(
             reason: "default enum case cannot be empty".to_string(),
         });
     }
-    let enum_value = resolve_default_enum_value(resolve, ty, case_name, path, context)?;
+    validate_default_enum_case(resolve, ty, case_name, path, context)?;
     Ok(Some(FieldDefaultSpec {
         enum_case: case_name.to_string(),
-        enum_value,
     }))
 }
 
-fn resolve_default_enum_value(
+fn validate_default_enum_case(
     resolve: &Resolve,
     ty: &Type,
     case_name: &str,
     path: &Path,
     context: &str,
-) -> Result<i32> {
+) -> Result<()> {
     match ty {
-        Type::Id(id) => resolve_default_enum_value_for_type_def(
+        Type::Id(id) => validate_default_enum_case_for_type_def(
             resolve,
             *id,
             &resolve.types[*id],
@@ -1767,24 +1841,22 @@ fn resolve_default_enum_value(
     }
 }
 
-fn resolve_default_enum_value_for_type_def(
+fn validate_default_enum_case_for_type_def(
     resolve: &Resolve,
     type_id: TypeId,
     type_def: &TypeDef,
     case_name: &str,
     path: &Path,
     context: &str,
-) -> Result<i32> {
+) -> Result<()> {
+    if find_proto_name_for_type_def(type_def, path, context)?.is_some() {
+        return Ok(());
+    }
     match &type_def.kind {
         TypeDefKind::Enum(enumeration) => {
-            for (index, case) in enumeration.cases.iter().enumerate() {
+            for case in &enumeration.cases {
                 if case.name == case_name {
-                    return i32::try_from(index).map_err(|_| Error::InvalidWitDirective {
-                        path: path.to_path_buf(),
-                        context: context.to_string(),
-                        directive: "@nexus.default".to_string(),
-                        reason: "enum case index does not fit in i32".to_string(),
-                    });
+                    return Ok(());
                 }
             }
             Err(Error::InvalidWitDirective {
@@ -1798,7 +1870,7 @@ fn resolve_default_enum_value_for_type_def(
             })
         }
         TypeDefKind::Option(inner) | TypeDefKind::Type(inner) => {
-            resolve_default_enum_value(resolve, inner, case_name, path, context)
+            validate_default_enum_case(resolve, inner, case_name, path, context)
         }
         _ => Err(default_on_non_enum_error(path, context)),
     }
@@ -3507,7 +3579,7 @@ mod tests {
     use crate::descriptors::DescriptorIndex;
     use crate::error::Error;
     use crate::language::Language;
-    use crate::spec::CompilerPass;
+    use crate::spec::{CompilerPass, ExternalSourceSpec, LanguageStringSpec};
 
     use super::{
         ApiSpec, AuthoredResourceType, DeclaredTypeName, ExternalTypeSpec, FunctionArgSpec,
@@ -3794,13 +3866,13 @@ interface workflow-service {
         assert_eq!(
             request
                 .field_default("workflow_id_reuse_policy")
-                .map(|default| default.enum_value),
-            Some(0)
+                .map(|default| default.enum_case.as_str()),
+            Some("allow-duplicate")
         );
     }
 
     #[test]
-    fn rejects_unknown_enum_field_default() {
+    fn defers_unknown_proto_enum_field_default_to_authored_validation() {
         let wit = r#"
 package temporal:nexus@1.0.0;
 
@@ -3820,18 +3892,13 @@ interface workflow-service {
 }
 "#;
 
-        let error = crate::parser::parse_api_spec_from_wit_for_language_with_inputs(
+        crate::parser::parse_api_spec_from_wit_for_language_with_inputs(
             Language::Python,
             wit,
             PathBuf::from("inline.wit"),
             &[linked_inputs_path()],
         )
-        .unwrap_err();
-        assert!(
-            error
-                .to_string()
-                .contains("unknown enum case `missing-case`")
-        );
+        .unwrap();
     }
 
     #[test]
@@ -4030,15 +4097,14 @@ interface workflow-service {
             python
                 .external_type_binding("temporal.api.common.v1.Payloads")
                 .unwrap()
-                .replacement
+                .replacement()
                 .is_none()
         );
         assert_eq!(
             dotnet
                 .external_type_binding("temporal.api.common.v1.Payloads")
                 .unwrap()
-                .replacement
-                .as_ref()
+                .replacement()
                 .and_then(|replacement| replacement.to_proto.for_language(Language::Dotnet)),
             Some("ProtoExtensions.ToPayloads")
         );
@@ -4376,6 +4442,70 @@ interface workflow-service {
     }
 
     #[test]
+    fn native_proto_declarations_own_source_metadata() {
+        let wit = r#"
+package acme:types@1.0.0;
+
+world system { export models; }
+
+interface models {
+  /// @nexus.proto "acme.v1.Record"
+  record record-model { value: string }
+
+  /// @nexus.proto "acme.v1.State"
+  enum state { ready }
+
+  /// @nexus.proto "acme.v1.Features"
+  flags features { fast }
+
+  /// @nexus.proto "acme.v1.Choice"
+  variant choice { value(string) }
+}
+"#;
+
+        let spec = parse(Language::Python, wit);
+        assert!(spec.record("models.record-model").unwrap().source.is_some());
+        assert!(spec.enum_decl("models.state").unwrap().source.is_some());
+        assert!(spec.flags_decl("models.features").unwrap().source.is_some());
+        assert!(spec.variant("models.choice").unwrap().source.is_some());
+        for proto_name in [
+            "acme.v1.Record",
+            "acme.v1.State",
+            "acme.v1.Features",
+            "acme.v1.Choice",
+        ] {
+            assert!(spec.external_type_binding(proto_name).is_none());
+        }
+    }
+
+    #[test]
+    fn rejects_type_replacement_on_native_proto_declaration() {
+        let wit = r#"
+package acme:types@1.0.0;
+
+world system { export models; }
+
+interface models {
+  /// @nexus.proto "acme.v1.Record"
+  /// @nexus.type python="object"
+  record record-model { value: string }
+}
+"#;
+
+        let error = crate::parser::parse_api_spec_from_wit_for_language(
+            Language::Python,
+            wit,
+            PathBuf::from("inline.wit"),
+        )
+        .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("cannot be combined with `@nexus.proto` on a native WIT declaration")
+        );
+    }
+
+    #[test]
     fn operation_specs_use_single_input_and_output_types() {
         let wit = r#"
 package temporal:users@1.0.0;
@@ -4417,16 +4547,21 @@ interface user-service {
         assert_eq!(
             spec.record("user-service.proto-request")
                 .unwrap()
-                .source_type
+                .source
                 .as_ref(),
-            Some(&ExternalTypeSpec::Proto(Symbol::new(
-                "acme.users.v1.ProtoRequest"
-            )))
+            Some(&ExternalSourceSpec {
+                external_type: ExternalTypeSpec::Proto(Symbol::new("acme.users.v1.ProtoRequest")),
+                reference: LanguageStringSpec {
+                    default: Some("acme.users.v1.ProtoRequest".to_string()),
+                    ..Default::default()
+                },
+                type_name: LanguageStringSpec::default(),
+            })
         );
         assert_eq!(
             spec.record("user-service.json-request")
                 .unwrap()
-                .source_type
+                .source
                 .as_ref(),
             None
         );

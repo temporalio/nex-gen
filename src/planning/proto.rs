@@ -3,7 +3,9 @@ use prost_types::FieldDescriptorProto;
 use prost_types::field_descriptor_proto::{Label, Type};
 
 use crate::descriptors::{DescriptorIndex, EnumMetadata, MessageMetadata, real_oneof_groups};
-use crate::spec::{ApiSpec, ExternalTypeSpec, IntSpec, RecordSpec, TypeSpec};
+use crate::spec::{
+    ApiSpec, ExternalSourceSpec, ExternalTypeSpec, IntSpec, RecordSpec, TypeDeclSpec, TypeSpec,
+};
 
 use super::OperationLoweredFamily;
 
@@ -21,14 +23,8 @@ impl PlannedProtoTypeInfo {
             package: message.package.clone(),
             file_name: message.file_name.clone(),
             file_options: message.file_options.clone(),
-            reference: spec
-                .external_type_binding(&message.full_name)
-                .map(|binding| materialize_selected_text(binding.reference()))
-                .unwrap_or_default(),
-            type_name: spec
-                .external_type_binding(&message.full_name)
-                .map(|binding| materialize_selected_text(binding.type_name()))
-                .unwrap_or_default(),
+            reference: proto_reference(spec, &message.full_name),
+            type_name: proto_type_name(spec, &message.full_name),
         }
     }
 
@@ -38,16 +34,58 @@ impl PlannedProtoTypeInfo {
             package: enumeration.package.clone(),
             file_name: enumeration.file_name.clone(),
             file_options: enumeration.file_options.clone(),
-            reference: spec
-                .external_type_binding(&enumeration.full_name)
-                .map(|binding| materialize_selected_text(binding.reference()))
-                .unwrap_or_default(),
-            type_name: spec
-                .external_type_binding(&enumeration.full_name)
-                .map(|binding| materialize_selected_text(binding.type_name()))
-                .unwrap_or_default(),
+            reference: proto_reference(spec, &enumeration.full_name),
+            type_name: proto_type_name(spec, &enumeration.full_name),
         }
     }
+}
+
+fn native_source_for_proto<'a>(
+    spec: &'a ApiSpec<OperationLoweredFamily>,
+    proto_name: &str,
+) -> Option<&'a ExternalSourceSpec<OperationLoweredFamily>> {
+    let proto_name = proto_name.trim_start_matches('.');
+    spec.types.values().find_map(|entry| {
+        let source = match &entry.declaration {
+            TypeDeclSpec::Record(record) => record.source.as_ref(),
+            TypeDeclSpec::Enum(enumeration) => enumeration.source.as_ref(),
+            TypeDeclSpec::Flags(flags) => flags.source.as_ref(),
+            TypeDeclSpec::Variant(variant) => variant.source.as_ref(),
+            TypeDeclSpec::External(_) => None,
+        }?;
+        matches!(
+            &source.external_type,
+            ExternalTypeSpec::Proto(source_proto) if source_proto.as_ref() == proto_name
+        )
+        .then_some(source)
+    })
+}
+
+fn proto_reference(
+    spec: &ApiSpec<OperationLoweredFamily>,
+    proto_name: &str,
+) -> crate::spec::LanguageStringSpec {
+    spec.external_type_binding(proto_name)
+        .and_then(|binding| binding.reference())
+        .map(materialize_selected_text)
+        .or_else(|| {
+            native_source_for_proto(spec, proto_name)
+                .map(|source| materialize_selected_text(&source.reference))
+        })
+        .unwrap_or_default()
+}
+
+fn proto_type_name(
+    spec: &ApiSpec<OperationLoweredFamily>,
+    proto_name: &str,
+) -> crate::spec::LanguageStringSpec {
+    spec.external_type_binding(proto_name)
+        .map(|binding| materialize_selected_text(binding.type_name()))
+        .or_else(|| {
+            native_source_for_proto(spec, proto_name)
+                .map(|source| materialize_selected_text(&source.type_name))
+        })
+        .unwrap_or_default()
 }
 
 pub(crate) fn message_model_name(full_name: &str) -> String {
@@ -133,7 +171,7 @@ pub(super) fn planned_message_reference(
     let authored_type = planner
         .spec
         .external_type_binding(&message.full_name)
-        .and_then(|binding| binding.authored_type.clone())
+        .and_then(|binding| binding.authored_type().cloned())
         .map(|authored_type| {
             Box::new(planner.planned_authored_type_override_from_authored(&authored_type))
         });
@@ -236,7 +274,11 @@ pub(super) fn planned_record_field_type(
 }
 
 fn record_proto_name(record: &RecordSpec<OperationLoweredFamily>) -> Option<&str> {
-    let Some(ExternalTypeSpec::Proto(proto_name)) = record.source_type.as_ref() else {
+    let Some(ExternalSourceSpec {
+        external_type: ExternalTypeSpec::Proto(proto_name),
+        ..
+    }) = record.source.as_ref()
+    else {
         return None;
     };
     Some(proto_name.as_str())
@@ -269,8 +311,8 @@ pub(super) fn planned_type_from_authored_proto(
         return None;
     }
     if let Some(binding) = planner.spec.external_type_binding(proto_name.as_str()) {
-        if binding.replacement.is_none()
-            && let Some(authored_type) = binding.authored_type.clone()
+        if binding.replacement().is_none()
+            && let Some(authored_type) = binding.authored_type().cloned()
         {
             return Some(planner.planned_type_from_authored(&authored_type));
         }

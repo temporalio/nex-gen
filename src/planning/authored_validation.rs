@@ -4,6 +4,7 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
+use heck::ToShoutySnakeCase;
 use prost_types::FieldDescriptorProto;
 use prost_types::field_descriptor_proto::{Label, Type};
 
@@ -210,19 +211,8 @@ fn validate_external_type_bindings(
 ) -> Result<()> {
     let usages = language_message_usages(spec, descriptors, language)?;
     for (type_name, binding) in spec.external_types() {
-        if let Some(message) = descriptors.message(type_name) {
+        if descriptors.message(type_name).is_some() {
             validate_message_external_type_binding(type_name, binding)?;
-            if let Some(record) = spec.record_for_proto(type_name) {
-                validate_message_model_config(
-                    spec,
-                    type_name,
-                    ModelConfig::from_record(record),
-                    message,
-                    descriptors,
-                    usages.get(type_name).copied().unwrap_or_default(),
-                    language,
-                )?;
-            }
         } else if descriptors.enumeration(type_name).is_some() {
             validate_enum_external_type_binding(type_name, binding)?;
         } else if descriptors.file_count() == 0 {
@@ -232,6 +222,31 @@ fn validate_external_type_bindings(
                 type_name: type_name.to_string(),
             });
         }
+    }
+
+    for (_, record) in spec.records() {
+        let Some(ExternalTypeSpec::Proto(proto_name)) =
+            record.source.as_ref().map(|source| &source.external_type)
+        else {
+            continue;
+        };
+        let Some(message) = descriptors.message(proto_name.as_str()) else {
+            if descriptors.file_count() == 0 {
+                continue;
+            }
+            return Err(Error::UnknownTypeOverride {
+                type_name: proto_name.as_str().to_string(),
+            });
+        };
+        validate_message_model_config(
+            spec,
+            proto_name.as_str(),
+            ModelConfig::from_record(record),
+            message,
+            descriptors,
+            usages.get(proto_name.as_str()).copied().unwrap_or_default(),
+            language,
+        )?;
     }
 
     Ok(())
@@ -710,9 +725,66 @@ fn validate_authored_field_types(
             field,
             descriptors,
         )?;
+        if let Some(default) = &field_spec.default_value {
+            validate_default_enum_case(
+                message_name,
+                field_name,
+                &default.enum_case,
+                field,
+                descriptors,
+            )?;
+        }
     }
 
     Ok(())
+}
+
+fn validate_default_enum_case(
+    message_name: &str,
+    field_name: &str,
+    case_name: &str,
+    field: &FieldDescriptorProto,
+    descriptors: &DescriptorIndex,
+) -> Result<()> {
+    if field_type(field) != Some(Type::Enum) {
+        return Err(Error::InvalidTypeOverrideField {
+            message: message_name.to_string(),
+            field: field_name.to_string(),
+            property: "default",
+            reason: "defaults are only supported on protobuf enum fields".to_string(),
+        });
+    }
+    let Some(enum_name) = field.type_name.as_deref() else {
+        return Err(Error::InvalidTypeOverrideField {
+            message: message_name.to_string(),
+            field: field_name.to_string(),
+            property: "default",
+            reason: "protobuf enum type is unavailable in the descriptors".to_string(),
+        });
+    };
+    let Some(enumeration) = descriptors.enumeration(enum_name) else {
+        return Err(Error::InvalidTypeOverrideField {
+            message: message_name.to_string(),
+            field: field_name.to_string(),
+            property: "default",
+            reason: "protobuf enum type is unavailable in the descriptors".to_string(),
+        });
+    };
+    let expected = case_name.to_shouty_snake_case();
+    if enumeration.descriptor.value.iter().any(|value| {
+        value
+            .name
+            .as_deref()
+            .is_some_and(|name| name == expected || name.ends_with(&format!("_{expected}")))
+    }) {
+        return Ok(());
+    }
+    Err(Error::InvalidTypeOverrideField {
+        message: message_name.to_string(),
+        field: field_name.to_string(),
+        property: "default",
+        reason: format!("unknown protobuf enum case `{case_name}`"),
+    })
 }
 
 fn validate_invocation_fields(
@@ -1271,6 +1343,38 @@ interface generic-service {
   complete: func(request: request) -> response;
 }
 "#;
+
+    #[test]
+    fn rejects_unknown_default_for_proto_enum_alias() {
+        let descriptors = DescriptorIndex::load(
+            &PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("advanced/samples/descriptors/temporal_api.bin"),
+        )
+        .unwrap();
+        let message = descriptors
+            .message("temporal.api.workflowservice.v1.SignalWithStartWorkflowExecutionRequest")
+            .unwrap();
+        let field = message
+            .descriptor
+            .field
+            .iter()
+            .find(|field| field.name.as_deref() == Some("workflow_id_reuse_policy"))
+            .unwrap();
+        let error = validate_default_enum_case(
+            &message.full_name,
+            "workflow_id_reuse_policy",
+            "missing-case",
+            field,
+            &descriptors,
+        )
+        .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("unknown protobuf enum case `missing-case`"),
+            "{error}"
+        );
+    }
 
     #[test]
     fn rejects_generic_resources() {

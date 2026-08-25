@@ -40,7 +40,7 @@ const EXPERIMENTAL_WARNING: &str = "This API is experimental and subject to chan
 const WIRE_VALUE_EXPR: &str = "{wire}";
 
 type PlannedOperation = OperationSpec<PlannedFamily>;
-type PlannedFlags = FlagsSpec;
+type PlannedFlags = FlagsSpec<PlannedFamily>;
 type PlannedVariant = VariantSpec<PlannedFamily>;
 
 #[derive(Debug, Default)]
@@ -216,7 +216,7 @@ fn branch_has_json_models(branch: &ApiSpecBranch<PlannedFamily>) -> bool {
             .spec
             .external_types()
             .map(|(_, binding)| binding)
-            .any(|binding| matches!(binding.external_type, ExternalTypeSpec::Json(_))),
+            .any(|binding| binding.json_model().is_some()),
         ApiSpecNode::Branch(branch) => branch_has_json_models(branch),
     })
 }
@@ -782,7 +782,7 @@ impl<'a> ApiPlanner<'a> {
             .unwrap_or_default();
     }
 
-    fn ensure_rendered_enum(&mut self, planned_enum: &EnumSpec) {
+    fn ensure_rendered_enum(&mut self, planned_enum: &EnumSpec<PlannedFamily>) {
         self.enums
             .entry(planned_enum.full_name.clone())
             .or_insert_with(|| RenderedEnum {
@@ -1922,7 +1922,7 @@ fn collect_tree_json_models_into(
     match node {
         ApiSpecNode::Leaf(leaf) => {
             for (_, binding) in leaf.spec.external_types() {
-                if let ExternalTypeSpec::Json(json_type) = &binding.external_type {
+                if let Some(json_type) = binding.json_model() {
                     models.insert(json_type.full_name.clone(), json_type.clone());
                 }
             }

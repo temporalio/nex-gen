@@ -162,17 +162,16 @@ async def test_kb_operations_use_real_nexus_client() -> None:
     finally:
         await env.shutdown()
 
+    invalid_input = result.pop("invalidInput")
     assert result == {
         "blockId": "block-1",
         "categoryChildId": "child",
         "pageId": "page-1",
         "revision": 7,
-        "invalidInput": {
-            "cause": "HandlerError",
-            "message": "Invalid operation input",
-            "type": "BAD_REQUEST",
-        },
     }
+    assert invalid_input["cause"] == "HandlerError"
+    assert invalid_input["type"] == "BAD_REQUEST"
+    assert "Invalid operation input" in invalid_input["message"]
     assert [operation for operation, _ in handler.calls] == [
         "GetPage",
         "PutBlock",

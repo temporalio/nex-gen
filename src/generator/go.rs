@@ -355,7 +355,7 @@ pub(in crate::generator) fn planned_field(
     }
 }
 
-fn planned_enum(enumeration: &EnumSpec) -> PlannedEnum {
+fn planned_enum(enumeration: &EnumSpec<PlannedFamily>) -> PlannedEnum {
     PlannedEnum {
         info: local_type_info(&enumeration.full_name),
         name: enumeration.name.clone(),
@@ -370,7 +370,7 @@ fn planned_enum(enumeration: &EnumSpec) -> PlannedEnum {
     }
 }
 
-fn planned_flags(flags: &FlagsSpec) -> PlannedFlags {
+fn planned_flags(flags: &FlagsSpec<PlannedFamily>) -> PlannedFlags {
     PlannedFlags {
         info: local_type_info(&flags.full_name),
         name: flags.name.clone(),
@@ -653,10 +653,7 @@ fn collect_tree_json_models(leaves: &[&ApiSpecLeaf<PlannedFamily>]) -> Vec<Plann
     leaves
         .iter()
         .flat_map(|leaf| leaf.spec.external_types())
-        .filter_map(|(_, binding)| match &binding.external_type {
-            ExternalTypeSpec::Json(json_type) => Some(json_type.clone()),
-            _ => None,
-        })
+        .filter_map(|(_, binding)| binding.json_model().cloned())
         .collect()
 }
 
@@ -789,7 +786,7 @@ fn go_tree_has_json_models(leaves: &[&ApiSpecLeaf<PlannedFamily>]) -> bool {
         leaf.spec
             .external_types()
             .map(|(_, binding)| binding)
-            .any(|binding| matches!(binding.external_type, ExternalTypeSpec::Json(_)))
+            .any(|binding| binding.json_model().is_some())
     })
 }
 
@@ -873,7 +870,7 @@ fn is_json_planned_type(kind: &PlannedType) -> bool {
 fn plan_uses_json_models(api_plan: &PlannedSpec) -> bool {
     api_plan
         .external_types()
-        .any(|(_, binding)| matches!(binding.external_type, ExternalTypeSpec::Json(_)))
+        .any(|(_, binding)| binding.json_model().is_some())
         || api_plan
             .services
             .iter()

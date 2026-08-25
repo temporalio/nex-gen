@@ -32,7 +32,7 @@ const EXPERIMENTAL_WARNING: &str =
 type PlannedOperation = OperationSpec<PlannedFamily>;
 type PlannedService = ServiceSpec<PlannedFamily>;
 type PlannedModel = RecordSpec<PlannedFamily>;
-type PlannedFlags = FlagsSpec;
+type PlannedFlags = FlagsSpec<PlannedFamily>;
 type PlannedVariant = VariantSpec<PlannedFamily>;
 trait PlannedOperationExt {
     fn input_model(&self) -> &PlannedType;
@@ -3331,7 +3331,7 @@ fn model_has_extractable_function_fields(model: &PlannedModel) -> bool {
     has_function_fields
 }
 
-fn render_enum(output: &mut String, enumeration: &EnumSpec) {
+fn render_enum(output: &mut String, enumeration: &EnumSpec<PlannedFamily>) {
     output.push_str(GENERATED_CODE_ATTRIBUTE);
     output.push('\n');
     output.push_str("public enum ");
@@ -3745,7 +3745,7 @@ fn api_plan_record_for_request_name<'a>(
         let name = name.trim_start_matches('.');
         api_plan.records().map(|(_, record)| record).find(|record| {
             matches!(
-                record.source_type.as_ref(),
+                record.source.as_ref().map(|source| &source.external_type),
                 Some(ExternalTypeSpec::Proto(PlannedProtoType::Message(message)))
                     if message.proto.full_name == name
             )

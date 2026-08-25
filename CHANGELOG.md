@@ -22,6 +22,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.2.2] - 2026-08-25
 
 ### Added
+- `@nexus.type` now reports an explicit error when combined with `@nexus.proto`
+  on a native WIT record, variant, enum, or flags declaration.
 
 - WIT signal-with-start request models now carry Temporal headers while keeping
   them out of generated convenience operation APIs.

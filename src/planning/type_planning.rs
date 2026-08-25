@@ -58,18 +58,30 @@ fn collect_spec_module_imports(
     for entry in spec.types.values() {
         match &entry.declaration {
             TypeDeclSpec::External(binding) => {
-                collect_external_type_module_imports(
-                    &spec.module_path,
-                    &binding.external_type,
-                    imports,
-                );
-                if let Some(authored_type) = &binding.authored_type {
+                if let Some(proto) = binding.proto_alias() {
+                    collect_external_type_module_imports(
+                        &spec.module_path,
+                        &ExternalTypeSpec::Proto(proto.proto.clone()),
+                        imports,
+                    );
+                } else if let Some(json) = binding.json_model() {
+                    collect_external_type_module_imports(
+                        &spec.module_path,
+                        &ExternalTypeSpec::Json(json.clone()),
+                        imports,
+                    );
+                }
+                if let Some(authored_type) = binding.authored_type() {
                     collect_type_module_imports(&spec.module_path, Some(authored_type), imports);
                 }
             }
             TypeDeclSpec::Record(record) => {
-                if let Some(source_type) = &record.source_type {
-                    collect_external_type_module_imports(&spec.module_path, source_type, imports);
+                if let Some(source) = &record.source {
+                    collect_external_type_module_imports(
+                        &spec.module_path,
+                        &source.external_type,
+                        imports,
+                    );
                 }
                 for field in record.fields.values() {
                     collect_type_module_imports(
@@ -97,13 +109,37 @@ fn collect_spec_module_imports(
                 }
             }
             TypeDeclSpec::Variant(variant) => {
+                if let Some(source) = &variant.source {
+                    collect_external_type_module_imports(
+                        &spec.module_path,
+                        &source.external_type,
+                        imports,
+                    );
+                }
                 for case in &variant.cases {
                     if let Some(payload) = &case.payload {
                         collect_type_module_imports(&spec.module_path, Some(payload), imports);
                     }
                 }
             }
-            TypeDeclSpec::Enum(_) | TypeDeclSpec::Flags(_) => {}
+            TypeDeclSpec::Enum(enumeration) => {
+                if let Some(source) = &enumeration.source {
+                    collect_external_type_module_imports(
+                        &spec.module_path,
+                        &source.external_type,
+                        imports,
+                    );
+                }
+            }
+            TypeDeclSpec::Flags(flags) => {
+                if let Some(source) = &flags.source {
+                    collect_external_type_module_imports(
+                        &spec.module_path,
+                        &source.external_type,
+                        imports,
+                    );
+                }
+            }
         }
     }
 }

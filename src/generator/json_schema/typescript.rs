@@ -21,7 +21,7 @@ use crate::json_schema::scalar::{ScalarKind, ScalarMatcher};
 use crate::language::Language;
 use crate::parser::NameManifest;
 use crate::planning::{PlannedFamily, PlannedJsonType, PlannedSpec};
-use crate::spec::{ExternalTypeSpec, ModulePath, RecordSpec};
+use crate::spec::{ModulePath, RecordSpec};
 
 /// The converter identifier is owned by the parser's per-language naming policy,
 /// which also enters it into the P15 collision namespace. Re-exported so the
@@ -1605,10 +1605,7 @@ impl ExternalModelBackend<PlannedJsonType> for ModelBackend {
         self.json_models = api_plan
             .external_types()
             .map(|(_, binding)| binding)
-            .filter_map(|binding| match &binding.external_type {
-                ExternalTypeSpec::Json(json_type) => Some(json_type.clone()),
-                _ => None,
-            })
+            .filter_map(|binding| binding.json_model().cloned())
             .map(|mut json_type| {
                 if let Some(resolved) = self.manifest.type_name(&json_type.full_name) {
                     json_type.model_name = resolved.to_string();

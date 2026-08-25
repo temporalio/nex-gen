@@ -20,6 +20,11 @@ models owned by each source. The metadata stays with each declaration through
 family transformations and supplies reachability roots; later passes do not
 inspect the input format to reconstruct them.
 
+Native WIT declarations own their external protobuf source metadata. External
+type bindings are reserved for non-native WIT overrides and JSON Schema models;
+the protobuf planning helpers resolve source metadata from either form without
+making later passes depend on the input format.
+
 Each IR box in the diagram names the `TypeFamily` parameter of the
 `ApiSpecTree<F>` produced at that point. A family may appear more than once
 where the same tree crosses a logical phase boundary or a pass refines its

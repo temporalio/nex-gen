@@ -22,7 +22,7 @@ use crate::language::Language;
 use crate::parser::NameManifest;
 use crate::planning::{PlannedFamily, PlannedJsonType, PlannedSpec};
 use crate::spec::{ApiSpecBranch, ApiSpecNode};
-use crate::spec::{ExternalTypeSpec, ModulePath, RecordSpec};
+use crate::spec::{ModulePath, RecordSpec};
 
 const JSON_PUBLIC_RUNTIME_NAMES: &[&str] = &["Violation"];
 
@@ -290,10 +290,7 @@ impl ExternalModelBackend<PlannedJsonType> for ModelBackend {
         let mut json_models: Vec<PlannedJsonType> = api_plan
             .external_types()
             .map(|(_, binding)| binding)
-            .filter_map(|binding| match &binding.external_type {
-                ExternalTypeSpec::Json(json_type) => Some(json_type.clone()),
-                _ => None,
-            })
+            .filter_map(|binding| binding.json_model().cloned())
             .map(|mut json_type| {
                 if let Some(resolved) = self.manifest.type_name(&json_type.full_name) {
                     json_type.model_name = resolved.to_string();
@@ -575,7 +572,7 @@ fn collect_tree_json_models(
         match node {
             ApiSpecNode::Leaf(leaf) => {
                 for binding in leaf.spec.external_types().map(|(_, binding)| binding) {
-                    if let ExternalTypeSpec::Json(json_type) = &binding.external_type {
+                    if let Some(json_type) = binding.json_model() {
                         models.insert(
                             json_type.full_name.clone(),
                             (leaf.module_path.clone(), json_type.clone()),

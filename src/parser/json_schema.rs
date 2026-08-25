@@ -13,9 +13,9 @@ use crate::error::{Error, Result};
 use crate::generator::json_schema::python;
 use crate::language::Language;
 use crate::spec::{
-    ApiSpec, ExternalTypeBindingSpec, ExternalTypeSpec, JsonModelSpec, LanguageStringSpec,
-    ModulePath, OperationSpec, ServiceSpec, SupportSpec, Symbol, TypeDeclEntry, TypeDeclSpec,
-    TypeSpec,
+    ApiSpec, ExternalTypeBindingSpec, ExternalTypeSpec, JsonModelBindingSpec, JsonModelSpec,
+    LanguageStringSpec, ModulePath, OperationSpec, ServiceSpec, SupportSpec, Symbol, TypeDeclEntry,
+    TypeDeclSpec, TypeSpec,
 };
 use crate::spec::{ApiSpecBranch, ApiSpecLeaf, ApiSpecNode, ApiSpecTree};
 
@@ -897,8 +897,8 @@ fn api_spec_from_parsed_json_documents(
     let types = external_types
         .into_iter()
         .map(|(name, binding)| {
-            let ExternalTypeSpec::Json(json_type) = &binding.external_type else {
-                return (name, TypeDeclEntry::new(TypeDeclSpec::External(binding)));
+            let Some(json_type) = binding.json_model() else {
+                unreachable!("JSON Schema parser only produces JSON model bindings");
             };
             let module_exported = module_paths.is_none()
                 || json_type
@@ -6584,7 +6584,7 @@ fn insert_json_external_type(
     // silently.
     match external_types.entry(type_spec.name.as_str().to_string()) {
         btree_map::Entry::Occupied(existing) => {
-            if let ExternalTypeSpec::Json(previous) = &existing.get().external_type
+            if let Some(previous) = existing.get().json_model()
                 && (previous.model_name != type_spec.model_name
                     || previous.schema != type_spec.schema)
             {
@@ -6600,13 +6600,10 @@ fn insert_json_external_type(
             }
         }
         btree_map::Entry::Vacant(slot) => {
-            slot.insert(ExternalTypeBindingSpec {
-                external_type: ExternalTypeSpec::Json(type_spec),
-                reference: LanguageStringSpec::default(),
+            slot.insert(ExternalTypeBindingSpec::JsonModel(JsonModelBindingSpec {
+                model: type_spec,
                 type_name: language_string(Some(model.model_name.clone())),
-                replacement: None,
-                authored_type: None,
-            });
+            }));
         }
     }
     Ok(())
@@ -7647,7 +7644,7 @@ fn manifest_inputs_from_spec(
 ) -> (Vec<ManifestModel>, Vec<ManifestService>) {
     let mut models = Vec::new();
     for (_full_name, binding) in spec.external_types() {
-        let ExternalTypeSpec::Json(json) = &binding.external_type else {
+        let Some(json) = binding.json_model() else {
             continue;
         };
         let module_key = json
@@ -10587,10 +10584,11 @@ properties:
         let binding = spec
             .external_type_binding(name)
             .unwrap_or_else(|| panic!("no external type binding `{name}`"));
-        match &binding.external_type {
-            ExternalTypeSpec::Json(model) => model.schema.clone(),
-            other => panic!("binding `{name}` is not a JSON model: {other:?}"),
-        }
+        binding
+            .json_model()
+            .unwrap_or_else(|| panic!("binding `{name}` is not a JSON model"))
+            .schema
+            .clone()
     }
 
     #[test]
@@ -10792,10 +10790,11 @@ $defs:
             let binding = spec
                 .external_type_binding(name)
                 .unwrap_or_else(|| panic!("no external type binding `{name}`"));
-            match &binding.external_type {
-                ExternalTypeSpec::Json(model) => model.schema.clone(),
-                other => panic!("binding `{name}` is not a JSON model: {other:?}"),
-            }
+            binding
+                .json_model()
+                .unwrap_or_else(|| panic!("binding `{name}` is not a JSON model"))
+                .schema
+                .clone()
         };
         // The merged property is a new anonymous shape, hoisted under the
         // owning model's name.
@@ -10911,9 +10910,7 @@ $defs:
             let binding = spec
                 .external_type_binding("Widget")
                 .expect("no external type binding `Widget`");
-            let ExternalTypeSpec::Json(model) = &binding.external_type else {
-                panic!("`Widget` is not a JSON model");
-            };
+            let model = binding.json_model().expect("`Widget` is not a JSON model");
             assert!(
                 model.schema.get("x-go-name").is_none(),
                 "{language:?}: the target's type name leaked into the merge site: {:?}",
@@ -10961,9 +10958,7 @@ $defs:
         let binding = spec
             .external_type_binding("Widget")
             .expect("no external type binding `Widget`");
-        let ExternalTypeSpec::Json(model) = &binding.external_type else {
-            panic!("`Widget` is not a JSON model");
-        };
+        let model = binding.json_model().expect("`Widget` is not a JSON model");
         // The merged node keeps the reference to the base's declaration.
         assert_eq!(
             model.schema["properties"]["inner"]["$ref"],
@@ -11252,9 +11247,9 @@ $defs:
         let binding = spec
             .external_type_binding(name)
             .unwrap_or_else(|| panic!("model `{name}` should be loaded"));
-        let ExternalTypeSpec::Json(json) = &binding.external_type else {
-            panic!("`{name}` should be a JSON model");
-        };
+        let json = binding
+            .json_model()
+            .unwrap_or_else(|| panic!("`{name}` should be a JSON model"));
         json.schema.clone()
     }
 
@@ -11277,9 +11272,7 @@ properties:
         )
         .expect("disjoint-kind union should load");
         let root = spec.external_type_binding("Api").expect("root model");
-        let ExternalTypeSpec::Json(json) = &root.external_type else {
-            panic!("root should be a JSON model");
-        };
+        let json = root.json_model().expect("root should be a JSON model");
         assert!(json.schema["properties"]["value"]["oneOf"].is_array());
     }
 
@@ -11328,9 +11321,7 @@ properties:
         )
         .expect("nullable oneOf should load");
         let root = spec.external_type_binding("Api").expect("root model");
-        let ExternalTypeSpec::Json(json) = &root.external_type else {
-            panic!("root should be a JSON model");
-        };
+        let json = root.json_model().expect("root should be a JSON model");
         // The degenerate two-branch pattern is preserved as-is (owned by
         // nullability), not rewritten into a sum type.
         let branches = json.schema["properties"]["middleName"]["oneOf"]
@@ -11940,9 +11931,7 @@ properties:
         )
         .expect("free-form inline object branch should load");
         let root = spec.external_type_binding("Api").expect("root model");
-        let ExternalTypeSpec::Json(json) = &root.external_type else {
-            panic!("root should be a JSON model");
-        };
+        let json = root.json_model().expect("root should be a JSON model");
         assert!(json.schema["properties"]["value"]["oneOf"].is_array());
     }
 
@@ -13519,10 +13508,13 @@ properties:
         assert!(spec.external_type_binding("Api").is_some());
         // The override is what admits the pair: an identifier-valued key that the
         // derivation would otherwise fold is now nameable.
-        let schema = match &spec.external_type_binding("Api").unwrap().external_type {
-            ExternalTypeSpec::Json(model) => model.schema.clone(),
-            other => panic!("not a JSON model: {other:?}"),
-        };
+        let schema = spec
+            .external_type_binding("Api")
+            .unwrap()
+            .json_model()
+            .expect("not a JSON model")
+            .schema
+            .clone();
         assert_eq!(
             schema["properties"]["scale"]["x-go-enum-names"]["1.5"],
             "ScaleOneHalf"
@@ -14851,9 +14843,9 @@ $defs:
         let nested = spec
             .external_type_binding("Outer.inner/value")
             .expect("nested definition should have its own model identity");
-        let ExternalTypeSpec::Json(nested) = &nested.external_type else {
-            panic!("nested definition should remain a JSON model");
-        };
+        let nested = nested
+            .json_model()
+            .expect("nested definition should remain a JSON model");
         assert!(nested.schema.get("allOf").is_none());
         assert_eq!(nested.schema["properties"]["id"]["type"], "string");
         assert_eq!(nested.schema["properties"]["label"]["type"], "string");

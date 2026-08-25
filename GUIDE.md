@@ -1231,12 +1231,18 @@ package nexus:temporal-types@1.0.0;
 
 ### @nexus.proto
 
-**Placement:** Type alias, record, or enum
+**Placement:** Type alias, record, variant, enum, or flags
 **Syntax:** `@nexus.proto "<fully.qualified.proto.MessageName>"`
 
 Maps a WIT type to a protobuf message or enum. The generator emits
 target-specific transfer-type conversion code and validates field mappings
 against the proto descriptor. Requires `--descriptors` on the CLI.
+
+Native WIT declarations (`record`, `variant`, `enum`, and `flags`) own this
+protobuf source mapping directly. A non-native alias or resource-backed type
+uses an external type binding instead. `@nexus.type` is reserved for those
+non-native bindings and is rejected when combined with `@nexus.proto` on a
+native declaration.
 
 ```wit
 /// @nexus.proto "temporal.api.activity.v1.ActivityOptions"
@@ -1356,7 +1362,7 @@ This emits `WorkflowExecutionTimeout` in Go while retaining the normal
 
 ### @nexus.type
 
-**Placement:** Type alias, enum, or record field
+**Placement:** Type alias or record field
 **Syntax:** `@nexus.type python="<type>" typescript="<type>" go="<type>"`
 
 Substitutes the WIT type with a language-native type in generated code. Each
@@ -1413,10 +1419,11 @@ Cannot be combined with `@nexus.default`.
 
 ### @nexus.default
 
-**Placement:** Record field (whose type is an enum)
+**Placement:** Record field (whose type is a WIT enum or a protobuf-enum alias)
 **Syntax:** `@nexus.default "<enum-case-name>"`
 
 Sets a default value for an enum field, making it optional in the generated API.
+For a protobuf-enum alias, the case name is validated against the descriptor.
 
 ```wit
 /// @nexus.default "allow-duplicate"

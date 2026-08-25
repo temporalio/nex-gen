@@ -48,7 +48,7 @@ pub(crate) fn generate(
     let mut registry: BTreeMap<String, (String, String)> = BTreeMap::new();
     for leaf in &leaves {
         for (_, binding) in leaf.spec.external_types() {
-            if let ExternalTypeSpec::Json(json_type) = &binding.external_type {
+            if let Some(json_type) = binding.json_model() {
                 let module = json_type.module_path.as_ref().unwrap_or(&leaf.module_path);
                 registry.insert(
                     json_type.full_name.clone(),
@@ -66,7 +66,7 @@ pub(crate) fn generate(
     let mut all_models: BTreeMap<String, PlannedJsonType> = BTreeMap::new();
     for leaf in &leaves {
         for (_, binding) in leaf.spec.external_types() {
-            if let ExternalTypeSpec::Json(json_type) = &binding.external_type {
+            if let Some(json_type) = binding.json_model() {
                 all_models.insert(json_type.full_name.clone(), json_type.clone());
             }
         }
@@ -82,7 +82,7 @@ pub(crate) fn generate(
         let module_dir = module.to_path_buf();
 
         for (_, binding) in leaf.spec.external_types() {
-            let ExternalTypeSpec::Json(json_type) = &binding.external_type else {
+            let Some(json_type) = binding.json_model() else {
                 continue;
             };
             let contents = java_json::render_model_file(

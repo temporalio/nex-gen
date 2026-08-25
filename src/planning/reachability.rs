@@ -180,8 +180,14 @@ fn enqueue_declaration_references(
             pending.extend(variant.cases.iter().filter_map(|case| case.payload.clone()));
         }
         TypeDeclSpec::External(binding) => {
-            pending.push(TypeSpec::External(binding.external_type.clone()));
-            if let Some(authored_type) = &binding.authored_type {
+            if let Some(proto) = binding.proto_alias() {
+                pending.push(TypeSpec::External(ExternalTypeSpec::Proto(
+                    proto.proto.clone(),
+                )));
+            } else if let Some(json) = binding.json_model() {
+                pending.push(TypeSpec::External(ExternalTypeSpec::Json(json.clone())));
+            }
+            if let Some(authored_type) = binding.authored_type() {
                 pending.push(authored_type.clone());
             }
         }

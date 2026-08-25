@@ -10,8 +10,9 @@ use indexmap::IndexMap;
 use crate::error::{Error, Result};
 use crate::spec::{ApiSpecLeaf, CompilerPass};
 use crate::spec::{
-    ApiSpecTransform, AuthoredResourceType, ExternalTypeSpec, JsonModelSpec, RecordFieldSpec,
-    RecordFieldVisibility, RecordSpec, Symbol, TypeDeclEntry, TypeDeclSpec, TypeSpec,
+    ApiSpecTransform, AuthoredResourceType, ExternalSourceSpec, ExternalTypeSpec, JsonModelSpec,
+    RecordFieldSpec, RecordFieldVisibility, RecordSpec, Symbol, TypeDeclEntry, TypeDeclSpec,
+    TypeSpec,
 };
 
 use super::{
@@ -90,9 +91,13 @@ impl CompilerPass<OperationBoundFamily, OperationLoweredFamily> for OperationLow
                         name: record_name.clone(),
                         full_name: record_full_name.clone(),
                         doc: SelectedTextSpec::default(),
-                        source_type: Some(ExternalTypeSpec::Proto(Symbol::new(
-                            resource_return.output_message_name.clone(),
-                        ))),
+                        source: Some(ExternalSourceSpec {
+                            external_type: ExternalTypeSpec::Proto(Symbol::new(
+                                resource_return.output_message_name.clone(),
+                            )),
+                            reference: Default::default(),
+                            type_name: Default::default(),
+                        }),
                         experimental: operation.experimental,
                         flatten_in_api: false,
                         fields: resource_result_fields(resource_return),

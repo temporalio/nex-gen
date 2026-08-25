@@ -305,7 +305,7 @@ impl<F: TypeFamily> ApiSpec<F> {
         }
     }
 
-    pub fn enums(&self) -> impl Iterator<Item = (&str, &EnumSpec)> {
+    pub fn enums(&self) -> impl Iterator<Item = (&str, &EnumSpec<F>)> {
         self.types
             .iter()
             .filter_map(|(name, entry)| match &entry.declaration {
@@ -314,7 +314,7 @@ impl<F: TypeFamily> ApiSpec<F> {
             })
     }
 
-    pub fn enum_decl(&self, name: &str) -> Option<&EnumSpec> {
+    pub fn enum_decl(&self, name: &str) -> Option<&EnumSpec<F>> {
         match self.types.get(name) {
             Some(TypeDeclEntry {
                 declaration: TypeDeclSpec::Enum(enumeration),
@@ -324,7 +324,7 @@ impl<F: TypeFamily> ApiSpec<F> {
         }
     }
 
-    pub fn flags(&self) -> impl Iterator<Item = (&str, &FlagsSpec)> {
+    pub fn flags(&self) -> impl Iterator<Item = (&str, &FlagsSpec<F>)> {
         self.types
             .iter()
             .filter_map(|(name, entry)| match &entry.declaration {
@@ -333,7 +333,7 @@ impl<F: TypeFamily> ApiSpec<F> {
             })
     }
 
-    pub fn flags_decl(&self, name: &str) -> Option<&FlagsSpec> {
+    pub fn flags_decl(&self, name: &str) -> Option<&FlagsSpec<F>> {
         match self.types.get(name) {
             Some(TypeDeclEntry {
                 declaration: TypeDeclSpec::Flags(flags),
@@ -406,9 +406,8 @@ where
                 return None;
             };
             matches!(
-                record.source_type.as_ref(),
-                Some(ExternalTypeSpec::Proto(source_proto))
-                    if source_proto.as_ref() == proto_name
+                record.source.as_ref().map(|source| &source.external_type),
+                Some(ExternalTypeSpec::Proto(source_proto)) if source_proto.as_ref() == proto_name
             )
             .then_some(record)
         })
@@ -501,8 +500,8 @@ impl<F: TypeFamily> From<TypeDeclSpec<F>> for TypeDeclEntry<F> {
 pub enum TypeDeclSpec<F: TypeFamily = AuthoredFamily> {
     External(ExternalTypeBindingSpec<F>),
     Record(RecordSpec<F>),
-    Enum(EnumSpec),
-    Flags(FlagsSpec),
+    Enum(EnumSpec<F>),
+    Flags(FlagsSpec<F>),
     Variant(VariantSpec<F>),
 }
 
@@ -515,8 +514,8 @@ impl<F: TypeFamily> TypeDeclSpec<F> {
         match self {
             TypeDeclSpec::External(binding) => TypeDeclSpec::External(binding.map_names_with(map)),
             TypeDeclSpec::Record(record) => TypeDeclSpec::Record(record.map_names_with(map)),
-            TypeDeclSpec::Enum(enumeration) => TypeDeclSpec::Enum(enumeration),
-            TypeDeclSpec::Flags(flags) => TypeDeclSpec::Flags(flags),
+            TypeDeclSpec::Enum(enumeration) => TypeDeclSpec::Enum(enumeration.map_names_with(map)),
+            TypeDeclSpec::Flags(flags) => TypeDeclSpec::Flags(flags.map_names_with(map)),
             TypeDeclSpec::Variant(variant) => TypeDeclSpec::Variant(variant.map_names_with(map)),
         }
     }
@@ -791,7 +790,7 @@ pub struct RecordSpec<F: TypeFamily = AuthoredFamily> {
     pub name: String,
     pub full_name: String,
     pub doc: F::Text,
-    pub source_type: Option<ExternalTypeSpec<F>>,
+    pub source: Option<ExternalSourceSpec<F>>,
     pub experimental: bool,
     pub flatten_in_api: bool,
     pub fields: IndexMap<String, RecordFieldSpec<F>>,
@@ -824,11 +823,12 @@ pub enum RecordFieldVisibility {
     },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct EnumSpec {
+#[derive(Debug, Clone, PartialEq)]
+pub struct EnumSpec<F: TypeFamily = AuthoredFamily> {
     pub name: String,
     pub full_name: String,
     pub values: Vec<EnumValueSpec>,
+    pub source: Option<ExternalSourceSpec<F>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -838,11 +838,12 @@ pub struct EnumValueSpec {
     pub number: i32,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FlagsSpec {
+#[derive(Debug, Clone, PartialEq)]
+pub struct FlagsSpec<F: TypeFamily = AuthoredFamily> {
     pub name: String,
     pub full_name: String,
     pub flags: Vec<FlagSpec>,
+    pub source: Option<ExternalSourceSpec<F>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -856,6 +857,7 @@ pub struct VariantSpec<F: TypeFamily = AuthoredFamily> {
     pub name: String,
     pub full_name: String,
     pub cases: Vec<VariantCaseSpec<F>>,
+    pub source: Option<ExternalSourceSpec<F>>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -877,9 +879,7 @@ impl<F: TypeFamily> RecordSpec<F> {
             name: self.name,
             full_name: full_name.clone(),
             doc: map.map_text(self.doc),
-            source_type: self
-                .source_type
-                .map(|source_type| source_type.map_names_with(map)),
+            source: self.source.map(|source| source.map_names_with(map)),
             experimental: self.experimental,
             flatten_in_api: self.flatten_in_api,
             fields: self
@@ -1016,6 +1016,36 @@ impl<F: TypeFamily> RecordSpec<F> {
     }
 }
 
+impl<F: TypeFamily> EnumSpec<F> {
+    fn map_names_with<G, M>(self, map: &mut M) -> EnumSpec<G>
+    where
+        G: TypeFamily,
+        M: ApiSpecTransform<F, G>,
+    {
+        EnumSpec {
+            name: self.name,
+            full_name: self.full_name,
+            values: self.values,
+            source: self.source.map(|source| source.map_names_with(map)),
+        }
+    }
+}
+
+impl<F: TypeFamily> FlagsSpec<F> {
+    fn map_names_with<G, M>(self, map: &mut M) -> FlagsSpec<G>
+    where
+        G: TypeFamily,
+        M: ApiSpecTransform<F, G>,
+    {
+        FlagsSpec {
+            name: self.name,
+            full_name: self.full_name,
+            flags: self.flags,
+            source: self.source.map(|source| source.map_names_with(map)),
+        }
+    }
+}
+
 impl<F: TypeFamily> RecordFieldSpec<F> {
     fn map_names_with<G, M>(
         self,
@@ -1068,6 +1098,7 @@ impl<F: TypeFamily> VariantSpec<F> {
                 .into_iter()
                 .map(|case| case.map_names_with(map))
                 .collect(),
+            source: self.source.map(|source| source.map_names_with(map)),
         }
     }
 }
@@ -1166,26 +1197,89 @@ impl TextSpec for SelectedTextSpec {
     }
 }
 
+/// External wire metadata owned by a native WIT declaration.
 #[derive(Debug, Clone, PartialEq)]
-pub struct ExternalTypeBindingSpec<F: TypeFamily = AuthoredFamily> {
+pub struct ExternalSourceSpec<F: TypeFamily = AuthoredFamily> {
     pub external_type: ExternalTypeSpec<F>,
+    pub reference: F::Text,
+    pub type_name: F::Text,
+}
+
+impl<F: TypeFamily> ExternalSourceSpec<F> {
+    fn map_names_with<G, M>(self, map: &mut M) -> ExternalSourceSpec<G>
+    where
+        G: TypeFamily,
+        M: ApiSpecTransform<F, G>,
+    {
+        ExternalSourceSpec {
+            external_type: self.external_type.map_names_with(map),
+            reference: map.map_text(self.reference),
+            type_name: map.map_text(self.type_name),
+        }
+    }
+}
+
+/// A declaration whose shape is owned by an input format other than native WIT.
+///
+/// Native WIT records, variants, enums, and flags carry [`ExternalSourceSpec`]
+/// when they map to a protobuf type. This enum is deliberately limited to the
+/// two remaining cases: a WIT type alias for a protobuf type, or a JSON Schema
+/// model. In particular, it cannot represent a native WIT declaration.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ExternalTypeBindingSpec<F: TypeFamily = AuthoredFamily> {
+    ProtoAlias(ProtoAliasBindingSpec<F>),
+    JsonModel(JsonModelBindingSpec<F>),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ProtoAliasBindingSpec<F: TypeFamily = AuthoredFamily> {
+    pub proto: F::Proto,
     pub reference: F::Text,
     pub type_name: F::Text,
     pub replacement: Option<TypeReplacementSpec<F>>,
     pub authored_type: Option<TypeSpec<F>>,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct JsonModelBindingSpec<F: TypeFamily = AuthoredFamily> {
+    pub model: F::Json,
+    pub type_name: F::Text,
+}
+
 impl<F: TypeFamily> ExternalTypeBindingSpec<F> {
-    pub fn type_name(&self) -> &F::Text {
-        &self.type_name
+    pub fn proto_alias(&self) -> Option<&ProtoAliasBindingSpec<F>> {
+        match self {
+            Self::ProtoAlias(binding) => Some(binding),
+            Self::JsonModel(_) => None,
+        }
     }
 
-    pub fn reference(&self) -> &F::Text {
-        &self.reference
+    pub fn json_model(&self) -> Option<&F::Json> {
+        match self {
+            Self::ProtoAlias(_) => None,
+            Self::JsonModel(binding) => Some(&binding.model),
+        }
+    }
+
+    pub fn type_name(&self) -> &F::Text {
+        match self {
+            Self::ProtoAlias(binding) => &binding.type_name,
+            Self::JsonModel(binding) => &binding.type_name,
+        }
+    }
+
+    pub fn reference(&self) -> Option<&F::Text> {
+        self.proto_alias().map(|binding| &binding.reference)
     }
 
     pub fn replacement(&self) -> Option<&TypeReplacementSpec<F>> {
-        self.replacement.as_ref()
+        self.proto_alias()
+            .and_then(|binding| binding.replacement.as_ref())
+    }
+
+    pub fn authored_type(&self) -> Option<&TypeSpec<F>> {
+        self.proto_alias()
+            .and_then(|binding| binding.authored_type.as_ref())
     }
 
     fn map_names_with<G, M>(self, map: &mut M) -> ExternalTypeBindingSpec<G>
@@ -1193,16 +1287,24 @@ impl<F: TypeFamily> ExternalTypeBindingSpec<F> {
         G: TypeFamily,
         M: ApiSpecTransform<F, G>,
     {
-        ExternalTypeBindingSpec {
-            external_type: self.external_type.map_names_with(map),
-            reference: map.map_text(self.reference),
-            type_name: map.map_text(self.type_name),
-            replacement: self
-                .replacement
-                .map(|replacement| replacement.map_names_with(map)),
-            authored_type: self
-                .authored_type
-                .map(|authored_type| authored_type.map_names_with(map)),
+        match self {
+            Self::ProtoAlias(binding) => {
+                ExternalTypeBindingSpec::ProtoAlias(ProtoAliasBindingSpec {
+                    proto: map.map_proto(binding.proto),
+                    reference: map.map_text(binding.reference),
+                    type_name: map.map_text(binding.type_name),
+                    replacement: binding
+                        .replacement
+                        .map(|replacement| replacement.map_names_with(map)),
+                    authored_type: binding
+                        .authored_type
+                        .map(|authored_type| authored_type.map_names_with(map)),
+                })
+            }
+            Self::JsonModel(binding) => ExternalTypeBindingSpec::JsonModel(JsonModelBindingSpec {
+                model: map.map_json(binding.model),
+                type_name: map.map_text(binding.type_name),
+            }),
         }
     }
 }
@@ -1244,7 +1346,6 @@ impl<N: AsRef<str>> AsRef<str> for JsonModelSpec<N> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FieldDefaultSpec {
     pub enum_case: String,
-    pub enum_value: i32,
 }
 
 /// A WIT alias marked with `@nexus.type-parameter`.
