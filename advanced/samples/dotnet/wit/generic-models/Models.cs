@@ -33,10 +33,10 @@ namespace Nexgen.GenericModelService
             Nested = nested;
         }
 
-        public ContextT Context { get; }
-        public IReadOnlyList<ContextT> Contexts { get; }
-        public IReadOnlyDictionary<string, ContextT> ByName { get; }
-        public Inner<ContextT> Nested { get; }
+        public ContextT Context { get; set; }
+        public IReadOnlyList<ContextT> Contexts { get; set; }
+        public IReadOnlyDictionary<string, ContextT> ByName { get; set; }
+        public Inner<ContextT> Nested { get; set; }
     }
 
     [GeneratedCode("nexgen", null)]
@@ -48,9 +48,9 @@ namespace Nexgen.GenericModelService
             Completion = completion;
         }
 
-        public ContextT Context { get; }
-        public OperationCompletionResult<OutputT> Completion { get; }
-        public MetadataT? Metadata { get; init; }
+        public ContextT Context { get; set; }
+        public OperationCompletionResult<OutputT> Completion { get; set; }
+        public MetadataT? Metadata { get; set; }
     }
 
     [GeneratedCode("nexgen", null)]
@@ -61,7 +61,7 @@ namespace Nexgen.GenericModelService
             Value = value;
         }
 
-        public ContextT Value { get; }
+        public ContextT Value { get; set; }
     }
 
     [GeneratedCode("nexgen", null)]
@@ -72,7 +72,7 @@ namespace Nexgen.GenericModelService
             Message = message;
         }
 
-        public string Message { get; }
+        public string Message { get; set; }
     }
 
     [GeneratedCode("nexgen", null)]
@@ -83,7 +83,7 @@ namespace Nexgen.GenericModelService
             Output = output;
         }
 
-        public OutputT Output { get; }
+        public OutputT Output { get; set; }
     }
 
 }

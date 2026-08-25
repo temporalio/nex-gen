@@ -19,11 +19,11 @@ namespace Temporalio.Workflows
         /// <summary>
         /// Single-line fixed summary for the workflow execution that may appear in UI and CLI. This can be in single-line Temporal Markdown format.
         /// </summary>
-        public object? StaticSummary { get; init; }
+        public object? StaticSummary { get; set; }
         /// <summary>
         /// General fixed details for the workflow execution that may appear in UI and CLI. This can be in Temporal Markdown format and can span multiple lines. This value is fixed on the workflow execution and cannot be updated.
         /// </summary>
-        public object? StaticDetails { get; init; }
+        public object? StaticDetails { get; set; }
 
         internal static UserMetadata FromTransferType(Temporalio.Api.Sdk.V1.UserMetadata wire)
         {
@@ -78,77 +78,77 @@ namespace Temporalio.Workflows
         /// <summary>
         /// Workflow type name or workflow expression identifying the workflow to start.
         /// </summary>
-        public string Workflow { get; }
+        public string Workflow { get; set; }
         /// <summary>
         /// Arguments for the workflow.
         /// </summary>
-        public IReadOnlyCollection<object?>? Args { get; init; }
+        public IReadOnlyCollection<object?>? Args { get; set; }
         /// <summary>
         /// Unique identifier for the workflow execution.
         /// </summary>
-        public string Id { get; }
+        public string Id { get; set; }
         /// <summary>
         /// Task queue to run the workflow on.
         /// </summary>
-        public string TaskQueue { get; }
+        public string TaskQueue { get; set; }
         /// <summary>
         /// Signal name or signal expression to send with the start request.
         /// </summary>
-        public string Signal { get; }
+        public string Signal { get; set; }
         /// <summary>
         /// Arguments for the signal.
         /// </summary>
-        public IReadOnlyCollection<object?>? SignalArgs { get; init; }
+        public IReadOnlyCollection<object?>? SignalArgs { get; set; }
         /// <summary>
         /// Total workflow execution timeout, including retries and continue-as-new.
         /// </summary>
-        public System.TimeSpan? ExecutionTimeout { get; init; }
+        public System.TimeSpan? ExecutionTimeout { get; set; }
         /// <summary>
         /// Timeout of a single workflow run.
         /// </summary>
-        public System.TimeSpan? RunTimeout { get; init; }
+        public System.TimeSpan? RunTimeout { get; set; }
         /// <summary>
         /// Timeout of a single workflow task.
         /// </summary>
-        public System.TimeSpan? TaskTimeout { get; init; }
+        public System.TimeSpan? TaskTimeout { get; set; }
         /// <summary>
         /// Behavior when a closed workflow with the same ID exists. Default is allow-duplicate.
         /// </summary>
-        public Temporalio.Api.Enums.V1.WorkflowIdReusePolicy? IdReusePolicy { get; init; }
+        public Temporalio.Api.Enums.V1.WorkflowIdReusePolicy? IdReusePolicy { get; set; }
         /// <summary>
         /// Behavior when a workflow is currently running with the same ID. Set to use-existing for idempotent deduplication on workflow ID. Cannot be set if id-reuse-policy is terminate-if-running.
         /// </summary>
-        public Temporalio.Api.Enums.V1.WorkflowIdConflictPolicy? IdConflictPolicy { get; init; }
+        public Temporalio.Api.Enums.V1.WorkflowIdConflictPolicy? IdConflictPolicy { get; set; }
         /// <summary>
         /// Retry policy for the workflow.
         /// </summary>
-        public Temporalio.Common.RetryPolicy? RetryPolicy { get; init; }
+        public Temporalio.Common.RetryPolicy? RetryPolicy { get; set; }
         /// <summary>
         /// Cron schedule for recurring workflow executions. See https://docs.temporal.io/cron-job.
         /// </summary>
-        public string? CronSchedule { get; init; }
+        public string? CronSchedule { get; set; }
         /// <summary>
         /// Memo for the workflow.
         /// </summary>
-        public IReadOnlyDictionary<string, object?>? Memo { get; init; }
+        public IReadOnlyDictionary<string, object?>? Memo { get; set; }
         /// <summary>
         /// Typed search attributes for the workflow.
         /// </summary>
-        public Temporalio.Common.SearchAttributeCollection? SearchAttributes { get; init; }
+        public Temporalio.Common.SearchAttributeCollection? SearchAttributes { get; set; }
         /// <summary>
         /// Priority of the workflow execution.
         /// </summary>
-        public Temporalio.Common.Priority? Priority { get; init; }
+        public Temporalio.Common.Priority? Priority { get; set; }
         /// <summary>
         /// Override for workflow versioning behavior.
         /// </summary>
-        public Temporalio.Common.VersioningOverride? VersioningOverride { get; init; }
+        public Temporalio.Common.VersioningOverride? VersioningOverride { get; set; }
         /// <summary>
         /// Amount of time to wait before starting the workflow. This does not work with cron-schedule.
         /// </summary>
-        public System.TimeSpan? StartDelay { get; init; }
-        public UserMetadata? UserMetadata { get; init; }
-        public IReadOnlyDictionary<string, object?>? Headers { get; init; }
+        public System.TimeSpan? StartDelay { get; set; }
+        public UserMetadata? UserMetadata { get; set; }
+        public IReadOnlyDictionary<string, object?>? Headers { get; set; }
         private string? _namespace;
         public string Namespace
         {
@@ -270,8 +270,8 @@ namespace Temporalio.Workflows
     [GeneratedCode("nexgen", null)]
     internal class SignalWithStartWorkflowResponse
     {
-        public string? RunId { get; init; }
-        public bool? Started { get; init; }
+        public string? RunId { get; set; }
+        public bool? Started { get; set; }
 
         internal static SignalWithStartWorkflowResponse FromTransferType(Temporalio.Api.WorkflowService.V1.SignalWithStartWorkflowExecutionResponse wire)
         {

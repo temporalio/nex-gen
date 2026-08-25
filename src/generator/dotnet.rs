@@ -638,11 +638,7 @@ impl<'a> ApiPlanner<'a> {
             output.push_str(&self.model_field_type(model, field_name, field));
             output.push(' ');
             output.push_str(&field_property_name(field));
-            if field.required {
-                output.push_str(" { get; }\n");
-            } else {
-                output.push_str(" { get; init; }\n");
-            }
+            output.push_str(" { get; set; }\n");
         }
         for (_field_name, field, source_expr) in model.sourced_fields() {
             render_field_xml_doc(output, "    ", field);

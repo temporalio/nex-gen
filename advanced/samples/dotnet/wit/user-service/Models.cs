@@ -18,7 +18,7 @@ namespace Nexgen.UserService
             UserId = userId;
         }
 
-        public string UserId { get; }
+        public string UserId { get; set; }
     }
 
     [GeneratedCode("nexgen", null)]
@@ -30,8 +30,8 @@ namespace Nexgen.UserService
             Email = email;
         }
 
-        public string UserId { get; }
-        public string Email { get; }
+        public string UserId { get; set; }
+        public string Email { get; set; }
     }
 
 }

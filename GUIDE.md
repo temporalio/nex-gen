@@ -681,6 +681,10 @@ public class ActivityOptions
 }
 ```
 
+Generated .NET model properties are mutable. Constructors still initialize
+required fields, while callers and workflow interceptors may modify any field
+before the model is sent.
+
 **TypeScript:**
 
 ```typescript

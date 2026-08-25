@@ -20,15 +20,15 @@ namespace Nexgen.FunctionExecution
             Count = count;
         }
 
-        public string Function { get; }
+        public string Function { get; set; }
         /// <summary>
         /// The name argument for the function.
         /// </summary>
-        public string Name { get; }
+        public string Name { get; set; }
         /// <summary>
         /// The count argument for the function.
         /// </summary>
-        public int Count { get; }
+        public int Count { get; set; }
     }
 
     [GeneratedCode("nexgen", null)]
@@ -39,7 +39,7 @@ namespace Nexgen.FunctionExecution
             Value = value;
         }
 
-        public string Value { get; }
+        public string Value { get; set; }
     }
 
     [GeneratedCode("nexgen", null)]
@@ -52,15 +52,15 @@ namespace Nexgen.FunctionExecution
             Enabled = enabled;
         }
 
-        public string Function { get; }
+        public string Function { get; set; }
         /// <summary>
         /// The name argument for the function.
         /// </summary>
-        public string Name { get; }
+        public string Name { get; set; }
         /// <summary>
         /// The enabled argument for the function.
         /// </summary>
-        public bool Enabled { get; }
+        public bool Enabled { get; set; }
     }
 
     [GeneratedCode("nexgen", null)]
@@ -71,7 +71,7 @@ namespace Nexgen.FunctionExecution
             Value = value;
         }
 
-        public string Value { get; }
+        public string Value { get; set; }
     }
 
     [GeneratedCode("nexgen", null)]
@@ -84,15 +84,15 @@ namespace Nexgen.FunctionExecution
             Enabled = enabled;
         }
 
-        public string Function { get; }
+        public string Function { get; set; }
         /// <summary>
         /// The name argument for the function.
         /// </summary>
-        public string Name { get; }
+        public string Name { get; set; }
         /// <summary>
         /// The enabled argument for the function.
         /// </summary>
-        public bool Enabled { get; }
+        public bool Enabled { get; set; }
     }
 
     [GeneratedCode("nexgen", null)]
@@ -103,7 +103,7 @@ namespace Nexgen.FunctionExecution
             Value = value;
         }
 
-        public string Value { get; }
+        public string Value { get; set; }
     }
 
     [GeneratedCode("nexgen", null)]
@@ -114,11 +114,11 @@ namespace Nexgen.FunctionExecution
             Function = function;
         }
 
-        public string Function { get; }
+        public string Function { get; set; }
         /// <summary>
         /// Arguments for the function.
         /// </summary>
-        public IReadOnlyCollection<string>? Args { get; init; }
+        public IReadOnlyCollection<string>? Args { get; set; }
     }
 
     [GeneratedCode("nexgen", null)]
@@ -129,7 +129,7 @@ namespace Nexgen.FunctionExecution
             Value = value;
         }
 
-        public string Value { get; }
+        public string Value { get; set; }
     }
 
     [GeneratedCode("nexgen", null)]
@@ -140,11 +140,11 @@ namespace Nexgen.FunctionExecution
             Function = function;
         }
 
-        public string Function { get; }
+        public string Function { get; set; }
         /// <summary>
         /// Arguments for the function.
         /// </summary>
-        public IReadOnlyCollection<string>? Args { get; init; }
+        public IReadOnlyCollection<string>? Args { get; set; }
     }
 
     [GeneratedCode("nexgen", null)]
@@ -155,7 +155,7 @@ namespace Nexgen.FunctionExecution
             Value = value;
         }
 
-        public string Value { get; }
+        public string Value { get; set; }
     }
 
 }

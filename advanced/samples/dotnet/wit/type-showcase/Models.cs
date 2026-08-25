@@ -69,8 +69,8 @@ namespace Nexgen.TypeShowcase
             UserId = userId;
         }
 
-        public string UserId { get; }
-        public string? Reason { get; init; }
+        public string UserId { get; set; }
+        public string? Reason { get; set; }
     }
 
     [GeneratedCode("nexgen", null)]
@@ -81,8 +81,8 @@ namespace Nexgen.TypeShowcase
             UserId = userId;
         }
 
-        public string UserId { get; }
-        public string? ConsistencyToken { get; init; }
+        public string UserId { get; set; }
+        public string? ConsistencyToken { get; set; }
     }
 
     [GeneratedCode("nexgen", null)]
@@ -95,10 +95,10 @@ namespace Nexgen.TypeShowcase
             Country = country;
         }
 
-        public string Street { get; }
-        public string City { get; }
-        public string Country { get; }
-        public (double, double)? Coordinates { get; init; }
+        public string Street { get; set; }
+        public string City { get; set; }
+        public string Country { get; set; }
+        public (double, double)? Coordinates { get; set; }
     }
 
     [GeneratedCode("nexgen", null)]
@@ -110,8 +110,8 @@ namespace Nexgen.TypeShowcase
             Report = report;
         }
 
-        public string UserId { get; }
-        public SyncReport Report { get; }
+        public string UserId { get; set; }
+        public SyncReport Report { get; set; }
     }
 
     [GeneratedCode("nexgen", null)]
@@ -123,8 +123,8 @@ namespace Nexgen.TypeShowcase
             DisplayName = displayName;
         }
 
-        public string UserId { get; }
-        public string DisplayName { get; }
+        public string UserId { get; set; }
+        public string DisplayName { get; set; }
     }
 
     [GeneratedCode("nexgen", null)]
@@ -136,8 +136,8 @@ namespace Nexgen.TypeShowcase
             Profile = profile;
         }
 
-        public string UserId { get; }
-        public UserProfile Profile { get; }
+        public string UserId { get; set; }
+        public UserProfile Profile { get; set; }
     }
 
     [GeneratedCode("nexgen", null)]
@@ -150,9 +150,9 @@ namespace Nexgen.TypeShowcase
             RegionStatus = regionStatus;
         }
 
-        public IReadOnlyList<(double, double)> Route { get; }
-        public IReadOnlyList<NexusResult<string, string>> Attempts { get; }
-        public IReadOnlyDictionary<string, NexusResult<string, string>> RegionStatus { get; }
+        public IReadOnlyList<(double, double)> Route { get; set; }
+        public IReadOnlyList<NexusResult<string, string>> Attempts { get; set; }
+        public IReadOnlyDictionary<string, NexusResult<string, string>> RegionStatus { get; set; }
     }
 
     [GeneratedCode("nexgen", null)]
@@ -164,8 +164,8 @@ namespace Nexgen.TypeShowcase
             Email = email;
         }
 
-        public string UserId { get; }
-        public string Email { get; }
+        public string UserId { get; set; }
+        public string Email { get; set; }
     }
 
     [GeneratedCode("nexgen", null)]
@@ -180,12 +180,12 @@ namespace Nexgen.TypeShowcase
             NotificationTarget = notificationTarget;
         }
 
-        public IReadOnlyList<string> Tags { get; }
-        public IReadOnlyDictionary<string, string> Metadata { get; }
-        public UserCapability Capabilities { get; }
-        public NexusResult<string, string> SyncState { get; }
-        public NotificationTarget NotificationTarget { get; }
-        public PostalAddress? Address { get; init; }
+        public IReadOnlyList<string> Tags { get; set; }
+        public IReadOnlyDictionary<string, string> Metadata { get; set; }
+        public UserCapability Capabilities { get; set; }
+        public NexusResult<string, string> SyncState { get; set; }
+        public NotificationTarget NotificationTarget { get; set; }
+        public PostalAddress? Address { get; set; }
     }
 
 }

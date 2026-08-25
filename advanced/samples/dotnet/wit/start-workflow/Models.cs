@@ -21,8 +21,8 @@ namespace Nexgen.StartWorkflowService
             WorkflowExecution = workflowExecution;
         }
 
-        public WorkflowExecution WorkflowExecution { get; }
-        public string? Reason { get; init; }
+        public WorkflowExecution WorkflowExecution { get; set; }
+        public string? Reason { get; set; }
         private string? _namespace;
         public string Namespace
         {
@@ -98,10 +98,10 @@ namespace Nexgen.StartWorkflowService
             TaskQueue = taskQueue;
         }
 
-        public string Workflow { get; }
-        public string WorkflowId { get; }
-        public string TaskQueue { get; }
-        public System.TimeSpan? WorkflowStartDelay { get; init; }
+        public string Workflow { get; set; }
+        public string WorkflowId { get; set; }
+        public string TaskQueue { get; set; }
+        public System.TimeSpan? WorkflowStartDelay { get; set; }
         private string? _namespace;
         public string Namespace
         {
@@ -146,7 +146,7 @@ namespace Nexgen.StartWorkflowService
     [GeneratedCode("nexgen", null)]
     internal class StartWorkflowResult
     {
-        public string? RunId { get; init; }
+        public string? RunId { get; set; }
 
         internal static StartWorkflowResult FromTransferType(Temporalio.Api.WorkflowService.V1.StartWorkflowExecutionResponse wire)
         {
@@ -186,8 +186,8 @@ namespace Nexgen.StartWorkflowService
             WorkflowId = workflowId;
         }
 
-        public string WorkflowId { get; }
-        public string? RunId { get; init; }
+        public string WorkflowId { get; set; }
+        public string? RunId { get; set; }
 
         internal static WorkflowExecution FromTransferType(Temporalio.Api.Common.V1.WorkflowExecution wire)
         {

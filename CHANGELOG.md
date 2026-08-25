@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Generated .NET model properties are mutable, matching Python generated
+  dataclasses and allowing workflow interceptors to modify generated requests
+  before scheduling.
+
 ### Deprecated
 
 ### Breaking Changes

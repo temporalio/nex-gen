@@ -21,10 +21,10 @@ namespace Nexgen.TypeRoundtripService
             RetryPolicy = retryPolicy;
         }
 
-        public string? TaskQueue { get; init; }
-        public Temporalio.Common.RetryPolicy RetryPolicy { get; }
-        public System.TimeSpan? ScheduleToCloseTimeout { get; init; }
-        public Temporalio.Common.Priority? Priority { get; init; }
+        public string? TaskQueue { get; set; }
+        public Temporalio.Common.RetryPolicy RetryPolicy { get; set; }
+        public System.TimeSpan? ScheduleToCloseTimeout { get; set; }
+        public Temporalio.Common.Priority? Priority { get; set; }
 
         internal static ActivityOptions FromTransferType(Temporalio.Api.Activity.V1.ActivityOptions wire)
         {
@@ -70,7 +70,7 @@ namespace Nexgen.TypeRoundtripService
     [GeneratedCode("nexgen", null)]
     public class FailureContainer
     {
-        public System.Exception? Failure { get; init; }
+        public System.Exception? Failure { get; set; }
 
         internal static FailureContainer FromTransferType(Temporalio.Api.Command.V1.FailWorkflowExecutionCommandAttributes wire)
         {

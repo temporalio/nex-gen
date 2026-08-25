@@ -461,18 +461,18 @@ fn dotnet_renders_proto_backed_temporal_types() {
     assert!(rendered.contains("internal SignalWithStartWorkflowRequest(string workflow, string id, string taskQueue, string signal)"));
     assert!(rendered.contains("public string Id { get; set; }\n"));
     assert!(rendered.contains("public string TaskQueue { get; set; }\n"));
-    assert!(rendered.contains("public string Workflow { get; }\n"));
-    assert!(rendered.contains("public string Id { get; }\n"));
-    assert!(rendered.contains("public string TaskQueue { get; }\n"));
-    assert!(rendered.contains("public string Signal { get; }\n"));
+    assert!(rendered.contains("public string Workflow { get; set; }\n"));
+    assert!(rendered.contains("public string Id { get; set; }\n"));
+    assert!(rendered.contains("public string TaskQueue { get; set; }\n"));
+    assert!(rendered.contains("public string Signal { get; set; }\n"));
     assert!(!rendered.contains("default!"));
     assert!(!rendered.contains("required "));
     assert!(rendered.contains("internal class SignalWithStartWorkflowRequest"));
     assert!(!rendered.contains("public class SignalWithStartWorkflowRequest"));
     assert!(rendered.contains("internal class UserMetadata"));
     assert!(!rendered.contains("public class UserMetadata"));
-    assert!(!rendered.contains("IReadOnlyCollection<object?>? Args { get; set; }"));
-    assert!(!rendered.contains("IReadOnlyCollection<object?>? SignalArgs { get; set; }"));
+    assert!(rendered.contains("IReadOnlyCollection<object?>? Args { get; set; }"));
+    assert!(rendered.contains("IReadOnlyCollection<object?>? SignalArgs { get; set; }"));
     assert!(rendered.contains("SignalWithStartWorkflowAsync<TWorkflow, TResult>(Expression<Func<TWorkflow, Task<TResult>>> workflow, Expression<Func<TWorkflow, Task>> signal, SignalWithStartWorkflowOptions options)"));
     assert!(rendered.contains("SignalWithStartWorkflowAsync(string workflow, IReadOnlyCollection<object?>? args, string signal, IReadOnlyCollection<object?>? signalArgs, SignalWithStartWorkflowOptions options)"));
     assert!(rendered.contains("SignalWithStartWorkflowAsync<TWorkflow, TResult>(Expression<Func<TWorkflow, Task<TResult>>> workflow, string signal, IReadOnlyCollection<object?>? signalArgs, SignalWithStartWorkflowOptions options)"));
@@ -537,7 +537,7 @@ fn dotnet_renders_proto_backed_temporal_types() {
     assert!(rendered.contains("ExecutionTimeout = options.ExecutionTimeout"));
     assert!(rendered.contains("proto.RetryPolicy = retryPolicy.ToProto();"));
     assert!(rendered.contains("proto.WorkflowExecutionTimeout = executionTimeout.ToProto();"));
-    assert!(rendered.contains("public IReadOnlyCollection<object?>? Args { get; init; }"));
+    assert!(rendered.contains("public IReadOnlyCollection<object?>? Args { get; set; }"));
     assert!(rendered.contains("proto.Input = Nexgen.Support.ProtoExtensions.ToPayloads(args);"));
     assert!(rendered.contains("Args = args,"));
     assert!(
