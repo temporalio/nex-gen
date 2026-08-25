@@ -1418,7 +1418,16 @@ fn python_standalone_proto_oneof_models_are_exported_and_converted() {
 
     assert!(models.contains("class Outcome(typing.Generic[OutputT]):"));
     assert!(models.contains("\"Outcome[typing.Any]\""));
-    assert!(models.contains("OutcomeValue = ("));
+    assert!(models.contains("output_type, = typing.get_args(type_hint) or (typing.Any,)"));
+    assert!(models.contains(
+        "@dataclasses.dataclass(slots=True)\nclass OutcomeValueSuccess(typing.Generic[OutputT]):\n    value: OutputT"
+    ));
+    assert!(!models.contains("@dataclasses.dataclass(slots=True, init=False)"));
+    assert!(!models.contains("tag: typing.Literal[\"success\"]"));
+    assert!(models.contains("class OutcomeValueFailure:"));
+    assert!(models.contains(
+        "OutcomeValue = (\n    OutcomeValueSuccess[OutputT]\n    | OutcomeValueFailure\n)"
+    ));
     assert!(models.contains("    value: OutcomeValue[OutputT]\n"));
     assert!(!models.contains("value: OutcomeValue[OutputT] | None"));
     assert!(!models.contains("class Failure:"));
@@ -1428,17 +1437,23 @@ fn python_standalone_proto_oneof_models_are_exported_and_converted() {
         "if _oneof_value_case is None:\n            raise ValueError(\"missing required field Outcome.value\")"
     ));
     assert!(models.contains(
-        "_oneof_value = (\"success\", payloads_from_proto(value.success, [output_type])[0])"
+        "_oneof_value = OutcomeValueSuccess(payloads_from_proto(value.success, [output_type])[0])"
     ));
-    assert!(models.contains("_oneof_value = (\"failure\", failure_from_proto(value.failure))"));
-    assert!(models.contains("if value.value[0] == \"success\":"));
+    assert!(
+        models.contains("_oneof_value = OutcomeValueFailure(failure_from_proto(value.failure))")
+    );
+    assert!(models.contains("if isinstance(_oneof_value_value, OutcomeValueSuccess):"));
     assert!(models.contains(
-        "if value.value is None:\n            raise ValueError(\"missing required field Outcome.value\")"
+        "if runtime_value.value is None:\n            raise ValueError(\"missing required field Outcome.value\")"
     ));
-    assert!(models.contains("message.success.CopyFrom(payloads_to_proto([value.value[1]]))"));
-    assert!(models.contains("elif value.value[0] == \"failure\":"));
-    assert!(models.contains("message.failure.CopyFrom(failure_to_proto(value.value[1]))"));
-    assert!(models.contains("raise ValueError(f\"unknown protobuf oneof tag Outcome.value:"));
+    assert!(
+        models.contains("message.success.CopyFrom(payloads_to_proto([_oneof_value_value.value]))")
+    );
+    assert!(models.contains("elif isinstance(_oneof_value_value, OutcomeValueFailure):"));
+    assert!(
+        models.contains("message.failure.CopyFrom(failure_to_proto(_oneof_value_value.value))")
+    );
+    assert!(models.contains("unsupported variant case Outcome.value:"));
     assert!(models.contains("class PauseActivityRequest:"));
     assert!(models.contains("namespace: str"));
     assert!(models.contains("execution: WorkflowExecution | None = None"));
@@ -1452,7 +1467,70 @@ fn python_standalone_proto_oneof_models_are_exported_and_converted() {
         models.contains("if _oneof_activity_case is None:\n            _oneof_activity = None")
     );
     assert!(package_init.contains("ActivitySelection,"));
+    assert!(package_init.contains("ActivitySelectionId,"));
+    assert!(package_init.contains("ActivitySelectionType,"));
+    assert!(package_init.contains("OutcomeValue,"));
+    assert!(package_init.contains("OutcomeValueSuccess,"));
+    assert!(package_init.contains("OutcomeValueFailure,"));
     assert!(package_init.contains("PauseActivityRequest,"));
+}
+
+#[test]
+fn python_non_proto_variants_remain_tagged_tuples_without_transfer_converters() {
+    let root = project_root();
+    let package = generate_python_package_files(
+        &example_input_paths(&root, "type-showcase"),
+        &[descriptor_path(&root)],
+    );
+    let models = package
+        .get(&PathBuf::from("models.py"))
+        .expect("type showcase should include models.py");
+    let resource = package
+        .get(&PathBuf::from("_resources/user.py"))
+        .expect("type showcase should include the User resource module");
+
+    assert!(models.contains(
+        "NotificationTarget = (\n    tuple[typing.Literal[\"email\"], str]\n    | tuple[typing.Literal[\"sms\"], str]\n    | tuple[typing.Literal[\"none\"]]\n)"
+    ));
+    assert!(!models.contains("class NotificationTargetEmail"));
+    assert!(!models.contains("TransferTypeConverter"));
+    assert!(!resource.contains("TransferTypeConverter"));
+}
+
+#[test]
+fn python_rejects_proto_variant_case_class_name_collisions() {
+    let root = project_root();
+    let temp_dir = unique_output_path("python-proto-variant-case-collision");
+    fs::create_dir_all(&temp_dir).unwrap();
+    let collision_path = temp_dir.join("collision.wit");
+    let fixture = fs::read_to_string(input_path(&root, "proto-oneof")).unwrap();
+    let fixture = fixture.strip_suffix("}\n").unwrap();
+    fs::write(
+        &collision_path,
+        format!("{fixture}  record outcome-value-success {{\n    value: string,\n  }}\n}}\n"),
+    )
+    .unwrap();
+    let spec = nexgen::parser::load_api_spec_from_wit_for_language_with_inputs(
+        nexgen::language::Language::Python,
+        &[collision_path, linked_inputs_path(&root)],
+    )
+    .unwrap();
+    let descriptors = nexgen::descriptors::DescriptorIndex::load(&descriptor_path(&root)).unwrap();
+
+    let error = generate_source(
+        nexgen::language::Language::Python,
+        spec,
+        &descriptors,
+        &SupportFiles::default(),
+    )
+    .unwrap_err();
+
+    assert!(
+        error
+            .to_string()
+            .contains("Python generated name `OutcomeValueSuccess`")
+    );
+    fs::remove_dir_all(temp_dir).unwrap();
 }
 
 #[test]

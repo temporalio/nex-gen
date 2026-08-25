@@ -1413,8 +1413,23 @@ mod tests {
                 .map(|proto| proto.full_name.as_str()),
             Some("temporal.api.update.v1.Outcome")
         );
+        let variant = plan
+            .variant("outcome.outcome-value")
+            .expect("oneof variant should be planned");
+        let Some(source) = &variant.source else {
+            panic!("oneof variant should retain its protobuf source");
+        };
+        let ExternalTypeSpec::Proto(PlannedProtoType::Message(message)) = &source.external_type
+        else {
+            panic!("oneof variant source should resolve to a protobuf message");
+        };
+        assert_eq!(message.proto.full_name, "temporal.api.update.v1.Outcome");
         let field = record.fields.get("value").expect("grouped field");
-        assert!(matches!(field.field_type, PlannedType::Variant(_)));
+        assert!(
+            matches!(field.field_type, PlannedType::Variant(_)),
+            "{:#?}",
+            field.field_type
+        );
         assert_eq!(field.data.has_presence, Some(true));
         let Some(super::PlannedWireFieldBinding::VariantMembers { wire_name, members }) =
             &field.data.wire_binding

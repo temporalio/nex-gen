@@ -1524,7 +1524,10 @@ fn resolve_authored_field_type_spec(
                     full_name: wit_type_full_name(resolve, *id),
                 }));
             }
-            if let Some(proto_name) = find_proto_name_for_type_def(type_def, path, &type_context)? {
+            if !matches!(type_def.kind, TypeDefKind::Variant(_))
+                && let Some(proto_name) =
+                    find_proto_name_for_type_def(type_def, path, &type_context)?
+            {
                 if let Some(resource_name) =
                     find_owned_resource_name_for_type_def(resolve, type_def)
                     && directive(&directives, "type", path, &type_context)?.is_none()

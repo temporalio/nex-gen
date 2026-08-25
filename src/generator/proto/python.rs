@@ -1,14 +1,13 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use heck::{ToSnakeCase, ToUpperCamelCase};
 
 use crate::error::{Error, Result};
 use crate::generator::ExternalModelBackend;
 use crate::generator::python::{
-    PythonExternalModelPlan, PythonExternalVariantCasePlan, PythonExternalVariantPlan,
     PythonFieldDefaultKind, PythonGeneratedName, PythonImports, RenderedField, RenderedModel,
-    RenderedModelFragments, RenderedRecordWireBlock, RenderedVariant, RenderedVariantBlock,
-    ResolvedFieldKind, ResolvedFieldType, WireValueConversion, python_authored_type_annotation,
+    RenderedModelFragments, RenderedRecordWireBlock, RenderedVariant, ResolvedFieldKind,
+    ResolvedFieldType, RootPackageImports, WireValueConversion, python_authored_type_annotation,
     python_string_literal,
 };
 use crate::language::Language;
@@ -62,13 +61,16 @@ struct ProtoField {
 }
 
 #[derive(Debug, Default)]
-pub(in crate::generator) struct ModelBackend;
+pub(in crate::generator) struct ModelBackend {
+    variant_names: BTreeSet<String>,
+}
 
 impl ExternalModelBackend for ModelBackend {
     type ModelFragments = RenderedModelFragments;
     type WireConversion = WireValueConversion;
 
-    fn prepare(&mut self, _api_plan: &PlannedSpec) -> Result<()> {
+    fn prepare(&mut self, api_plan: &PlannedSpec) -> Result<()> {
+        self.variant_names = oneof_variant_names(api_plan);
         Ok(())
     }
 
@@ -119,74 +121,28 @@ impl ExternalModelBackend for ModelBackend {
 
 fn oneof_variant_names(api_plan: &PlannedSpec) -> BTreeSet<String> {
     api_plan
-        .records()
-        .filter(|(_, record)| record.data.proto.is_some())
-        .flat_map(|(_, record)| record.fields.values())
-        .filter(|field| {
-            matches!(
-                field.data.wire_binding,
-                Some(PlannedWireFieldBinding::VariantMembers { .. })
-            )
-        })
-        .filter_map(
-            |field| match field.field_type.without_option().validation_type() {
-                PlannedType::Variant(variant) => Some(variant.full_name.clone()),
-                _ => None,
-            },
-        )
-        .collect()
-}
-
-pub(in crate::generator) fn external_model_plan(api_plan: &PlannedSpec) -> PythonExternalModelPlan {
-    let variant_names = oneof_variant_names(api_plan);
-    let mut plan = PythonExternalModelPlan::default();
-    for (full_name, variant) in api_plan
         .variants()
-        .filter(|(full_name, _)| variant_names.contains(*full_name))
-    {
-        plan.insert_variant(
-            full_name.to_string(),
-            PythonExternalVariantPlan {
-                cases: variant
-                    .cases
-                    .iter()
-                    .map(|case| PythonExternalVariantCasePlan {
-                        case_name: case.name.clone(),
-                        generated_name: PythonGeneratedName {
-                            name: variant_case_class_name(&variant.name, &case.name),
-                            generated_by: format!("variant case `{full_name}.{}`", case.name),
-                        },
-                    })
-                    .collect(),
-            },
-        );
-    }
-    plan
+        .filter(|(_, variant)| {
+            variant
+                .source
+                .as_ref()
+                .is_some_and(|source| matches!(&source.external_type, ExternalTypeSpec::Proto(_)))
+        })
+        .map(|(full_name, _)| full_name.to_string())
+        .collect()
 }
 
 fn variant_case_class_name(variant_name: &str, case_name: &str) -> String {
     format!("{variant_name}{}", case_name.to_upper_camel_case())
 }
 
-fn render_oneof_variant_block(
-    variant: &RenderedVariant,
-    variant_plan: &PythonExternalVariantPlan,
-) -> RenderedVariantBlock {
-    let companion_names = variant_plan
-        .cases
-        .iter()
-        .map(|case| case.generated_name.name.clone())
-        .collect::<Vec<_>>();
+fn render_oneof_variant_body(variant: &RenderedVariant) -> String {
     let mut body = String::new();
     for case in &variant.cases {
-        let class_name = &variant_plan
-            .case(&case.name)
-            .expect("planned external variant case should exist")
-            .generated_name
-            .name;
+        let class_name = variant_case_class_name(&variant.name, &case.name);
         body.push_str("@dataclasses.dataclass(slots=True)\n");
         body.push_str("class ");
-        body.push_str(class_name);
+        body.push_str(&class_name);
         if !case.type_parameters.is_empty() {
             body.push_str("(typing.Generic[");
             body.push_str(&case.type_parameters.join(", "));
@@ -207,24 +163,17 @@ fn render_oneof_variant_block(
     body.push_str(" = ");
     if variant.cases.is_empty() {
         body.push_str("typing.Never\n");
-        return RenderedVariantBlock {
-            body,
-            companion_names,
-        };
+        return body;
     }
     if variant.cases.len() > 1 {
         body.push_str("(\n    ");
     }
     for (index, case) in variant.cases.iter().enumerate() {
-        let class_name = &variant_plan
-            .case(&case.name)
-            .expect("planned external variant case should exist")
-            .generated_name
-            .name;
+        let class_name = variant_case_class_name(&variant.name, &case.name);
         if index > 0 {
             body.push_str("\n    | ");
         }
-        body.push_str(class_name);
+        body.push_str(&class_name);
         if !case.type_parameters.is_empty() {
             body.push('[');
             body.push_str(&case.type_parameters.join(", "));
@@ -235,15 +184,11 @@ fn render_oneof_variant_block(
         body.push_str("\n)");
     }
     body.push('\n');
-    RenderedVariantBlock {
-        body,
-        companion_names,
-    }
+    body
 }
 
 fn build_oneof(
     api_plan: &PlannedSpec,
-    external_model_plan: &PythonExternalModelPlan,
     message_name: &str,
     field: &RecordFieldSpec<PlannedFamily>,
     wire_name: &str,
@@ -293,19 +238,7 @@ fn build_oneof(
                 property: "type",
                 reason: format!("planned variant case `{}` has no payload", case.name),
             })?;
-        let class_name = external_model_plan
-            .variant(&variant.full_name)
-            .and_then(|variant| variant.case(&case.name))
-            .map(|case| case.generated_name.name.clone())
-            .ok_or_else(|| Error::InvalidTypeOverrideField {
-                message: message_name.to_string(),
-                field: wire_name.to_string(),
-                property: "type",
-                reason: format!(
-                    "Python external model plan is missing variant case `{}.{}`",
-                    variant.full_name, case.name
-                ),
-            })?;
+        let class_name = variant_case_class_name(&variant.name, &case.name);
         cases.push(ProtoOneofCase {
             class_name,
             proto_name: member.wire_name.clone(),
@@ -337,7 +270,6 @@ fn proto_generic_carrier(wire_type: &PlannedType) -> Option<ProtoGenericCarrier>
 impl ModelBackend {
     fn analyze_field(
         api_plan: &PlannedSpec,
-        external_model_plan: &PythonExternalModelPlan,
         record: &RecordSpec<PlannedFamily>,
         field: &RecordFieldSpec<PlannedFamily>,
         resolve_type: &impl Fn(&PlannedType) -> Result<ResolvedFieldType>,
@@ -357,7 +289,6 @@ impl ModelBackend {
             (Some(proto), Some(PlannedWireFieldBinding::VariantMembers { wire_name, members })) => {
                 Some(build_oneof(
                     api_plan,
-                    external_model_plan,
                     &proto.full_name,
                     field,
                     wire_name,
@@ -376,26 +307,93 @@ impl ModelBackend {
     pub(in crate::generator) fn render_record_wire_block(
         &self,
         api_plan: &PlannedSpec,
-        external_model_plan: &PythonExternalModelPlan,
         model: &RenderedModel,
         planned_model: &RecordSpec<PlannedFamily>,
         resolve_type: &impl Fn(&PlannedType) -> Result<ResolvedFieldType>,
     ) -> Result<Option<RenderedRecordWireBlock>> {
-        render_record_wire_block(
-            api_plan,
-            external_model_plan,
-            model,
-            planned_model,
-            resolve_type,
-        )
+        render_record_wire_block(api_plan, model, planned_model, resolve_type)
     }
 
-    pub(in crate::generator) fn render_variant_block(
+    pub(in crate::generator) fn owns_variant(&self, full_name: &str) -> bool {
+        self.variant_names.contains(full_name)
+    }
+
+    pub(in crate::generator) fn render_variant_models(
         &self,
-        variant: &RenderedVariant,
-        variant_plan: &PythonExternalVariantPlan,
-    ) -> RenderedVariantBlock {
-        render_oneof_variant_block(variant, variant_plan)
+        api_plan: &PlannedSpec,
+        variants: &[&RenderedVariant],
+        declared_type_parameters: &BTreeSet<String>,
+    ) -> RenderedModelFragments {
+        let variants = variants
+            .iter()
+            .copied()
+            .filter(|variant| self.owns_variant(&variant.full_name))
+            .collect::<Vec<_>>();
+        if variants.is_empty() {
+            return RenderedModelFragments::default();
+        }
+
+        let type_parameters = variants
+            .iter()
+            .flat_map(|variant| variant.type_parameters.iter())
+            .filter(|parameter| !declared_type_parameters.contains(parameter.as_str()))
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        let mut body = String::new();
+        for parameter in &type_parameters {
+            body.push_str(parameter);
+            body.push_str(" = typing.TypeVar(");
+            body.push_str(&python_string_literal(parameter));
+            body.push_str(")\n");
+        }
+        if !type_parameters.is_empty() {
+            body.push_str("\n\n");
+        }
+
+        let mut exported_names = BTreeSet::new();
+        let mut module_exported_names = BTreeSet::new();
+        let mut generated_names = Vec::new();
+        let mut export_sort_keys = BTreeMap::new();
+        for (variant_index, variant) in variants.iter().enumerate() {
+            if variant_index > 0 {
+                body.push_str("\n\n");
+            }
+            body.push_str(&render_oneof_variant_body(variant));
+            exported_names.insert(variant.name.clone());
+            export_sort_keys.insert(variant.name.clone(), (variant.name.clone(), 0));
+            let module_export = api_plan
+                .types
+                .get(&variant.full_name)
+                .is_some_and(|entry| entry.is_module_export());
+            if module_export {
+                module_exported_names.insert(variant.name.clone());
+            }
+            for (case_index, case) in variant.cases.iter().enumerate() {
+                let name = variant_case_class_name(&variant.name, &case.name);
+                exported_names.insert(name.clone());
+                export_sort_keys.insert(name.clone(), (variant.name.clone(), case_index + 1));
+                generated_names.push(PythonGeneratedName {
+                    name: name.clone(),
+                    generated_by: format!("variant case `{}.{}`", variant.full_name, case.name),
+                });
+                if module_export {
+                    module_exported_names.insert(name);
+                }
+            }
+        }
+
+        RenderedModelFragments {
+            body,
+            post_model_statements: String::new(),
+            module_imports: BTreeSet::from(["dataclasses".to_string(), "typing".to_string()]),
+            relative_imports: BTreeMap::new(),
+            root_package_imports: RootPackageImports::new(),
+            exported_names,
+            module_exported_names,
+            generated_names,
+            export_sort_keys,
+            allows_private_wire_access: false,
+        }
     }
 
     pub(in crate::generator) fn service_wire_model_ref(
@@ -1068,7 +1066,6 @@ pub(crate) fn python_replacement_type_name(replacement: &TypeReplacementSpec) ->
 
 fn render_record_wire_block(
     api_plan: &PlannedSpec,
-    external_model_plan: &PythonExternalModelPlan,
     model: &RenderedModel,
     planned_model: &RecordSpec<PlannedFamily>,
     resolve_type: &impl Fn(&PlannedType) -> Result<ResolvedFieldType>,
@@ -1080,15 +1077,7 @@ fn render_record_wire_block(
         .fields
         .values()
         .filter(|field| field.visibility != crate::spec::RecordFieldVisibility::Omitted)
-        .map(|field| {
-            ModelBackend::analyze_field(
-                api_plan,
-                external_model_plan,
-                planned_model,
-                field,
-                resolve_type,
-            )
-        })
+        .map(|field| ModelBackend::analyze_field(api_plan, planned_model, field, resolve_type))
         .collect::<Result<Vec<_>>>()?;
     let type_arguments = runtime_type_arguments(model);
     let converter_model_annotation = if model.type_parameters.is_empty() {

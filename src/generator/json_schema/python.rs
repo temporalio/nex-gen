@@ -774,6 +774,9 @@ pub(in crate::generator) fn render_external_models(
             .iter()
             .map(|model| model.model_name.clone())
             .collect(),
+        module_exported_names: BTreeSet::new(),
+        generated_names: Vec::new(),
+        export_sort_keys: BTreeMap::new(),
         allows_private_wire_access: false,
     })
 }

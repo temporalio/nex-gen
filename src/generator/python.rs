@@ -39,6 +39,7 @@ pub(in crate::generator) type RootPackageImports = BTreeMap<String, BTreeSet<Str
 struct PythonGenerationResult {
     generated_files: GeneratedFiles,
     root_package_imports: RootPackageImports,
+    exported_names: BTreeSet<String>,
 }
 
 pub(crate) fn generate(
@@ -94,8 +95,9 @@ fn generate_tree(
     for (path, contents) in model_hoists.files() {
         insert_generated_file(&mut files, path.clone(), contents.clone())?;
     }
-    for node in branch.children.values() {
-        generate_tree_node(
+    let mut child_exports = BTreeMap::new();
+    for (name, node) in &branch.children {
+        let exported_names = generate_tree_node(
             node,
             support,
             mode,
@@ -104,12 +106,13 @@ fn generate_tree(
             &mut warnings,
             &mut root_package_imports,
         )?;
+        child_exports.insert(name.clone(), exported_names);
     }
     insert_branch_index_file(
         &mut files,
         branch,
         &model_hoists,
-        mode,
+        &child_exports,
         &root_package_imports,
     )?;
     Ok(GeneratedFiles {
@@ -127,7 +130,7 @@ fn generate_tree_node(
     files: &mut BTreeMap<PathBuf, String>,
     warnings: &mut Vec<String>,
     root_package_imports: &mut RootPackageImports,
-) -> Result<()> {
+) -> Result<BTreeSet<String>> {
     match node {
         ApiSpecNode::Leaf(leaf) => {
             let support_fragments = support_fragments_for_plan(&leaf.spec, support);
@@ -143,18 +146,12 @@ fn generate_tree_node(
             for (path, contents) in generated.generated_files.files {
                 insert_generated_file(files, prefix.join(path), contents)?;
             }
-            Ok(())
+            Ok(generated.exported_names)
         }
         ApiSpecNode::Branch(branch) => {
-            insert_branch_index_file(
-                files,
-                branch,
-                model_hoists,
-                mode,
-                &RootPackageImports::new(),
-            )?;
-            for node in branch.children.values() {
-                generate_tree_node(
+            let mut child_exports = BTreeMap::new();
+            for (name, node) in &branch.children {
+                let exported_names = generate_tree_node(
                     node,
                     support,
                     mode,
@@ -163,8 +160,16 @@ fn generate_tree_node(
                     warnings,
                     root_package_imports,
                 )?;
+                child_exports.insert(name.clone(), exported_names);
             }
-            Ok(())
+            insert_branch_index_file(
+                files,
+                branch,
+                model_hoists,
+                &child_exports,
+                &RootPackageImports::new(),
+            )?;
+            Ok(child_exports.into_values().flatten().collect())
         }
     }
 }
@@ -195,7 +200,7 @@ fn insert_branch_index_file(
     files: &mut BTreeMap<PathBuf, String>,
     branch: &ApiSpecBranch<PlannedFamily>,
     model_hoists: &PythonModelHoists,
-    mode: GenerationMode,
+    child_exports: &BTreeMap<String, BTreeSet<String>>,
     root_package_imports: &RootPackageImports,
 ) -> Result<()> {
     let mut path = branch.module_path.to_path_buf();
@@ -207,9 +212,13 @@ fn insert_branch_index_file(
         render_root_package_imports(&mut contents, root_package_imports);
         wrote_import = true;
     }
-    for (name, node) in &branch.children {
+    for name in branch.children.keys() {
         let module_name = name.replace('-', "_");
-        let names = node_export_names(node, model_hoists, mode)
+        let names = child_exports
+            .get(name)
+            .into_iter()
+            .flatten()
+            .cloned()
             .into_iter()
             .collect::<Vec<_>>();
         if names.is_empty() {
@@ -232,7 +241,13 @@ fn insert_branch_index_file(
                 .collect::<Vec<_>>(),
         );
     }
-    let mut export_names = branch_export_names(branch, model_hoists, mode);
+    let mut export_names = child_exports
+        .values()
+        .flat_map(|names| names.iter().cloned())
+        .collect::<BTreeSet<_>>();
+    if branch.module_path.is_root() {
+        export_names.extend(model_hoists.exported_names().iter().cloned());
+    }
     export_names.extend(root_package_export_names(root_package_imports));
     if !export_names.is_empty() {
         contents.push_str("\n__all__ = [\n");
@@ -246,127 +261,8 @@ fn insert_branch_index_file(
     insert_generated_file(files, path, contents)
 }
 
-fn node_export_names(
-    node: &ApiSpecNode<PlannedFamily>,
-    model_hoists: &PythonModelHoists,
-    mode: GenerationMode,
-) -> BTreeSet<String> {
-    match node {
-        ApiSpecNode::Leaf(leaf) => leaf_export_names(&leaf.spec, model_hoists, mode),
-        ApiSpecNode::Branch(branch) => branch_export_names(branch, model_hoists, mode),
-    }
-}
-
-fn branch_export_names(
-    branch: &ApiSpecBranch<PlannedFamily>,
-    model_hoists: &PythonModelHoists,
-    mode: GenerationMode,
-) -> BTreeSet<String> {
-    let mut names = BTreeSet::new();
-    for node in branch.children.values() {
-        match node {
-            ApiSpecNode::Leaf(leaf) => {
-                names.extend(leaf_export_names(&leaf.spec, model_hoists, mode));
-            }
-            ApiSpecNode::Branch(branch) => {
-                names.extend(branch_export_names(branch, model_hoists, mode));
-            }
-        }
-    }
-    if branch.module_path.is_root() {
-        names.extend(model_hoists.exported_names().iter().cloned());
-    }
-    names
-}
-
-fn leaf_export_names(
-    plan: &PlannedSpec,
-    model_hoists: &PythonModelHoists,
-    mode: GenerationMode,
-) -> BTreeSet<String> {
-    let external_model_plan = PythonExternalModels::build_plan(plan);
-    let mut model_names = plan
-        .enums()
-        .map(|(_, enumeration)| enumeration.name.clone())
-        .chain(plan.flags().map(|(_, flag_set)| flag_set.name.clone()))
-        .chain(plan.variants().flat_map(|(full_name, variant)| {
-            let mut names = vec![variant.name.clone()];
-            if let Some(variant_plan) = external_model_plan.variant(full_name) {
-                names.extend(
-                    variant_plan
-                        .cases
-                        .iter()
-                        .map(|case| case.generated_name.name.clone()),
-                );
-            }
-            names
-        }))
-        .chain(plan.external_types().filter_map(|(_, binding)| {
-            let Some(json_type) = binding.json_model() else {
-                return None;
-            };
-            if model_hoists.is_hoisted(&plan.module_path, &json_type.model_name) {
-                return None;
-            }
-            Some(json_type.model_name.clone())
-        }))
-        .collect::<BTreeSet<_>>();
-    model_names.extend(planned_module_export_model_names(
-        plan,
-        &external_model_plan,
-    ));
-
-    match mode {
-        GenerationMode::DefinitionsOnly => {
-            model_names.extend(plan.services.iter().map(|service| {
-                service
-                    .code_name
-                    .for_language(Language::Python)
-                    .map(str::to_string)
-                    .unwrap_or_else(|| service.name.clone())
-            }));
-            model_names
-        }
-        GenerationMode::NativeApi => {
-            model_names.extend(
-                plan.services
-                    .iter()
-                    .filter(|service| service.endpoint.is_none())
-                    .map(|service| {
-                        format!(
-                            "{}Client",
-                            service
-                                .code_name
-                                .for_language(Language::Python)
-                                .unwrap_or(&service.name)
-                        )
-                    }),
-            );
-            model_names.extend(
-                plan.services
-                    .iter()
-                    .filter(|service| service.endpoint.is_some())
-                    .flat_map(|service| {
-                        service.operations.iter().map(|operation| {
-                            operation
-                                .code_name
-                                .for_language(Language::Python)
-                                .map(str::to_string)
-                                .unwrap_or_else(|| python_ident(&operation.name.to_snake_case()))
-                        })
-                    }),
-            );
-            model_names
-        }
-    }
-}
-
-fn planned_module_export_model_names(
-    plan: &PlannedSpec,
-    external_model_plan: &PythonExternalModelPlan,
-) -> BTreeSet<String> {
-    let mut names = plan
-        .types
+fn planned_module_export_model_names(plan: &PlannedSpec) -> BTreeSet<String> {
+    plan.types
         .values()
         .filter(|entry| entry.is_module_export())
         .filter_map(|entry| match &entry.declaration {
@@ -376,28 +272,7 @@ fn planned_module_export_model_names(
             TypeDeclSpec::Variant(variant) => Some(variant.name.clone()),
             TypeDeclSpec::External(_) => None,
         })
-        .collect::<BTreeSet<_>>();
-    for variant in plan.types.values().filter_map(|entry| {
-        if !entry.is_module_export() {
-            return None;
-        }
-        let TypeDeclSpec::Variant(variant) = &entry.declaration else {
-            return None;
-        };
-        external_model_plan
-            .variant(&variant.full_name)
-            .is_some()
-            .then_some(variant)
-    }) {
-        names.extend(
-            external_model_plan
-                .variant(&variant.full_name)
-                .into_iter()
-                .flat_map(|variant| &variant.cases)
-                .map(|case| case.generated_name.name.clone()),
-        );
-    }
-    names
+        .collect()
 }
 
 fn support_fragments_for_plan(
@@ -427,16 +302,11 @@ struct ApiPlanner<'a> {
 
 #[derive(Debug, Default)]
 struct PythonExternalModels {
-    plan: PythonExternalModelPlan,
     proto: python_proto::ModelBackend,
     json: python_json::ModelBackend,
 }
 
 impl PythonExternalModels {
-    fn build_plan(api_plan: &PlannedSpec) -> PythonExternalModelPlan {
-        python_proto::external_model_plan(api_plan)
-    }
-
     fn new(api_plan: &PlannedSpec) -> Result<Self> {
         let mut this = Self::default();
         this.prepare(api_plan)?;
@@ -445,7 +315,6 @@ impl PythonExternalModels {
 
     fn new_with_hoists(api_plan: &PlannedSpec, hoists: &PythonModelHoists) -> Result<Self> {
         let mut this = Self::default();
-        this.plan = Self::build_plan(api_plan);
         this.proto.prepare(api_plan)?;
         this.json.prepare_with_hoists(api_plan, hoists)?;
         Ok(this)
@@ -454,12 +323,23 @@ impl PythonExternalModels {
     fn render_model_fragments(
         &self,
         models: &[&RenderedModel],
+        variants: &[&RenderedVariant],
         api_plan: &PlannedSpec,
     ) -> Result<RenderedModelFragments> {
         let mut fragments = RenderedModelFragments::default();
         fragments.extend(render_record_models(models, api_plan, self)?);
         fragments.extend(self.json.render_models()?);
+        let declared_type_parameters = rendered_type_parameters(&fragments.body);
+        fragments.extend(self.proto.render_variant_models(
+            api_plan,
+            variants,
+            &declared_type_parameters,
+        ));
         Ok(fragments)
+    }
+
+    fn owns_variant(&self, full_name: &str) -> bool {
+        self.proto.owns_variant(full_name)
     }
 
     fn render_support_files(&self) -> Result<BTreeMap<PathBuf, String>> {
@@ -539,22 +419,10 @@ impl PythonExternalModels {
         model: &RenderedModel,
         planned_model: &RecordSpec<PlannedFamily>,
     ) -> Result<Option<RenderedRecordWireBlock>> {
-        self.proto.render_record_wire_block(
-            api_plan,
-            &self.plan,
-            model,
-            planned_model,
-            &|value_type| resolve_python_value_type(api_plan, self, value_type),
-        )
-    }
-
-    fn render_variant_block(
-        &self,
-        full_name: &str,
-        variant: &RenderedVariant,
-    ) -> Option<RenderedVariantBlock> {
-        let variant_plan = self.plan.variant(full_name)?;
-        Some(self.proto.render_variant_block(variant, variant_plan))
+        self.proto
+            .render_record_wire_block(api_plan, model, planned_model, &|value_type| {
+                resolve_python_value_type(api_plan, self, value_type)
+            })
     }
 }
 
@@ -563,7 +431,6 @@ impl ExternalModelBackend for PythonExternalModels {
     type WireConversion = WireValueConversion;
 
     fn prepare(&mut self, api_plan: &PlannedSpec) -> Result<()> {
-        self.plan = Self::build_plan(api_plan);
         self.proto.prepare(api_plan)?;
         self.json.prepare(api_plan)
     }
@@ -627,7 +494,6 @@ impl<'a> ApiPlanner<'a> {
         } else {
             PythonExternalModels::new(api_plan)?
         };
-        validate_python_generated_names(api_plan, external_models.plan.generated_names())?;
         Ok(Self {
             api_plan,
             inline_model_rebuilds,
@@ -694,19 +560,27 @@ impl<'a> ApiPlanner<'a> {
             self.resolve_message_value_conversion(&model_type)?;
         }
         let model_refs = self.models.values().collect::<Vec<_>>();
-        let model_fragments = self.render_model_fragments(model_refs.as_slice())?;
+        let variant_refs = self.variants.values().collect::<Vec<_>>();
+        let model_fragments =
+            self.render_model_fragments(model_refs.as_slice(), variant_refs.as_slice())?;
+        validate_python_generated_names(self.api_plan, &model_fragments.generated_names)?;
 
-        let generated_files =
+        let (generated_files, exported_names) =
             self.render_package(&model_fragments, &services, support_fragments, mode)?;
         Ok(PythonGenerationResult {
             generated_files,
             root_package_imports: model_fragments.root_package_imports,
+            exported_names,
         })
     }
 
-    fn render_model_fragments(&self, models: &[&RenderedModel]) -> Result<RenderedModelFragments> {
+    fn render_model_fragments(
+        &self,
+        models: &[&RenderedModel],
+        variants: &[&RenderedVariant],
+    ) -> Result<RenderedModelFragments> {
         self.external_models
-            .render_model_fragments(models, self.api_plan)
+            .render_model_fragments(models, variants, self.api_plan)
     }
 
     fn render_package(
@@ -715,27 +589,29 @@ impl<'a> ApiPlanner<'a> {
         services: &[RenderedService<'_>],
         support_fragments: &[SupportFragmentSpec],
         mode: GenerationMode,
-    ) -> Result<GeneratedFiles> {
+    ) -> Result<(GeneratedFiles, BTreeSet<String>)> {
         let mut files = BTreeMap::new();
         render_support_package(&mut files, support_fragments)?;
         for (path, contents) in self.external_models.render_support_files()? {
             insert_generated_file(&mut files, path, contents)?;
         }
+        let variants = self
+            .variants
+            .iter()
+            .filter(|(full_name, _)| !self.external_models.owns_variant(full_name))
+            .map(|(_, variant)| variant)
+            .collect::<Vec<_>>();
         let mut model_names = self
             .enums
             .values()
             .map(|enumeration| enumeration.name.clone())
             .chain(self.flags.values().map(|flag_set| flag_set.name.clone()))
-            .chain(
-                self.variants
-                    .values()
-                    .flat_map(RenderedVariant::exported_names),
-            )
+            .chain(variants.iter().map(|variant| variant.name.clone()))
             .chain(model_fragments.exported_names.iter().cloned())
             .collect::<BTreeSet<_>>()
             .into_iter()
             .collect::<Vec<_>>();
-        sort_python_model_names(&mut model_names, &self.variants);
+        sort_python_model_names(&mut model_names, &self.variants, model_fragments);
         let operation_model_names = model_names
             .iter()
             .cloned()
@@ -772,12 +648,18 @@ impl<'a> ApiPlanner<'a> {
             BTreeSet::new()
         };
         package_model_names.extend(
-            planned_module_export_model_names(self.api_plan, &self.external_models.plan)
+            planned_module_export_model_names(self.api_plan)
+                .intersection(&rendered_model_names)
+                .cloned(),
+        );
+        package_model_names.extend(
+            model_fragments
+                .module_exported_names
                 .intersection(&rendered_model_names)
                 .cloned(),
         );
         let mut package_model_names = package_model_names.into_iter().collect::<Vec<_>>();
-        sort_python_model_names(&mut package_model_names, &self.variants);
+        sort_python_model_names(&mut package_model_names, &self.variants, model_fragments);
         let render_init = |root_package_imports: &RootPackageImports| {
             if mode == GenerationMode::NativeApi {
                 render_package_init(
@@ -800,19 +682,27 @@ impl<'a> ApiPlanner<'a> {
         } else {
             &empty_root_package_imports
         };
+        let exported_names = package_export_names(
+            mode,
+            services,
+            if mode == GenerationMode::NativeApi {
+                &package_model_names
+            } else {
+                &model_names
+            },
+            root_package_imports,
+        );
         insert_generated_file(&mut files, "__init__.py", render_init(root_package_imports))?;
         // A module that declares nothing emits no models file. Emitting the file
         // anyway leaves a header and unused imports behind.
         if let Some(models_source) = render_models_module(
             self.enums.values().collect::<Vec<_>>().as_slice(),
             self.flags.values().collect::<Vec<_>>().as_slice(),
-            self.variants.values().collect::<Vec<_>>().as_slice(),
+            variants.as_slice(),
             model_fragments,
             &support_names,
             &self.language_imports,
             self.api_plan,
-            &self.external_models,
-            &self.direct_transfer_declarations,
             self.inline_model_rebuilds,
             self.model_hoists,
         )? {
@@ -893,7 +783,7 @@ impl<'a> ApiPlanner<'a> {
             }
         }
 
-        Ok(GeneratedFiles::directory(files))
+        Ok((GeneratedFiles::directory(files), exported_names))
     }
 
     fn render_resource_module_file(
@@ -1778,7 +1668,8 @@ impl<'a> ApiPlanner<'a> {
                 })
             })
             .collect::<Result<Vec<_>>>()?;
-        let mut rendered_variant = RenderedVariant {
+        let rendered_variant = RenderedVariant {
+            full_name: variant_spec.full_name.clone(),
             name: variant_spec.name.clone(),
             type_parameters: self
                 .api_plan
@@ -1787,11 +1678,7 @@ impl<'a> ApiPlanner<'a> {
                 .map(|usage| usage.parameter.name)
                 .collect(),
             cases,
-            block: None,
         };
-        rendered_variant.block = self
-            .external_models
-            .render_variant_block(&variant_spec.full_name, &rendered_variant);
         self.variants
             .insert(variant_spec.full_name.clone(), rendered_variant);
         Ok(())
@@ -2298,6 +2185,9 @@ fn render_record_models(
         relative_imports: BTreeMap::new(),
         root_package_imports: RootPackageImports::new(),
         exported_names: models.iter().map(|model| model.name.clone()).collect(),
+        module_exported_names: BTreeSet::new(),
+        generated_names: Vec::new(),
+        export_sort_keys: BTreeMap::new(),
         allows_private_wire_access: false,
     })
 }
@@ -2729,10 +2619,10 @@ struct RenderedFlag {
 
 #[derive(Debug)]
 pub(in crate::generator) struct RenderedVariant {
+    pub(in crate::generator) full_name: String,
     pub(in crate::generator) name: String,
     pub(in crate::generator) type_parameters: Vec<String>,
     pub(in crate::generator) cases: Vec<RenderedVariantCase>,
-    block: Option<RenderedVariantBlock>,
 }
 
 #[derive(Debug)]
@@ -2743,93 +2633,26 @@ pub(in crate::generator) struct RenderedVariantCase {
 }
 
 #[derive(Debug)]
-pub(in crate::generator) struct RenderedVariantBlock {
-    pub(in crate::generator) body: String,
-    pub(in crate::generator) companion_names: Vec<String>,
-}
-
-#[derive(Debug)]
 pub(in crate::generator) struct PythonGeneratedName {
     pub(in crate::generator) name: String,
     pub(in crate::generator) generated_by: String,
 }
 
-#[derive(Debug, Default)]
-pub(in crate::generator) struct PythonExternalModelPlan {
-    variants: BTreeMap<String, PythonExternalVariantPlan>,
-}
-
-#[derive(Debug)]
-pub(in crate::generator) struct PythonExternalVariantPlan {
-    pub(in crate::generator) cases: Vec<PythonExternalVariantCasePlan>,
-}
-
-#[derive(Debug)]
-pub(in crate::generator) struct PythonExternalVariantCasePlan {
-    pub(in crate::generator) case_name: String,
-    pub(in crate::generator) generated_name: PythonGeneratedName,
-}
-
-impl PythonExternalModelPlan {
-    pub(in crate::generator) fn insert_variant(
-        &mut self,
-        full_name: String,
-        variant: PythonExternalVariantPlan,
-    ) {
-        assert!(
-            self.variants.insert(full_name.clone(), variant).is_none(),
-            "Python external model plan already contains variant `{full_name}`"
-        );
-    }
-
-    pub(in crate::generator) fn variant(
-        &self,
-        full_name: &str,
-    ) -> Option<&PythonExternalVariantPlan> {
-        self.variants.get(full_name)
-    }
-
-    fn generated_names(&self) -> impl Iterator<Item = &PythonGeneratedName> {
-        self.variants
-            .values()
-            .flat_map(|variant| variant.cases.iter().map(|case| &case.generated_name))
-    }
-}
-
-impl PythonExternalVariantPlan {
-    pub(in crate::generator) fn case(
-        &self,
-        case_name: &str,
-    ) -> Option<&PythonExternalVariantCasePlan> {
-        self.cases.iter().find(|case| case.case_name == case_name)
-    }
-}
-
-impl RenderedVariant {
-    fn exported_names(&self) -> Vec<String> {
-        let mut names = vec![self.name.clone()];
-        if let Some(block) = &self.block {
-            names.extend(block.companion_names.iter().cloned());
-        }
-        names
-    }
-}
-
-fn sort_python_model_names(names: &mut [String], variants: &IndexMap<String, RenderedVariant>) {
+fn sort_python_model_names(
+    names: &mut [String],
+    variants: &IndexMap<String, RenderedVariant>,
+    model_fragments: &RenderedModelFragments,
+) {
     names.sort_by_key(|name| {
-        variants
-            .values()
-            .find_map(|variant| {
-                if name == &variant.name {
-                    return Some((variant.name.clone(), 0));
-                }
-                variant
-                    .block
-                    .as_ref()?
-                    .companion_names
-                    .iter()
-                    .position(|companion_name| name == companion_name)
-                    .map(|index| (variant.name.clone(), index + 1))
+        model_fragments
+            .export_sort_keys
+            .get(name)
+            .cloned()
+            .or_else(|| {
+                variants
+                    .values()
+                    .find(|variant| name == &variant.name)
+                    .map(|variant| (variant.name.clone(), 0))
             })
             .unwrap_or_else(|| (name.clone(), 0))
     });
@@ -3010,6 +2833,9 @@ pub(in crate::generator) struct RenderedModelFragments {
     /// Backend-owned public names imported only by the generated package tree's root module.
     pub(in crate::generator) root_package_imports: RootPackageImports,
     pub(in crate::generator) exported_names: BTreeSet<String>,
+    pub(in crate::generator) module_exported_names: BTreeSet<String>,
+    pub(in crate::generator) generated_names: Vec<PythonGeneratedName>,
+    pub(in crate::generator) export_sort_keys: BTreeMap<String, (String, usize)>,
     pub(in crate::generator) allows_private_wire_access: bool,
 }
 
@@ -3038,7 +2864,20 @@ impl RenderedModelFragments {
         }
         extend_root_package_imports(&mut self.root_package_imports, other.root_package_imports);
         self.exported_names.extend(other.exported_names);
+        self.module_exported_names
+            .extend(other.module_exported_names);
+        self.generated_names.extend(other.generated_names);
+        self.export_sort_keys.extend(other.export_sort_keys);
     }
+}
+
+fn rendered_type_parameters(body: &str) -> BTreeSet<String> {
+    body.lines()
+        .filter_map(|line| {
+            line.split_once(" = typing.TypeVar(")
+                .map(|(name, _)| name.to_string())
+        })
+        .collect()
 }
 
 pub(crate) fn render_tree_support_files(
@@ -3489,6 +3328,41 @@ fn render_definitions_only_package_init(
     }
     output.push_str("]\n");
     output
+}
+
+fn package_export_names(
+    mode: GenerationMode,
+    services: &[RenderedService<'_>],
+    model_names: &[String],
+    root_package_imports: &RootPackageImports,
+) -> BTreeSet<String> {
+    let mut names = root_package_export_names(root_package_imports);
+    names.extend(model_names.iter().cloned());
+    match mode {
+        GenerationMode::DefinitionsOnly => {
+            names.extend(services.iter().map(|service| service.name.to_string()));
+        }
+        GenerationMode::NativeApi => {
+            names.extend(
+                services
+                    .iter()
+                    .filter(|service| service.endpoint.is_none())
+                    .map(endpoint_service_object_name),
+            );
+            names.extend(
+                services
+                    .iter()
+                    .filter(|service| service.endpoint.is_some())
+                    .flat_map(|service| {
+                        service
+                            .operations
+                            .iter()
+                            .map(|operation| operation.attr_name.clone())
+                    }),
+            );
+        }
+    }
+    names
 }
 
 fn operation_key(service_name: &str, operation_name: &str) -> String {
@@ -4064,11 +3938,7 @@ fn render_models_module(
         if !body.is_empty() {
             body.push_str("\n\n");
         }
-        let record_type_parameters = model_fragments
-            .body
-            .lines()
-            .filter_map(|line| line.split_once(" = typing.TypeVar(").map(|(name, _)| name))
-            .collect::<BTreeSet<_>>();
+        let record_type_parameters = rendered_type_parameters(&model_fragments.body);
         let variant_only_type_parameters = variants
             .iter()
             .flat_map(|variant| variant.type_parameters.iter())
@@ -5337,11 +5207,6 @@ fn render_flags(output: &mut String, flags: &RenderedFlags) {
 }
 
 fn render_variant(output: &mut String, variant: &RenderedVariant) {
-    if let Some(block) = &variant.block {
-        output.push_str(&block.body);
-        return;
-    }
-
     output.push_str(variant.name.as_str());
     output.push_str(" = ");
     if variant.cases.is_empty() {
@@ -7732,7 +7597,7 @@ fn validate_python_generated_names<'a>(
                 (&variant.name, format!("variant `{}`", variant.full_name))
             }
             TypeDeclSpec::External(binding) => {
-                let ExternalTypeSpec::Json(json) = &binding.external_type else {
+                let Some(json) = binding.json_model() else {
                     continue;
                 };
                 (

@@ -1259,6 +1259,7 @@ member value. Use `option<variant>` when the protobuf oneof may be unset, or a
 required `variant` when an unset value should be rejected during conversion.
 
 ```wit
+/// @nexus.proto "example.v1.Response"
 variant outcome {
   success(list<u8>),
   failure(string),
