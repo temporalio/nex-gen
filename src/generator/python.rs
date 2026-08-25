@@ -735,10 +735,8 @@ impl<'a> ApiPlanner<'a> {
             &empty_root_package_imports
         };
         insert_generated_file(&mut files, "__init__.py", render_init(root_package_imports))?;
-        // A module whose every operation type is `$ref`d from another file
-        // declares nothing of its own and emits no models file at all — see
-        // specs/json-schema/features/generated-file-layout.md. Emitting the file
-        // anyway leaves a header and an unused `import typing` behind.
+        // A module that declares nothing emits no models file. Emitting the file
+        // anyway leaves a header and unused imports behind.
         if let Some(models_source) = render_models_module(
             self.enums.values().collect::<Vec<_>>().as_slice(),
             self.flags.values().collect::<Vec<_>>().as_slice(),
