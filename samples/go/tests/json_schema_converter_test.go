@@ -1,15 +1,40 @@
 package tests
 
 import (
+	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
 
 	commonpb "go.temporal.io/api/common/v1"
 	"go.temporal.io/sdk/converter"
+	"go.temporal.io/sdk/temporal"
 
 	"github.com/stretchr/testify/require"
 )
+
+// decodeValidation bypasses the current SDK JSON converter's legacy `%v`
+// wrapper so negative tests can inspect the ApplicationError detail directly.
+// Positive round trips still exercise the default data converter above.
+func decodeValidation(payload *commonpb.Payload, valuePtr any) error {
+	return json.Unmarshal(payload.GetData(), valuePtr)
+}
+
+// validationText exposes a locally-created payload-validation error's first
+// detail for assertions. Details performs a cheap assignment here; it does not
+// serialize the generated violation slice.
+func validationText(err error) string {
+	var applicationError *temporal.ApplicationError
+	if errors.As(err, &applicationError) && applicationError.Type() == "PayloadValidationError" {
+		var details any
+		if applicationError.Details(&details) == nil {
+			return fmt.Sprint(details)
+		}
+	}
+	return err.Error()
+}
 
 // jsonSchemaFixtureBytes reads a canonical wire fixture shared across languages.
 // Go test working directory is the package dir (samples/go/tests), so the

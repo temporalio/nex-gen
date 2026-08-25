@@ -74,10 +74,10 @@ primitive.
 
 | Language | Strategy |
 |---|---|
-| Go | `UnmarshalJSON` checks `len(rawArray) > max` after collecting indexed item violations; serialize checks the typed slice in shared `Validate`. Both collect into one `ValidationError`. |
+| Go | `UnmarshalJSON` checks `len(rawArray) > max` after collecting indexed item violations; serialize checks the typed slice in shared `Validate`. Both collect into one `PayloadValidationError` application failure. |
 | TypeScript | After the `Array.isArray` guard ([[items]]), deserialize checks `raw.length > max` after parsing the elements; serialize checks the typed array. A failure pushes ``Violation{path, reason: `must have at most ${max} items, got ${raw.length}`}``. |
-| Python | After the `isinstance(raw, list)` guard ([[items]]), the transfer converter checks `len(raw) > max` after parsing the elements; serialize checks the typed list. Both aggregate into the generated `ValidationError`. |
-| Java | The per-POJO collecting deserializer (PRINCIPLES Java §5) checks `node.size() > max` after parsing the elements; serialize checks the typed `List<T>`. Both push a structured violation into the single `ValidationException`. Not bean-validation `@Size`. |
+| Python | After the `isinstance(raw, list)` guard ([[items]]), the transfer converter checks `len(raw) > max` after parsing the elements; serialize checks the typed list. Both aggregate into the generated `PayloadValidationError` application failure. |
+| Java | The per-POJO collecting deserializer (PRINCIPLES Java §5) checks `node.size() > max` after parsing the elements; serialize checks the typed `List<T>`. Both push a structured violation into the single `PayloadValidationError` application failure. Not bean-validation `@Size`. |
 
 **Informative `reason` strings.** The `Violation` `reason` names the
 **concrete bound and the offending count** — `must have at most 3 items,
@@ -122,7 +122,7 @@ plain length comparison in both directions.
 ### Runtime fixtures (validator)
 
 - Element count `== max` → OK (`≤` is inclusive).
-- Element count `max+1` → one `ValidationError` whose reason names the
+- Element count `max+1` → one `PayloadValidationError` application failure whose reason names the
   bound and count (`must have at most 3 items, got 4`).
 - Empty array `[]` against `maxItems:0` → OK.
 - Combined with other failing assertions ([[minItems]], a failing element

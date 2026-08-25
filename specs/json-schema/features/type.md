@@ -122,8 +122,9 @@ Strategy per language:
 - **Go**: Every generated struct gets a custom `UnmarshalJSON`. It decodes
   into a shadow struct of `*json.Number` / `*T` pointers (absence
   observable per P9), dispatches per field, builds
-  `Violation{Path, Reason}` and collects them into a single
-  `ValidationError` (a struct over `[]Violation` implementing `error`).
+  `Violation{Path, Reason}` and collects them into a single non-retryable
+  Temporal `ApplicationError` with type `PayloadValidationError` and
+  `[]Violation` as its first detail.
   Integer fields go through a runtime helper that also enforces the
   cross-language integer cap (`±(2^53−1)`):
   ```go
@@ -144,8 +145,8 @@ Strategy per language:
   for type-classification (`1.0 === 1` in JS, so
   `Number.isInteger(1.0) === true`) — verified empirically across all
   10 type-classification fixtures. Push `Violation { path, reason }`
-  into a list, throw one `ValidationError` (a class extending `Error`,
-  holding the `Violation[]`) at the end.
+  into a list, then throw one non-retryable Temporal `ApplicationFailure` with
+  type `PayloadValidationError` and the `Violation[]` as its first detail.
   Integer fields emit `typeof v === 'number' && Number.isSafeInteger(v)`.
   `JSON.parse` silently rounds integers past 2^53 to the nearest double,
   and with the cap at `Number.MAX_SAFE_INTEGER` (`2^53−1`) that post-parse
@@ -167,7 +168,8 @@ Strategy per language:
   every type-classification check is a hand-emitted `isinstance` call in the
   model's `_<Model>TransferTypeConverter` (**PRINCIPLES Python §3**), each
   mismatch appending a `Violation { path, reason }` to the list the converter
-  raises as one `ValidationError` (**PRINCIPLES Python §2**). Because `bool`
+  raises as one non-retryable Temporal `ApplicationError` with type
+  `PayloadValidationError` (**PRINCIPLES Python §2**). Because `bool`
   is a subclass of `int`, an integer or number check **must exclude `bool`
   explicitly** — otherwise `True` classifies as `1`. A classified `number` is
   **narrowed to binary64** in both directions, through the generated runtime's
@@ -250,7 +252,7 @@ before emit:
 
 - **`integer` cap.** The in-memory `int64`/`long`/`int`/`number` is
   re-checked against `±(2^53−1)`; a value constructed past the cap is a
-  `ValidationError`, not silently emitted. Go `int64` / Java `long` hold
+  `PayloadValidationError` application failure, not silently emitted. Go `int64` / Java `long` hold
   magnitudes the cap forbids, and Python ints are unbounded, so this
   check has real teeth on the out-path.
 - **`number` finiteness.** Every target rejects `NaN` and `±Infinity`

@@ -28,7 +28,8 @@ def test_proto_backed_generic_type_hints_are_preserved() -> None:
         scaler=PayloadBackedContext(details=MyCtx(neat="very")),
     )
     converter = temporalio.nexus.system._SystemNexusPayloadConverter(
-        temporalio.converter.PayloadConverter.default
+        temporalio.converter.PayloadConverter.default,
+        temporalio.converter.FailureConverter.default,
     )
 
     payload = converter.to_payload(model)
@@ -50,7 +51,8 @@ def test_unparameterized_proto_backed_generic_decodes_payload_values() -> None:
         scaler=PayloadBackedContext(details={"neat": "very"}),
     )
     converter = temporalio.nexus.system._SystemNexusPayloadConverter(
-        temporalio.converter.PayloadConverter.default
+        temporalio.converter.PayloadConverter.default,
+        temporalio.converter.FailureConverter.default,
     )
 
     payload = converter.to_payload(model)

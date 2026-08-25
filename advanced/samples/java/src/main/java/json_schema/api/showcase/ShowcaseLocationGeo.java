@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.SerializerProvider;
 import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
 import com.fasterxml.jackson.databind.annotation.JsonSerialize;
+import io.temporal.failure.ApplicationFailure;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Iterator;
@@ -99,7 +100,8 @@ public final class ShowcaseLocationGeo {
                 }
             }
             if (!violations.isEmpty()) {
-                throw new ValidationException(violations);
+                // TODO: Use PayloadValidationException.newPayloadValidationException once it is available in an SDK release.
+                throw ApplicationFailure.newNonRetryableFailure("Payload validation failed", "PayloadValidationError", violations);
             }
             gen.writeStartObject();
             if (value.lat != null) {
@@ -125,7 +127,8 @@ public final class ShowcaseLocationGeo {
             List<Violation> violations = new ArrayList<>();
             if (node == null || !node.isObject()) {
                 violations.add(new Violation("", "expected object"));
-                throw new ValidationException(violations);
+                // TODO: Use PayloadValidationException.newPayloadValidationException once it is available in an SDK release.
+                throw ApplicationFailure.newNonRetryableFailure("Payload validation failed", "PayloadValidationError", violations);
             }
             Map<String, JsonNode> additionalProperties = new LinkedHashMap<>();
             Iterator<String> fieldNames = node.fieldNames();
@@ -166,7 +169,8 @@ public final class ShowcaseLocationGeo {
                 }
             }
             if (!violations.isEmpty()) {
-                throw new ValidationException(violations);
+                // TODO: Use PayloadValidationException.newPayloadValidationException once it is available in an SDK release.
+                throw ApplicationFailure.newNonRetryableFailure("Payload validation failed", "PayloadValidationError", violations);
             }
             return new ShowcaseLocationGeo(lat, lon, additionalProperties);
         }

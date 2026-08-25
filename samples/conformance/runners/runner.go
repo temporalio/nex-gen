@@ -18,6 +18,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"go.temporal.io/sdk/temporal"
 )
 
 type mutation struct {
@@ -143,35 +145,33 @@ func runProbe(modelType reflect.Type, p probe) verdict {
 	return verdict{Outcome: "accepted", Wire: &wire}
 }
 
-// violationsOf reports the generated *ValidationError's violations. The type is
-// package-local to every generated module, so it is matched structurally.
+// violationsOf reports a payload-validation ApplicationError's first detail.
+// The generated Violation type is package-local to each conformance case, so
+// the runner first casts the detail to any and then reads its common shape.
+// Details performs a cheap local assignment for newly-created errors; it does
+// not serialize the violations.
 func violationsOf(err error) ([]violation, bool) {
-	for current := err; current != nil; current = errors.Unwrap(current) {
-		value := reflect.ValueOf(current)
-		if value.Kind() == reflect.Pointer {
-			if value.IsNil() {
-				continue
-			}
-			value = value.Elem()
-		}
-		if value.Kind() != reflect.Struct || value.Type().Name() != "ValidationError" {
-			continue
-		}
-		field := value.FieldByName("Violations")
-		if !field.IsValid() || field.Kind() != reflect.Slice {
-			continue
-		}
-		found := make([]violation, 0, field.Len())
-		for index := 0; index < field.Len(); index++ {
-			element := field.Index(index)
-			found = append(found, violation{
-				Path:   element.FieldByName("Path").String(),
-				Reason: element.FieldByName("Reason").String(),
-			})
-		}
-		return found, true
+	var applicationError *temporal.ApplicationError
+	if !errors.As(err, &applicationError) || applicationError.Type() != "PayloadValidationError" {
+		return nil, false
 	}
-	return nil, false
+	var detail any
+	if err := applicationError.Details(&detail); err != nil {
+		return nil, false
+	}
+	value := reflect.ValueOf(detail)
+	if value.Kind() != reflect.Slice {
+		return nil, false
+	}
+	found := make([]violation, 0, value.Len())
+	for index := 0; index < value.Len(); index++ {
+		element := value.Index(index)
+		found = append(found, violation{
+			Path:   element.FieldByName("Path").String(),
+			Reason: element.FieldByName("Reason").String(),
+		})
+	}
+	return found, true
 }
 
 // step is one component of a mutation path: a named member, or an array index.

@@ -21,7 +21,7 @@ type Page struct {
 	Blocks []Block `json:"blocks,omitempty"`
 }
 
-// Validate checks m against every constraint and returns a *ValidationError
+// Validate checks m against every constraint and returns a PayloadValidationError
 // listing any violations.
 func (m Page) Validate() error {
 	var errs []Violation
@@ -31,13 +31,13 @@ func (m Page) Validate() error {
 		mergeNested(&errs, p0, v0.Validate())
 	}
 	if len(errs) > 0 {
-		return &ValidationError{Violations: errs}
+		return newPayloadValidationError(errs)
 	}
 	return nil
 }
 
 // UnmarshalJSON parses data into m and validates it, returning a
-// *ValidationError listing any violations.
+// PayloadValidationError listing any violations.
 func (m *Page) UnmarshalJSON(data []byte) error {
 	var all map[string]json.RawMessage
 	if err := json.Unmarshal(data, &all); err != nil {
@@ -96,13 +96,13 @@ func (m *Page) UnmarshalJSON(data []byte) error {
 		}
 	}
 	if len(errs) > 0 {
-		return &ValidationError{Violations: errs}
+		return newPayloadValidationError(errs)
 	}
 	return nil
 }
 
 // MarshalJSON validates m, then serializes it to JSON, returning a
-// *ValidationError if validation fails.
+// PayloadValidationError if validation fails.
 func (m Page) MarshalJSON() ([]byte, error) {
 	var errs []Violation
 	addViolations(&errs, m.Validate())
@@ -114,7 +114,7 @@ func (m Page) MarshalJSON() ([]byte, error) {
 		marshalField(out, "blocks", m.Blocks, &errs)
 	}
 	if len(errs) > 0 {
-		return nil, &ValidationError{Violations: errs}
+		return nil, newPayloadValidationError(errs)
 	}
 	return json.Marshal(out)
 }
@@ -128,7 +128,7 @@ type PageMeta struct {
 	WordCount *int64 `json:"wordCount,omitempty"`
 }
 
-// Validate checks m against every constraint and returns a *ValidationError
+// Validate checks m against every constraint and returns a PayloadValidationError
 // listing any violations.
 func (m PageMeta) Validate() error {
 	var errs []Violation
@@ -136,13 +136,13 @@ func (m PageMeta) Validate() error {
 		errs = append(errs, Violation{"wordCount", "exceeds ±(2^53-1) integer cap"})
 	}
 	if len(errs) > 0 {
-		return &ValidationError{Violations: errs}
+		return newPayloadValidationError(errs)
 	}
 	return nil
 }
 
 // UnmarshalJSON parses data into m and validates it, returning a
-// *ValidationError listing any violations.
+// PayloadValidationError listing any violations.
 func (m *PageMeta) UnmarshalJSON(data []byte) error {
 	var all map[string]json.RawMessage
 	if err := json.Unmarshal(data, &all); err != nil {
@@ -170,13 +170,13 @@ func (m *PageMeta) UnmarshalJSON(data []byte) error {
 		m.WordCount = &v
 	}
 	if len(errs) > 0 {
-		return &ValidationError{Violations: errs}
+		return newPayloadValidationError(errs)
 	}
 	return nil
 }
 
 // MarshalJSON validates m, then serializes it to JSON, returning a
-// *ValidationError if validation fails.
+// PayloadValidationError if validation fails.
 func (m PageMeta) MarshalJSON() ([]byte, error) {
 	var errs []Violation
 	addViolations(&errs, m.Validate())
@@ -186,7 +186,7 @@ func (m PageMeta) MarshalJSON() ([]byte, error) {
 		marshalField(out, "wordCount", *m.WordCount, &errs)
 	}
 	if len(errs) > 0 {
-		return nil, &ValidationError{Violations: errs}
+		return nil, newPayloadValidationError(errs)
 	}
 	return json.Marshal(out)
 }

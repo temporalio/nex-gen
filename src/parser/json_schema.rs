@@ -7579,36 +7579,43 @@ pub(crate) fn build_name_manifest(
 /// The fixed (schema-independent) top-level identifiers a target's JSON runtime
 /// emits into — or imports into — every module that carries models, and which
 /// therefore share the user type/service namespace. Only identifiers in the
-/// same case-class as user identifiers (which are always `UpperCamelCase`) are
-/// listed: a target's lower-case/underscore helpers occupy an effectively
-/// separate namespace and can never coincide with a generated type.
+/// same case-class as user identifiers (which are normally `UpperCamelCase`) are
+/// listed. TypeScript's exported lower-camel helper is also included because it
+/// can collide with a service binding or generated converter value.
 ///
-/// - Go (`src/generator/json/go.rs`): the exported runtime types `Violation`
-///   and `ValidationError` live in the models' own package; every other runtime
+/// - Go (`src/generator/json/go.rs`): the exported runtime type `Violation`
+///   lives in the models' own package; every other runtime
 ///   symbol is unexported (`addViolations`, `parseSpecInteger`, …) and cannot
 ///   collide with an exported user type.
 /// - TypeScript (`src/generator/json/typescript.rs`): nexus-rpc's
 ///   `TransferTypeConverter` is a bare named import in every model module (the
 ///   contract each model's converter implements), so a user type of that name is
 ///   an import-versus-local-declaration conflict. `Violation` (interface) and
-///   `ValidationError` (class) reach `models.ts` only through the namespace
-///   import `__nexgenDefinitions`, but the package barrel re-exports both from
-///   `./definitions` beside `export *` of the model modules, so a user type of
-///   either name is silently shadowed out of the package surface (P7). The
-///   runtime helper functions (`isPlainObject`, `collect`, …) are `camelCase`.
-/// - Python (`src/generator/json/python.rs`): `Violation` (dataclass) and
-///   `ValidationError` (exception) are imported by bare name into every model
-///   module and re-exported by the root package barrel; the other runtime helpers
+///   `payloadValidationError` reach `models.ts` only through the namespace
+///   import `__nexgenDefinitions`, but the package barrel re-exports them from
+///   `./definitions` beside `export *` of the model modules, so a user binding of
+///   the same name is silently shadowed out of the package surface (P7).
+///   `payloadValidationError` is also exported and can collide with lower-camel
+///   value bindings; the other runtime helpers (`isPlainObject`, `collect`, …)
+///   are `camelCase`.
+/// - Python (`src/generator/json/python.rs`): `Violation` (dataclass) is imported
+///   by bare name into every model module and re-exported by the root package
+///   barrel; the other runtime helpers
 ///   are `_`-prefixed.
 /// - Java (`src/generator/java.rs`): the root-package runtime classes
-///   `Violation`, `ValidationException`, and `SpecNumbers`, each emitted as its
-///   own always-present public file and imported into model files.
+///   `Violation` and `SpecNumbers`, each emitted as its own always-present public
+///   file and imported into model files. The SDK's `ApplicationFailure` is also
+///   imported into every model file.
 ///   (`TemporalSupport`/`Base64Support` are schema-dependent, so excluded.)
 fn boilerplate_idents(language: Language) -> &'static [&'static str] {
     match language {
-        Language::Go | Language::Python => &["Violation", "ValidationError"],
-        Language::TypeScript => &["Violation", "ValidationError", "TransferTypeConverter"],
-        Language::Java => &["Violation", "ValidationException", "SpecNumbers"],
+        Language::Go | Language::Python => &["Violation"],
+        Language::TypeScript => &[
+            "Violation",
+            "payloadValidationError",
+            "TransferTypeConverter",
+        ],
+        Language::Java => &["ApplicationFailure", "Violation", "SpecNumbers"],
         _ => &[],
     }
 }
@@ -8150,6 +8157,7 @@ const JAVA_DESERIALIZER_LOCALS: &[&str] = &[
     "items",
     "length",
     "nestedLength",
+    "nestedViolations",
     "node",
     "numberValue",
     "parsed",
@@ -13263,6 +13271,7 @@ properties:
             "rawSeen",
             "priorIndex",
             "numberValue",
+            "nestedViolations",
         ] {
             let input = format!(
                 r#"
@@ -14952,10 +14961,10 @@ $defs:
     }
 
     #[test]
-    fn rejects_type_colliding_with_go_and_python_runtime_boilerplate() {
-        // Go emits the exported runtime type `ValidationError` into the models'
-        // own package, so a `$defs` type of that name is a package-scope clash;
-        // Python imports the same name into every model module.
+    fn accepts_validation_error_type_after_application_failure_switch() {
+        // ValidationError used to be generated runtime boilerplate in Go and
+        // Python. Payload validation now raises the SDK's application failure,
+        // so the identifier is available to schemas again.
         let input = r##"
 $schema: https://json-schema.org/draft/2020-12/schema
 type: object
@@ -14966,16 +14975,9 @@ $defs:
     type: object
     properties: { a: { type: string } }
 "##;
-        for language in [Language::Go, Language::Python] {
-            let error = reject_for(language, input);
-            assert!(
-                error.contains("collision") && error.contains("ValidationError"),
-                "{language:?}: {error}"
-            );
+        for language in [Language::Go, Language::Python, Language::Java] {
+            parse_for(language, input).expect("ValidationError is no longer boilerplate");
         }
-        // Java names its aggregate error `ValidationException`, not
-        // `ValidationError`, so the same schema is accepted for Java.
-        parse_for(Language::Java, input).expect("Java has no ValidationError boilerplate");
     }
 
     #[test]
@@ -15105,27 +15107,21 @@ $defs:
     }
 
     #[test]
-    fn rejects_type_colliding_with_java_runtime_boilerplate() {
-        // Java emits `ValidationException` as an always-present public runtime
-        // class in the root package, imported into model files.
+    fn accepts_payload_validation_error_as_a_java_model_name() {
+        // `PayloadValidationError` is only the Temporal failure type string;
+        // Java emits no class with that name.
         let input = r##"
 $schema: https://json-schema.org/draft/2020-12/schema
 type: object
 properties:
-  e: { $ref: "#/$defs/ValidationException" }
+  e: { $ref: "#/$defs/PayloadValidationError" }
 $defs:
-  ValidationException:
+  PayloadValidationError:
     type: object
     properties: { a: { type: string } }
 "##;
-        let error = reject_for(Language::Java, input);
-        assert!(
-            error.contains("collision") && error.contains("ValidationException"),
-            "{error}"
-        );
-        // Go names its aggregate error `ValidationError`, not `ValidationException`,
-        // so the same schema is accepted for Go.
-        parse_for(Language::Go, input).expect("Go has no ValidationException boilerplate");
+        parse_for(Language::Java, input)
+            .expect("Java has no PayloadValidationError boilerplate class");
     }
 
     #[test]

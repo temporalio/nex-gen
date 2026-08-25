@@ -24,7 +24,7 @@ type Block struct {
 	Page *Page `json:"page,omitempty"`
 }
 
-// Validate checks m against every constraint and returns a *ValidationError
+// Validate checks m against every constraint and returns a PayloadValidationError
 // listing any violations.
 func (m Block) Validate() error {
 	var errs []Violation
@@ -41,13 +41,13 @@ func (m Block) Validate() error {
 		mergeNested(&errs, "page", m.Page.Validate())
 	}
 	if len(errs) > 0 {
-		return &ValidationError{Violations: errs}
+		return newPayloadValidationError(errs)
 	}
 	return nil
 }
 
 // UnmarshalJSON parses data into m and validates it, returning a
-// *ValidationError listing any violations.
+// PayloadValidationError listing any violations.
 func (m *Block) UnmarshalJSON(data []byte) error {
 	var all map[string]json.RawMessage
 	if err := json.Unmarshal(data, &all); err != nil {
@@ -102,13 +102,13 @@ func (m *Block) UnmarshalJSON(data []byte) error {
 		}
 	}
 	if len(errs) > 0 {
-		return &ValidationError{Violations: errs}
+		return newPayloadValidationError(errs)
 	}
 	return nil
 }
 
 // MarshalJSON validates m, then serializes it to JSON, returning a
-// *ValidationError if validation fails.
+// PayloadValidationError if validation fails.
 func (m Block) MarshalJSON() ([]byte, error) {
 	var errs []Violation
 	addViolations(&errs, m.Validate())
@@ -125,7 +125,7 @@ func (m Block) MarshalJSON() ([]byte, error) {
 		marshalField(out, "page", *m.Page, &errs)
 	}
 	if len(errs) > 0 {
-		return nil, &ValidationError{Violations: errs}
+		return nil, newPayloadValidationError(errs)
 	}
 	return json.Marshal(out)
 }
@@ -139,7 +139,7 @@ type BlockStyle struct {
 	Indent *int64 `json:"indent,omitempty"`
 }
 
-// Validate checks m against every constraint and returns a *ValidationError
+// Validate checks m against every constraint and returns a PayloadValidationError
 // listing any violations.
 func (m BlockStyle) Validate() error {
 	var errs []Violation
@@ -152,13 +152,13 @@ func (m BlockStyle) Validate() error {
 		}
 	}
 	if len(errs) > 0 {
-		return &ValidationError{Violations: errs}
+		return newPayloadValidationError(errs)
 	}
 	return nil
 }
 
 // UnmarshalJSON parses data into m and validates it, returning a
-// *ValidationError listing any violations.
+// PayloadValidationError listing any violations.
 func (m *BlockStyle) UnmarshalJSON(data []byte) error {
 	var all map[string]json.RawMessage
 	if err := json.Unmarshal(data, &all); err != nil {
@@ -189,13 +189,13 @@ func (m *BlockStyle) UnmarshalJSON(data []byte) error {
 		m.Indent = &v
 	}
 	if len(errs) > 0 {
-		return &ValidationError{Violations: errs}
+		return newPayloadValidationError(errs)
 	}
 	return nil
 }
 
 // MarshalJSON validates m, then serializes it to JSON, returning a
-// *ValidationError if validation fails.
+// PayloadValidationError if validation fails.
 func (m BlockStyle) MarshalJSON() ([]byte, error) {
 	var errs []Violation
 	addViolations(&errs, m.Validate())
@@ -207,7 +207,7 @@ func (m BlockStyle) MarshalJSON() ([]byte, error) {
 		marshalField(out, "indent", *m.Indent, &errs)
 	}
 	if len(errs) > 0 {
-		return nil, &ValidationError{Violations: errs}
+		return nil, newPayloadValidationError(errs)
 	}
 	return json.Marshal(out)
 }

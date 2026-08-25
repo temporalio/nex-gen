@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.SerializerProvider;
 import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
 import com.fasterxml.jackson.databind.annotation.JsonSerialize;
+import io.temporal.failure.ApplicationFailure;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Iterator;
@@ -16,7 +17,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import json_schema.definitions.kb.SpecNumbers;
-import json_schema.definitions.kb.ValidationException;
 import json_schema.definitions.kb.Violation;
 import json_schema.definitions.kb.content.page.Page;
 import org.jspecify.annotations.Nullable;
@@ -128,27 +128,44 @@ public final class Block {
                 gen.writeFieldName("style");
                 try {
                     serializers.defaultSerializeValue(value.style, gen);
-                } catch (ValidationException nested0) {
-                    for (Violation nestedViolation0 : nested0.getViolations()) {
+                } catch (ApplicationFailure nested0) {
+                    if (!"PayloadValidationError".equals(nested0.getType()) || nested0.getDetails().getSize() == 0) {
+                        throw nested0;
+                    }
+                    // The locally-created failure retains the original list as its first detail.
+                    // This unchecked cast is cheap and performs no serialization.
+                    @SuppressWarnings("unchecked")
+                    List<Violation> nestedViolations0 = (List<Violation>) nested0.getDetails().get(0, List.class);
+                    for (Violation nestedViolation0 : nestedViolations0) {
                         violations.add(nestedViolation0.withPathPrefix("style"));
                     }
-                    throw new ValidationException(violations);
+                    // TODO: Use PayloadValidationException.newPayloadValidationException once it is available in an SDK release.
+                    throw ApplicationFailure.newNonRetryableFailure("Payload validation failed", "PayloadValidationError", violations);
                 }
             }
             if (value.page != null) {
                 gen.writeFieldName("page");
                 try {
                     serializers.defaultSerializeValue(value.page, gen);
-                } catch (ValidationException nested0) {
-                    for (Violation nestedViolation0 : nested0.getViolations()) {
+                } catch (ApplicationFailure nested0) {
+                    if (!"PayloadValidationError".equals(nested0.getType()) || nested0.getDetails().getSize() == 0) {
+                        throw nested0;
+                    }
+                    // The locally-created failure retains the original list as its first detail.
+                    // This unchecked cast is cheap and performs no serialization.
+                    @SuppressWarnings("unchecked")
+                    List<Violation> nestedViolations0 = (List<Violation>) nested0.getDetails().get(0, List.class);
+                    for (Violation nestedViolation0 : nestedViolations0) {
                         violations.add(nestedViolation0.withPathPrefix("page"));
                     }
-                    throw new ValidationException(violations);
+                    // TODO: Use PayloadValidationException.newPayloadValidationException once it is available in an SDK release.
+                    throw ApplicationFailure.newNonRetryableFailure("Payload validation failed", "PayloadValidationError", violations);
                 }
             }
             gen.writeEndObject();
             if (!violations.isEmpty()) {
-                throw new ValidationException(violations);
+                // TODO: Use PayloadValidationException.newPayloadValidationException once it is available in an SDK release.
+                throw ApplicationFailure.newNonRetryableFailure("Payload validation failed", "PayloadValidationError", violations);
             }
         }
     }
@@ -160,7 +177,8 @@ public final class Block {
             List<Violation> violations = new ArrayList<>();
             if (node == null || !node.isObject()) {
                 violations.add(new Violation("", "expected object"));
-                throw new ValidationException(violations);
+                // TODO: Use PayloadValidationException.newPayloadValidationException once it is available in an SDK release.
+                throw ApplicationFailure.newNonRetryableFailure("Payload validation failed", "PayloadValidationError", violations);
             }
             Iterator<String> fieldNames = node.fieldNames();
             while (fieldNames.hasNext()) {
@@ -231,8 +249,15 @@ public final class Block {
                 } else {
                     try {
                         style = context.readTreeAsValue(field, BlockStyle.class);
-                    } catch (ValidationException nested) {
-                        for (Violation violation : nested.getViolations()) {
+                    } catch (ApplicationFailure nested) {
+                        if (!"PayloadValidationError".equals(nested.getType()) || nested.getDetails().getSize() == 0) {
+                            throw nested;
+                        }
+                        // The locally-created failure retains the original list as its first detail.
+                        // This unchecked cast is cheap and performs no serialization.
+                        @SuppressWarnings("unchecked")
+                        List<Violation> nestedViolations = (List<Violation>) nested.getDetails().get(0, List.class);
+                        for (Violation violation : nestedViolations) {
                             violations.add(violation.withPathPrefix("style"));
                         }
                     } catch (IOException nested) {
@@ -248,8 +273,15 @@ public final class Block {
                 } else {
                     try {
                         page = context.readTreeAsValue(field, Page.class);
-                    } catch (ValidationException nested) {
-                        for (Violation violation : nested.getViolations()) {
+                    } catch (ApplicationFailure nested) {
+                        if (!"PayloadValidationError".equals(nested.getType()) || nested.getDetails().getSize() == 0) {
+                            throw nested;
+                        }
+                        // The locally-created failure retains the original list as its first detail.
+                        // This unchecked cast is cheap and performs no serialization.
+                        @SuppressWarnings("unchecked")
+                        List<Violation> nestedViolations = (List<Violation>) nested.getDetails().get(0, List.class);
+                        for (Violation violation : nestedViolations) {
                             violations.add(violation.withPathPrefix("page"));
                         }
                     } catch (IOException nested) {
@@ -258,7 +290,8 @@ public final class Block {
                 }
             }
             if (!violations.isEmpty()) {
-                throw new ValidationException(violations);
+                // TODO: Use PayloadValidationException.newPayloadValidationException once it is available in an SDK release.
+                throw ApplicationFailure.newNonRetryableFailure("Payload validation failed", "PayloadValidationError", violations);
             }
             return new Block(blockId, order, text, style, page);
         }

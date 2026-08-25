@@ -2516,6 +2516,36 @@ fn render_union_dispatch_body(
     ));
 }
 
+fn render_payload_validation_failure(output: &mut String, indent: &str) {
+    output.push_str(&format!(
+        "{indent}// TODO: Use PayloadValidationException.newPayloadValidationException once it is available in an SDK release.\n"
+    ));
+    output.push_str(&format!(
+        "{indent}throw ApplicationFailure.newNonRetryableFailure(\"Payload validation failed\", \"PayloadValidationError\", violations);\n"
+    ));
+}
+
+fn render_nested_violation_cast(
+    output: &mut String,
+    indent: &str,
+    failure: &str,
+    violations: &str,
+) {
+    output.push_str(&format!(
+        "{indent}if (!\"PayloadValidationError\".equals({failure}.getType()) || {failure}.getDetails().getSize() == 0) {{\n{indent}    throw {failure};\n{indent}}}\n"
+    ));
+    output.push_str(&format!(
+        "{indent}// The locally-created failure retains the original list as its first detail.\n"
+    ));
+    output.push_str(&format!(
+        "{indent}// This unchecked cast is cheap and performs no serialization.\n"
+    ));
+    output.push_str(&format!("{indent}@SuppressWarnings(\"unchecked\")\n"));
+    output.push_str(&format!(
+        "{indent}List<Violation> {violations} = (List<Violation>) {failure}.getDetails().get(0, List.class);\n"
+    ));
+}
+
 /// Reads an object member (delegating to its POJO deserializer) and returns it.
 fn render_union_read_object(
     output: &mut String,
@@ -2545,10 +2575,16 @@ fn render_union_read_object(
         variant.class
     ));
     output.push_str(&format!(
-        "{indent}}} catch (ValidationException nested) {{\n"
+        "{indent}}} catch (ApplicationFailure nested) {{\n"
     ));
+    render_nested_violation_cast(
+        output,
+        &format!("{indent}    "),
+        "nested",
+        "nestedViolations",
+    );
     output.push_str(&format!(
-        "{indent}    for (Violation violation : nested.getViolations()) {{\n{indent}        violations.add(violation.withPathPrefix({path}));\n{indent}    }}\n"
+        "{indent}    for (Violation violation : nestedViolations) {{\n{indent}        violations.add(violation.withPathPrefix({path}));\n{indent}    }}\n"
     ));
     output.push_str(&format!("{indent}    return null;\n"));
     output.push_str(&format!("{indent}}} catch (IOException nested) {{\n"));
@@ -2697,7 +2733,7 @@ fn render_union_from_node(output: &mut String, union: &JavaUnion, indent: &str) 
 /// `fromNode`: it dispatches on the member's runtime class and re-runs that
 /// branch's own constraints before the value is written (P12). The enclosing
 /// POJO's `Serializer` calls it, so a branch violation aggregates with its
-/// siblings into the one `ValidationException` (P11).
+/// siblings into the one payload-validation failure (P11).
 ///
 /// Emitted only when some branch declares a constraint; a union of unconstrained
 /// kinds needs no dispatcher, because holding a member *is* the whole invariant.
@@ -2907,6 +2943,7 @@ fn assemble_file(
             "com.fasterxml.jackson.databind.SerializerProvider",
             "com.fasterxml.jackson.databind.annotation.JsonDeserialize",
             "com.fasterxml.jackson.databind.annotation.JsonSerialize",
+            "io.temporal.failure.ApplicationFailure",
             "java.io.IOException",
             "java.util.ArrayList",
             "java.util.Iterator",
@@ -2919,7 +2956,6 @@ fn assemble_file(
         }
         if package != root_package {
             imports.insert(format!("{root_package}.SpecNumbers"));
-            imports.insert(format!("{root_package}.ValidationException"));
             imports.insert(format!("{root_package}.Violation"));
             if body.contains("TemporalSupport.") {
                 imports.insert(format!("{root_package}.TemporalSupport"));
@@ -3790,7 +3826,7 @@ fn render_object_serializer(
     ));
 
     // A member whose value is itself a validating model reports its failures
-    // through its own `ValidationException`; those have to be re-pathed under
+    // through its own payload-validation failure; those have to be re-pathed under
     // this member and merged into *this* object's list, so the throw moves to
     // after the write (P11: one aggregated failure per payload).
     let captures_nested = fields
@@ -3799,7 +3835,7 @@ fn render_object_serializer(
         || typed_additional.is_some_and(|additional| field_serialize_may_nest(&additional.ty));
 
     // Serialize-side (P12): re-run the shared field validation over the
-    // in-memory model and throw the aggregated `ValidationException` before
+    // in-memory model and throw the aggregated payload-validation failure before
     // emitting any wire member — matching the deserializer (both directions over
     // one set of check emitters).
     let needs_validation = object_needs_serialize_validation(schema, fields, open);
@@ -3883,7 +3919,9 @@ fn render_object_serializer(
         }
         render_java_serialize_dependent_required(output, schema, fields, open, "            ");
         if !captures_nested {
-            output.push_str("            if (!violations.isEmpty()) {\n                throw new ValidationException(violations);\n            }\n");
+            output.push_str("            if (!violations.isEmpty()) {\n");
+            render_payload_validation_failure(output, "                ");
+            output.push_str("            }\n");
         }
     }
 
@@ -3913,13 +3951,15 @@ fn render_object_serializer(
     }
     output.push_str("            gen.writeEndObject();\n");
     if captures_nested {
-        output.push_str("            if (!violations.isEmpty()) {\n                throw new ValidationException(violations);\n            }\n");
+        output.push_str("            if (!violations.isEmpty()) {\n");
+        render_payload_validation_failure(output, "                ");
+        output.push_str("            }\n");
     }
     output.push_str("        }\n    }\n\n");
 }
 
 /// True when writing a value of this type runs another model's `Serializer`,
-/// which may throw its own `ValidationException` with paths rooted at *its*
+/// which may throw its own payload-validation failure with paths rooted at *its*
 /// members (`zip`, not `address.zip`).
 fn field_serialize_may_nest(ty: &JavaType) -> bool {
     match ty {
@@ -3930,7 +3970,7 @@ fn field_serialize_may_nest(ty: &JavaType) -> bool {
 }
 
 /// Writes a value that may itself be a validating model, capturing its
-/// `ValidationException` and re-pathing every violation under the parent's
+/// payload-validation failure and re-pathing every violation under the parent's
 /// member path — `address.zip`, `addresses[1].zip` — into the parent's own
 /// list, so one payload still produces one aggregated failure (P11). The
 /// deserialize side does the same at `readTreeAsValue`.
@@ -3974,17 +4014,21 @@ fn render_capturing_value_write(
                 "{indent}    serializers.defaultSerializeValue({accessor}, gen);\n"
             ));
             output.push_str(&format!(
-                "{indent}}} catch (ValidationException nested{depth}) {{\n"
+                "{indent}}} catch (ApplicationFailure nested{depth}) {{\n"
             ));
+            render_nested_violation_cast(
+                output,
+                &format!("{indent}    "),
+                &format!("nested{depth}"),
+                &format!("nestedViolations{depth}"),
+            );
             output.push_str(&format!(
-                "{indent}    for (Violation nestedViolation{depth} : nested{depth}.getViolations()) {{\n{indent}        violations.add(nestedViolation{depth}.withPathPrefix({path_expr}));\n{indent}    }}\n"
+                "{indent}    for (Violation nestedViolation{depth} : nestedViolations{depth}) {{\n{indent}        violations.add(nestedViolation{depth}.withPathPrefix({path_expr}));\n{indent}    }}\n"
             ));
             // The nested serializer aborted mid-value, so the generator is
             // expecting one; nothing more can be written. Throw here with the
             // parent's own violations already merged in (P11).
-            output.push_str(&format!(
-                "{indent}    throw new ValidationException(violations);\n"
-            ));
+            render_payload_validation_failure(output, &format!("{indent}    "));
             output.push_str(&format!("{indent}}}\n"));
         }
     }
@@ -4169,9 +4213,9 @@ fn render_object_deserializer(
     output.push_str("            JsonNode node = SpecNumbers.readExactTree(parser);\n");
     output.push_str("            List<Violation> violations = new ArrayList<>();\n");
     output.push_str("            if (node == null || !node.isObject()) {\n");
-    output.push_str(
-        "                violations.add(new Violation(\"\", \"expected object\"));\n                throw new ValidationException(violations);\n            }\n",
-    );
+    output.push_str("                violations.add(new Violation(\"\", \"expected object\"));\n");
+    render_payload_validation_failure(output, "                ");
+    output.push_str("            }\n");
 
     let known: BTreeSet<&str> = fields
         .iter()
@@ -4255,7 +4299,9 @@ fn render_object_deserializer(
     render_java_property_count_checks(output, "node.size()", schema, "            ");
     render_java_dependent_required(output, "node", schema, "            ");
 
-    output.push_str("            if (!violations.isEmpty()) {\n                throw new ValidationException(violations);\n            }\n");
+    output.push_str("            if (!violations.isEmpty()) {\n");
+    render_payload_validation_failure(output, "                ");
+    output.push_str("            }\n");
     output.push_str("            return new ");
     output.push_str(class);
     output.push('(');
@@ -4503,10 +4549,16 @@ fn render_parse_value(
                 "{indent}    {target} = context.readTreeAsValue(field, {class}.class);\n"
             ));
             output.push_str(&format!(
-                "{indent}}} catch (ValidationException nested) {{\n"
+                "{indent}}} catch (ApplicationFailure nested) {{\n"
             ));
+            render_nested_violation_cast(
+                output,
+                &format!("{indent}    "),
+                "nested",
+                "nestedViolations",
+            );
             output.push_str(&format!(
-                "{indent}    for (Violation violation : nested.getViolations()) {{\n"
+                "{indent}    for (Violation violation : nestedViolations) {{\n"
             ));
             output.push_str(&format!(
                 "{indent}        violations.add(violation.withPathPrefix({json}));\n"
@@ -4727,10 +4779,16 @@ fn render_parse_element(
                 "{indent}    {list}.add(context.readTreeAsValue({element}, {class}.class));\n"
             ));
             output.push_str(&format!(
-                "{indent}}} catch (ValidationException nested) {{\n"
+                "{indent}}} catch (ApplicationFailure nested) {{\n"
             ));
+            render_nested_violation_cast(
+                output,
+                &format!("{indent}    "),
+                "nested",
+                "nestedViolations",
+            );
             output.push_str(&format!(
-                "{indent}    for (Violation violation : nested.getViolations()) {{\n"
+                "{indent}    for (Violation violation : nestedViolations) {{\n"
             ));
             output.push_str(&format!(
                 "{indent}        violations.add(violation.withPathPrefix({path_var}));\n"
@@ -4946,10 +5004,16 @@ fn render_parse_map_value(
                 "{indent}    {map}.put({key_var}, context.readTreeAsValue({element}, {class}.class));\n"
             ));
             output.push_str(&format!(
-                "{indent}}} catch (ValidationException nested) {{\n"
+                "{indent}}} catch (ApplicationFailure nested) {{\n"
             ));
+            render_nested_violation_cast(
+                output,
+                &format!("{indent}    "),
+                "nested",
+                "nestedViolations",
+            );
             output.push_str(&format!(
-                "{indent}    for (Violation violation : nested.getViolations()) {{\n"
+                "{indent}    for (Violation violation : nestedViolations) {{\n"
             ));
             output.push_str(&format!(
                 "{indent}        violations.add(violation.withPathPrefix({key_var}));\n"
@@ -5361,7 +5425,7 @@ fn render_typed_map_class(
 
     // Serialize-side (P12): member-count and key-shape constraints over the
     // in-memory map, plus each member re-checked against `T`, thrown as an
-    // aggregated `ValidationException` before emitting — matching the
+    // aggregated payload-validation failure before emitting — matching the
     // deserializer.
     let mut member_checks = String::new();
     if let Some(member) = &member {
@@ -5399,7 +5463,7 @@ fn render_typed_map_class(
         || schema.max_properties.is_some()
         || schema.property_names.is_some()
         || !member_checks.is_empty();
-    // A model-valued member reports through its own `ValidationException`;
+    // A model-valued member reports through its own payload-validation failure;
     // re-path and merge it here rather than letting it escape unrooted (P11).
     let captures_nested = field_serialize_may_nest(value);
     if !map_needs_validation && captures_nested {
@@ -5433,7 +5497,9 @@ fn render_typed_map_class(
             output.push_str("            }\n");
         }
         if !captures_nested {
-            output.push_str("            if (!violations.isEmpty()) {\n                throw new ValidationException(violations);\n            }\n");
+            output.push_str("            if (!violations.isEmpty()) {\n");
+            render_payload_validation_failure(output, "                ");
+            output.push_str("            }\n");
         }
     }
 
@@ -5450,7 +5516,9 @@ fn render_typed_map_class(
     output.push_str("            }\n");
     output.push_str("            gen.writeEndObject();\n");
     if captures_nested {
-        output.push_str("            if (!violations.isEmpty()) {\n                throw new ValidationException(violations);\n            }\n");
+        output.push_str("            if (!violations.isEmpty()) {\n");
+        render_payload_validation_failure(output, "                ");
+        output.push_str("            }\n");
     }
     output.push_str("        }\n    }\n\n");
 
@@ -5464,9 +5532,9 @@ fn render_typed_map_class(
     output.push_str("            JsonNode node = SpecNumbers.readExactTree(parser);\n");
     output.push_str("            List<Violation> violations = new ArrayList<>();\n");
     output.push_str("            if (node == null || !node.isObject()) {\n");
-    output.push_str(
-        "                violations.add(new Violation(\"\", \"expected object\"));\n                throw new ValidationException(violations);\n            }\n",
-    );
+    output.push_str("                violations.add(new Violation(\"\", \"expected object\"));\n");
+    render_payload_validation_failure(output, "                ");
+    output.push_str("            }\n");
     output.push_str(&format!(
         "            Map<String, {value_type}> additionalProperties = new LinkedHashMap<>();\n"
     ));
@@ -5504,7 +5572,9 @@ fn render_typed_map_class(
     if let Some(subschema) = &schema.property_names {
         render_java_property_name_checks(output, "node", subschema, "            ");
     }
-    output.push_str("            if (!violations.isEmpty()) {\n                throw new ValidationException(violations);\n            }\n");
+    output.push_str("            if (!violations.isEmpty()) {\n");
+    render_payload_validation_failure(output, "                ");
+    output.push_str("            }\n");
     output.push_str(&format!(
         "            return new {class}(additionalProperties);\n"
     ));
@@ -5989,41 +6059,6 @@ pub(in crate::generator) fn render_violation_file(package: &str) -> String {
     output.push_str("        Violation that = (Violation) other;\n");
     output.push_str("        return java.util.Objects.equals(path, that.path) && java.util.Objects.equals(reason, that.reason);\n    }\n\n");
     output.push_str("    @Override\n    public int hashCode() {\n        return java.util.Objects.hash(path, reason);\n    }\n");
-    output.push_str("}\n");
-    output
-}
-
-/// Runtime `ValidationException.java` contents for the package root.
-pub(in crate::generator) fn render_validation_exception_file(package: &str) -> String {
-    let mut output = String::new();
-    output.push_str(GENERATED_HEADER);
-    output.push_str(&format!("package {package};\n\n"));
-    output.push_str("import com.fasterxml.jackson.databind.JsonMappingException;\n");
-    output.push_str("import java.util.ArrayList;\n");
-    output.push_str("import java.util.Collections;\n");
-    output.push_str("import java.util.List;\n\n");
-    output.push_str(
-        "/** Aggregates every {@link Violation} found while (de)serializing a value. */\n",
-    );
-    output.push_str("public final class ValidationException extends JsonMappingException {\n");
-    output.push_str("    private final List<Violation> violations;\n\n");
-    output.push_str("    public ValidationException(List<Violation> violations) {\n");
-    output.push_str("        super((java.io.Closeable) null, buildMessage(violations));\n");
-    output.push_str("        this.violations = Collections.unmodifiableList(new ArrayList<>(violations));\n    }\n\n");
-    output.push_str(
-        "    public List<Violation> getViolations() {\n        return violations;\n    }\n\n",
-    );
-    output.push_str("    private static String buildMessage(List<Violation> violations) {\n");
-    output.push_str("        StringBuilder builder = new StringBuilder();\n");
-    output.push_str(
-        "        builder.append(violations.size()).append(\" validation error(s): \");\n",
-    );
-    output.push_str("        for (int index = 0; index < violations.size(); index++) {\n");
-    output.push_str(
-        "            if (index > 0) {\n                builder.append(\"; \");\n            }\n",
-    );
-    output.push_str("            builder.append(violations.get(index).toString());\n        }\n");
-    output.push_str("        return builder.toString();\n    }\n");
     output.push_str("}\n");
     output
 }

@@ -192,7 +192,7 @@ fn ts_temporal_serialize_call(
     let call = format!("{DEFINITIONS_NAMESPACE}.{func}({value_expr})");
     // `Date#toISOString` throws a RangeError for an invalid Date. The ordinary
     // serialize-side validator has already added a path-aware violation, so do
-    // not let the wire mapper bypass that aggregated ValidationError while the
+    // not let the wire mapper bypass that aggregated payload-validation failure while the
     // model is still assembling its output object.
     if matches!(
         (kind, repr),
@@ -1736,7 +1736,7 @@ fn render_external_models(
 
 /// The namespace under which every generated `models.ts` imports its sibling
 /// `definitions.ts` runtime module, so the generated file doesn't pollute its
-/// own module namespace with generic names (`ValidationError`, `collect`, …)
+/// own module namespace with generic names (`payloadValidationError`, `collect`, …)
 /// that could collide with user-authored identifiers.
 const DEFINITIONS_NAMESPACE: &str = "__nexgenDefinitions";
 
@@ -1747,7 +1747,7 @@ fn render_json_model_imports(runtime_import_module: &str) -> String {
     imports.push_str("import type { TransferTypeConverter } from \"nexus-rpc\";\n");
     // Temporal-repr models reference the ambient global `Temporal.*` types
     // (TS 6's `esnext.temporal` lib) — no import required (P4).
-    // `ValidationError`/`isPlainObject`/`Violation` are referenced by every
+    // `payloadValidationError`/`isPlainObject`/`Violation` are referenced by every
     // generated model's parser, so the import is always live.
     imports.push_str("import * as ");
     imports.push_str(DEFINITIONS_NAMESPACE);
@@ -1763,7 +1763,7 @@ fn render_json_runtime_module() -> String {
     let mut output = String::new();
     output.push_str(crate::generator::typescript::GENERATED_HEADER);
     output.push_str("\n\n");
-    output.push_str("import { HandlerError } from \"nexus-rpc\";\n\n");
+    output.push_str("import { ApplicationFailure } from \"@temporalio/common\";\n\n");
     render_validator_core(&mut output);
     output.push('\n');
     render_collect_helper(&mut output);
@@ -2063,7 +2063,7 @@ fn render_ts_temporal_helpers(output: &mut String, repr: TsDateTimeTypes) {
             // The pinned regex plus `validTemporalCalendar` already admit only
             // values `Temporal` accepts, but a constructor that throws must never
             // escape the converter as a bare `RangeError` (P11): every rejection
-            // is a `Violation` in the aggregated `ValidationError`.
+            // is a `Violation` in the aggregated payload-validation failure.
             output.push_str("  try {\n");
             output.push_str("    return Temporal.ZonedDateTime.from(`${canon}[${zone}]`);\n");
             output.push_str("  } catch {\n");
@@ -2278,15 +2278,16 @@ fn render_validator_core(output: &mut String) {
     output.push_str("  readonly path: string;\n");
     output.push_str("  readonly reason: string;\n");
     output.push_str("}\n\n");
-    output.push_str("export class ValidationError extends HandlerError {\n");
-    output.push_str("  public constructor(public readonly violations: Violation[]) {\n");
-    output.push_str("    super(\n");
-    output.push_str("      'BAD_REQUEST',\n");
+    output.push_str("/** Creates the Temporal failure used for payload validation errors. */\n");
     output.push_str(
-        "      `${violations.length} validation error(s): ` + violations.map((v) => `${v.path}: ${v.reason}`).join('; '),\n",
+        "export function payloadValidationError(violations: Violation[]): ApplicationFailure {\n",
     );
-    output.push_str("    );\n");
-    output.push_str("  }\n");
+    output.push_str("  // TODO: Use createPayloadValidationError from @temporalio/common once it is available in an SDK release.\n");
+    output.push_str("  return ApplicationFailure.nonRetryable(\n");
+    output.push_str("    'Payload validation failed',\n");
+    output.push_str("    'PayloadValidationError',\n");
+    output.push_str("    violations,\n");
+    output.push_str("  );\n");
     output.push_str("}\n\n");
     output.push_str(
         "export function isPlainObject(value: unknown): value is Record<string, unknown> {\n",
@@ -2972,7 +2973,7 @@ fn render_ts_union_serialize(output: &mut String, union: &TsUnion, value_expr: &
             let root_path = typescript_string_literal("");
             let serialized = serialize_expr_collecting(&variant.schema, &member, &root_path);
             output.push_str(&format!(
-                "  if (Array.isArray({value_expr})) {{\n    const out = {serialized};\n    if (violations.length) {{\n      throw new {DEFINITIONS_NAMESPACE}.ValidationError(violations);\n    }}\n    return out;\n  }}\n"
+                "  if (Array.isArray({value_expr})) {{\n    const out = {serialized};\n    if (violations.length) {{\n      throw {DEFINITIONS_NAMESPACE}.payloadValidationError(violations);\n    }}\n    return out;\n  }}\n"
             ));
         } else if variant.is_integer {
             output.push_str(&format!(
@@ -2990,7 +2991,7 @@ fn render_ts_union_serialize(output: &mut String, union: &TsUnion, value_expr: &
         ));
     }
     output.push_str(&format!(
-        "  throw new {DEFINITIONS_NAMESPACE}.ValidationError([{{ path: '', reason: 'expected one of: {}' }}]);\n",
+        "  throw {DEFINITIONS_NAMESPACE}.payloadValidationError([{{ path: '', reason: 'expected one of: {}' }}]);\n",
         union.admissible()
     ));
 }
@@ -3151,7 +3152,7 @@ fn render_model_transfer_type_converter(
         render_ts_union_parse(output, &union, "raw", "out", "''", "    ");
         output.push_str("    if (violations.length) {\n");
         output.push_str(&format!(
-            "      throw new {DEFINITIONS_NAMESPACE}.ValidationError(violations);\n"
+            "      throw {DEFINITIONS_NAMESPACE}.payloadValidationError(violations);\n"
         ));
         output.push_str("    }\n");
         output.push_str("    return out;\n");
@@ -3167,7 +3168,7 @@ fn render_model_transfer_type_converter(
             output.push_str(&checks);
             output.push_str("    if (violations.length) {\n");
             output.push_str(&format!(
-                "      throw new {DEFINITIONS_NAMESPACE}.ValidationError(violations);\n"
+                "      throw {DEFINITIONS_NAMESPACE}.payloadValidationError(violations);\n"
             ));
             output.push_str("    }\n");
         }
@@ -3209,7 +3210,7 @@ fn render_model_parser_body(
         "  if (!{DEFINITIONS_NAMESPACE}.isPlainObject(raw)) {{\n"
     ));
     output.push_str(&format!(
-        "    throw new {DEFINITIONS_NAMESPACE}.ValidationError([{{ path: '', reason: 'expected object' }}]);\n"
+        "    throw {DEFINITIONS_NAMESPACE}.payloadValidationError([{{ path: '', reason: 'expected object' }}]);\n"
     ));
     output.push_str("  }\n\n");
 
@@ -3252,7 +3253,7 @@ fn render_model_parser_body(
 
     output.push_str("  if (violations.length) {\n");
     output.push_str(&format!(
-        "    throw new {DEFINITIONS_NAMESPACE}.ValidationError(violations);\n"
+        "    throw {DEFINITIONS_NAMESPACE}.payloadValidationError(violations);\n"
     ));
     output.push_str("  }\n");
     // An optional member is assigned after the literal is built, which a
@@ -3310,7 +3311,7 @@ fn render_model_serializer_body(
     models: &[&PlannedJsonType],
 ) -> Result<()> {
     // Serialize-side (P12): re-run the shared field validation over the
-    // in-memory model and throw the aggregated `ValidationError` before emitting
+    // in-memory model and throw the aggregated payload-validation failure before emitting
     // the wire object — matching the parse path (both directions over one set of
     // check emitters).
     let needs_validation = model_needs_serialize_validation(&schema)?;
@@ -3350,7 +3351,7 @@ fn render_model_serializer_body(
             }
             output.push_str("  if (violations.length) {\n");
             output.push_str(&format!(
-                "    throw new {DEFINITIONS_NAMESPACE}.ValidationError(violations);\n"
+                "    throw {DEFINITIONS_NAMESPACE}.payloadValidationError(violations);\n"
             ));
             output.push_str("  }\n");
         }
@@ -3425,7 +3426,7 @@ fn render_model_serializer_body(
         render_ts_dependent_required(output, "out", &schema, "  ");
         output.push_str("  if (violations.length) {\n");
         output.push_str(&format!(
-            "    throw new {DEFINITIONS_NAMESPACE}.ValidationError(violations);\n"
+            "    throw {DEFINITIONS_NAMESPACE}.payloadValidationError(violations);\n"
         ));
         output.push_str("  }\n");
     }
@@ -3470,7 +3471,7 @@ fn render_map_parser_body(output: &mut String, schema: &Schema, shape: &TsMapSha
     output.push_str("  }\n");
     output.push_str("  if (violations.length) {\n");
     output.push_str(&format!(
-        "    throw new {DEFINITIONS_NAMESPACE}.ValidationError(violations);\n"
+        "    throw {DEFINITIONS_NAMESPACE}.payloadValidationError(violations);\n"
     ));
     output.push_str("  }\n");
     output.push_str("  return { additionalProperties };\n");
@@ -4294,8 +4295,10 @@ fn render_collect_helper(output: &mut String) {
     output.push_str(
         "export function collect(violations: Violation[], path: string, error: unknown): void {\n",
     );
-    output.push_str("  if (error instanceof ValidationError) {\n");
-    output.push_str("    for (const inner of error.violations) {\n");
+    output.push_str("  if (error instanceof ApplicationFailure && error.type === 'PayloadValidationError' && Array.isArray(error.details?.[0])) {\n");
+    output.push_str("    // Generated failures keep the original array as their first detail; this cast performs no serialization.\n");
+    output.push_str("    const nestedViolations = error.details?.[0] as Violation[];\n");
+    output.push_str("    for (const inner of nestedViolations) {\n");
     // A nested violation about the value *itself* carries no path of its own (a
     // union branch's own constraint, an element-level check), so the prefix is
     // the whole path — never `segments[0].` with a dangling separator (P11).

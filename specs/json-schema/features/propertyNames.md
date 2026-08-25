@@ -74,10 +74,10 @@ string against the (string) constraint.
 
 | Language | Strategy |
 |---|---|
-| Go | The key-constraint check is a predicate in the shared `Validate`, which `UnmarshalJSON` calls after decoding: iterate the decoded keys and run the check (compiled `regexp` for [[pattern]], length checks); a failure → `Violation{Path:key, Reason: fmt.Sprintf("invalid property name %q: %s", key, why)}` (`why` is the underlying assertion's reason, e.g. `must match ^[a-z]+$`), collected into one `ValidationError`. |
-| TypeScript | the shared `Validate` predicate over `Object.keys(parsed)` applies the check; a failure → push ``Violation{path:k, reason: `invalid property name "${k}": ${why}`}``, throw one `ValidationError`. |
-| Python | both directions of the `_<Model>TransferTypeConverter` (**PRINCIPLES Python §3**) loop the map's keys and apply the shared key check; a failure appends ``Violation(path=key, reason=f'invalid property name "{key}": {why}')`` per bad key into the single `ValidationError`. |
-| Java | in the per-POJO collecting deserializer (PRINCIPLES Java §5), iterate the parsed tree's keys, apply the shared key check, and push a `Violation{path:key, "invalid property name \"" + key + "\": " + why}` per bad key into the single `ValidationException`. |
+| Go | The key-constraint check is a predicate in the shared `Validate`, which `UnmarshalJSON` calls after decoding: iterate the decoded keys and run the check (compiled `regexp` for [[pattern]], length checks); a failure → `Violation{Path:key, Reason: fmt.Sprintf("invalid property name %q: %s", key, why)}` (`why` is the underlying assertion's reason, e.g. `must match ^[a-z]+$`), collected into one `PayloadValidationError` application failure. |
+| TypeScript | the shared `Validate` predicate over `Object.keys(parsed)` applies the check; a failure → push ``Violation{path:k, reason: `invalid property name "${k}": ${why}`}``, throw one `PayloadValidationError` application failure. |
+| Python | both directions of the `_<Model>TransferTypeConverter` (**PRINCIPLES Python §3**) loop the map's keys and apply the shared key check; a failure appends ``Violation(path=key, reason=f'invalid property name "{key}": {why}')`` per bad key into the single `PayloadValidationError` application failure. |
+| Java | in the per-POJO collecting deserializer (PRINCIPLES Java §5), iterate the parsed tree's keys, apply the shared key check, and push a `Violation{path:key, "invalid property name \"" + key + "\": " + why}` per bad key into the single `PayloadValidationError` application failure. |
 
 Reuses whatever the string-assertion specs ([[pattern]], [[minLength]],
 [[maxLength]], [[enum]], [[format]]) emit — `propertyNames` is just those
@@ -116,7 +116,7 @@ exactly the wire key the check applies to, in both directions.
 
 - All keys satisfy the constraint → OK.
 - One key violates (bad pattern / too long) → one
-  `ValidationError{path:key, reason}`.
+  `Violation{path:key, reason}` in the payload-validation application failure.
 - Multiple bad keys → all reported in one shot (P11).
 - Empty object → vacuously OK.
 

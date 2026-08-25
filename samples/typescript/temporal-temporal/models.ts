@@ -62,7 +62,7 @@ export const temporalTransferTypeConverter =
     public fromTransferType(raw: unknown): Temporal {
       const violations: __nexgenDefinitions.Violation[] = [];
       if (!__nexgenDefinitions.isPlainObject(raw)) {
-        throw new __nexgenDefinitions.ValidationError([
+        throw __nexgenDefinitions.payloadValidationError([
           { path: "", reason: "expected object" },
         ]);
       }
@@ -280,7 +280,7 @@ export const temporalTransferTypeConverter =
       }
 
       if (violations.length) {
-        throw new __nexgenDefinitions.ValidationError(violations);
+        throw __nexgenDefinitions.payloadValidationError(violations);
       }
       const out: Temporal = { createdAt, birthday, alarm, timeout };
       if (updatedAt !== undefined) {
@@ -384,7 +384,7 @@ export const temporalTransferTypeConverter =
             : __nexgenDefinitions.serializeTemporalDate(value.archivedOn);
       }
       if (violations.length) {
-        throw new __nexgenDefinitions.ValidationError(violations);
+        throw __nexgenDefinitions.payloadValidationError(violations);
       }
       return out;
     }

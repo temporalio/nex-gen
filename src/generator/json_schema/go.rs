@@ -1638,7 +1638,7 @@ fn render_external_models(
 }
 
 /// Renders the shared `definitions.go` file: the schema-independent runtime
-/// (`Violation`/`ValidationError`, `parseSpecInteger`, the (de)serialize
+/// (`Violation`/payload-validation failure, `parseSpecInteger`, the (de)serialize
 /// helpers) defined once in the models' own package. The identifiers stay
 /// unexported because the generated model files reference them within the same
 /// package.
@@ -1653,11 +1653,11 @@ pub(in crate::generator) fn render_definitions_file(package_name: &str) -> Strin
     output.push_str("\t\"bytes\"\n");
     output.push_str("\t\"encoding/json\"\n");
     output.push_str("\t\"errors\"\n");
-    output.push_str("\t\"fmt\"\n");
     output.push_str("\t\"math\"\n");
     output.push_str("\t\"reflect\"\n");
     output.push_str("\t\"strconv\"\n");
     output.push_str("\t\"strings\"\n");
+    output.push_str("\t\"go.temporal.io/sdk/temporal\"\n");
     output.push_str(")\n\n");
     render_validator_core(&mut output);
     output
@@ -1674,27 +1674,27 @@ fn render_validator_core(output: &mut String) {
     output.push_str("func (v Violation) String() string {\n");
     output.push_str("\tif v.Path == \"\" {\n\t\treturn v.Reason\n\t}\n");
     output.push_str("\treturn v.Path + \": \" + v.Reason\n}\n\n");
-    output
-        .push_str("// ValidationError aggregates every Violation found while (de)serializing a\n");
-    output.push_str("// value, surfacing them all in one error (never a partial first-failure).\n");
-    output.push_str("type ValidationError struct {\n\tViolations []Violation\n}\n\n");
-    output.push_str("// Error implements the error interface, joining every Violation into one\n");
-    output.push_str("// message.\n");
-    output.push_str("func (e *ValidationError) Error() string {\n");
-    output.push_str("\tparts := make([]string, len(e.Violations))\n");
-    output.push_str("\tfor i, v := range e.Violations {\n\t\tparts[i] = v.String()\n\t}\n");
-    output.push_str("\treturn fmt.Sprintf(\"%d validation error(s): %s\", len(e.Violations), strings.Join(parts, \"; \"))\n");
+    output.push_str("func newPayloadValidationError(violations []Violation) error {\n");
+    output.push_str("\t// TODO: Use temporal.NewPayloadValidationError once it is available in an SDK release.\n");
+    output.push_str("\treturn temporal.NewNonRetryableApplicationError(\"Payload validation failed\", \"PayloadValidationError\", nil, violations)\n");
+    output.push_str("}\n\n");
+    output.push_str("func payloadValidationErrorViolations(err error) ([]Violation, bool) {\n");
+    output.push_str("\tvar applicationError *temporal.ApplicationError\n");
+    output.push_str("\tif !errors.As(err, &applicationError) || applicationError.Type() != \"PayloadValidationError\" {\n");
+    output.push_str("\t\treturn nil, false\n\t}\n");
+    output.push_str("\tvar violations []Violation\n");
+    output.push_str("\tif err := applicationError.Details(&violations); err != nil {\n");
+    output.push_str("\t\treturn nil, false\n\t}\n");
+    output.push_str("\treturn violations, true\n");
     output.push_str("}\n\n");
     output.push_str("func addViolations(errs *[]Violation, err error) {\n");
     output.push_str("\tif err == nil {\n\t\treturn\n\t}\n");
-    output.push_str("\tvar ve *ValidationError\n");
-    output.push_str("\tif errors.As(err, &ve) {\n\t\t*errs = append(*errs, ve.Violations...)\n\t\treturn\n\t}\n");
+    output.push_str("\tif violations, ok := payloadValidationErrorViolations(err); ok {\n\t\t*errs = append(*errs, violations...)\n\t\treturn\n\t}\n");
     output.push_str("\t*errs = append(*errs, Violation{\"\", err.Error()})\n}\n\n");
     output.push_str("func mergeNested(errs *[]Violation, path string, err error) {\n");
     output.push_str("\tif err == nil {\n\t\treturn\n\t}\n");
-    output.push_str("\tvar ve *ValidationError\n");
-    output.push_str("\tif errors.As(err, &ve) {\n");
-    output.push_str("\t\tfor _, v := range ve.Violations {\n");
+    output.push_str("\tif violations, ok := payloadValidationErrorViolations(err); ok {\n");
+    output.push_str("\t\tfor _, v := range violations {\n");
     output.push_str("\t\t\tp := v.Path\n\t\t\tif p == \"\" {\n\t\t\t\tp = path\n\t\t\t} else {\n\t\t\t\tp = path + \".\" + v.Path\n\t\t\t}\n");
     output.push_str(
         "\t\t\tif strings.HasPrefix(v.Path, \"[\") {\n\t\t\t\tp = path + v.Path\n\t\t\t}\n",
@@ -2389,8 +2389,9 @@ fn render_go_variant_validate(
     model_names: &BTreeMap<String, String>,
     unions: &BTreeMap<String, GoUnion>,
 ) {
-    output
-        .push_str("// Validate checks v against every constraint and returns a *ValidationError\n");
+    output.push_str(
+        "// Validate checks v against every constraint and returns a PayloadValidationError\n",
+    );
     output.push_str("// listing any violations.\n");
     output.push_str("func (v ");
     output.push_str(&variant.go_type);
@@ -2422,7 +2423,7 @@ fn render_go_variant_validate(
             0,
         );
     }
-    output.push_str("\tif len(errs) > 0 {\n\t\treturn &ValidationError{Violations: errs}\n\t}\n\treturn nil\n}\n\n");
+    output.push_str("\tif len(errs) > 0 {\n\t\treturn newPayloadValidationError(errs)\n\t}\n\treturn nil\n}\n\n");
     if variant.schema.ty.as_ref().and_then(Value::as_str) == Some("array")
         && schema_requires_go_wire_conversion(&variant.schema)
     {
@@ -2880,8 +2881,9 @@ fn render_validate(
     unions: &BTreeMap<String, GoUnion>,
     additional_shape: Option<&GoMapShape>,
 ) -> Result<()> {
-    output
-        .push_str("// Validate checks m against every constraint and returns a *ValidationError\n");
+    output.push_str(
+        "// Validate checks m against every constraint and returns a PayloadValidationError\n",
+    );
     output.push_str("// listing any violations.\n");
     output.push_str("func (m ");
     output.push_str(&model.model_name);
@@ -3273,7 +3275,7 @@ fn render_validate(
         render_go_property_count_checks(output, "len(present)", schema, "\t");
         render_go_dependent_required(output, "present", schema, "\t");
     }
-    output.push_str("\tif len(errs) > 0 {\n\t\treturn &ValidationError{Violations: errs}\n\t}\n\treturn nil\n}\n\n");
+    output.push_str("\tif len(errs) > 0 {\n\t\treturn newPayloadValidationError(errs)\n\t}\n\treturn nil\n}\n\n");
     Ok(())
 }
 
@@ -3314,7 +3316,7 @@ fn render_unmarshal_json(
     additional_shape: Option<&GoMapShape>,
 ) -> Result<()> {
     output.push_str("// UnmarshalJSON parses data into m and validates it, returning a\n");
-    output.push_str("// *ValidationError listing any violations.\n");
+    output.push_str("// PayloadValidationError listing any violations.\n");
     output.push_str("func (m *");
     output.push_str(&model.model_name);
     output.push_str(") UnmarshalJSON(data []byte) error {\n");
@@ -3402,7 +3404,7 @@ fn render_unmarshal_json(
     }) {
         output.push_str("\tif len(errs) == 0 {\n\t\taddViolations(&errs, m.Validate())\n\t}\n");
     }
-    output.push_str("\tif len(errs) > 0 {\n\t\treturn &ValidationError{Violations: errs}\n\t}\n\treturn nil\n}\n\n");
+    output.push_str("\tif len(errs) > 0 {\n\t\treturn newPayloadValidationError(errs)\n\t}\n\treturn nil\n}\n\n");
     Ok(())
 }
 
@@ -4245,7 +4247,7 @@ fn render_marshal_json(
     additional_shape: Option<&GoMapShape>,
 ) -> Result<()> {
     output.push_str("// MarshalJSON validates m, then serializes it to JSON, returning a\n");
-    output.push_str("// *ValidationError if validation fails.\n");
+    output.push_str("// PayloadValidationError if validation fails.\n");
     output.push_str("func (m ");
     output.push_str(&model.model_name);
     output.push_str(") MarshalJSON() ([]byte, error) {\n");
@@ -4403,7 +4405,7 @@ fn render_marshal_json(
     }
     // The object member-count and cross-field constraints ran in the shared
     // `Validate` above, over the same member set (`render_go_present_member_set`).
-    output.push_str("\tif len(errs) > 0 {\n\t\treturn nil, &ValidationError{Violations: errs}\n\t}\n\treturn json.Marshal(out)\n}\n\n");
+    output.push_str("\tif len(errs) > 0 {\n\t\treturn nil, newPayloadValidationError(errs)\n\t}\n\treturn json.Marshal(out)\n}\n\n");
     Ok(())
 }
 
@@ -4470,8 +4472,9 @@ fn render_go_map_methods(
     unions: &BTreeMap<String, GoUnion>,
 ) {
     let element_type = shape.element_type.as_str();
-    output
-        .push_str("// Validate checks m against every constraint and returns a *ValidationError\n");
+    output.push_str(
+        "// Validate checks m against every constraint and returns a PayloadValidationError\n",
+    );
     output.push_str("// listing any violations.\n");
     output.push_str("func (m ");
     output.push_str(type_name);
@@ -4633,10 +4636,10 @@ fn render_go_map_methods(
         }
         output.push_str("\t}\n");
     }
-    output.push_str("\tif len(errs) > 0 {\n\t\treturn &ValidationError{Violations: errs}\n\t}\n\treturn nil\n}\n\n");
+    output.push_str("\tif len(errs) > 0 {\n\t\treturn newPayloadValidationError(errs)\n\t}\n\treturn nil\n}\n\n");
 
     output.push_str("// UnmarshalJSON parses data into m and validates it, returning a\n");
-    output.push_str("// *ValidationError listing any violations.\n");
+    output.push_str("// PayloadValidationError listing any violations.\n");
     output.push_str("func (m *");
     output.push_str(type_name);
     output.push_str(") UnmarshalJSON(data []byte) error {\n");
@@ -4812,10 +4815,10 @@ fn render_go_map_methods(
     if let Some(subschema) = &schema.property_names {
         render_go_property_name_checks(output, type_name, "raw", subschema, "\t");
     }
-    output.push_str("\tif len(errs) > 0 {\n\t\treturn &ValidationError{Violations: errs}\n\t}\n\treturn nil\n}\n\n");
+    output.push_str("\tif len(errs) > 0 {\n\t\treturn newPayloadValidationError(errs)\n\t}\n\treturn nil\n}\n\n");
 
     output.push_str("// MarshalJSON validates m, then serializes it to JSON, returning a\n");
-    output.push_str("// *ValidationError if validation fails.\n");
+    output.push_str("// PayloadValidationError if validation fails.\n");
     output.push_str("func (m ");
     output.push_str(type_name);
     output.push_str(") MarshalJSON() ([]byte, error) {\n\tif err := m.Validate(); err != nil {\n\t\treturn nil, err\n\t}\n");

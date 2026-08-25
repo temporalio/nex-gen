@@ -2,10 +2,7 @@
 
 from __future__ import annotations
 
-from ._definitions import (
-    ValidationError,
-    Violation,
-)
+from ._definitions import Violation
 from .models import (
     GetRoomInput,
     Labels,
@@ -17,7 +14,6 @@ from .models import (
 from .services import ChatService
 
 __all__ = [
-    "ValidationError",
     "Violation",
     "GetRoomInput",
     "Labels",

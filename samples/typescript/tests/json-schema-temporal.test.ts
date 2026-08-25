@@ -6,10 +6,17 @@ import { temporalTransferTypeConverter as temporalTemporalTransferTypeConverter 
 import {
   decodeFixture,
   encodeModel,
+  exposeValidationDetails,
   fixtureBytes,
   loadFixture as loadFixtureFrom,
   roundTripFixture,
 } from "./json-converter-helper.ts";
+
+exposeValidationDetails(
+  stringTemporalTransferTypeConverter,
+  dateTemporalTransferTypeConverter,
+  temporalTemporalTransferTypeConverter,
+);
 
 const wireFixtureDir = new URL("../../wire/json_schema/temporal/", import.meta.url);
 

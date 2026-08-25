@@ -2,6 +2,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import io.temporal.failure.ApplicationFailure;
 import java.io.File;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
@@ -266,14 +267,20 @@ public final class Runner {
 
     private static List<Map<String, String>> violationsOf(Throwable error) {
         for (Throwable current = error; current != null; current = current.getCause()) {
-            if (!current.getClass().getSimpleName().equals("ValidationException")) {
+            if (!(current instanceof ApplicationFailure)) {
+                continue;
+            }
+            ApplicationFailure failure = (ApplicationFailure) current;
+            if (!"PayloadValidationError".equals(failure.getType())
+                    || failure.getDetails().getSize() == 0) {
                 continue;
             }
             try {
-                Method accessor = current.getClass().getMethod("getViolations");
+                // A locally-created failure retains the list as its first detail.
+                // This cast is cheap and performs no serialization.
+                List<?> violations = failure.getDetails().get(0, List.class);
                 List<Map<String, String>> out = new ArrayList<Map<String, String>>();
-                for (Iterator<?> it = ((List<?>) accessor.invoke(current)).iterator();
-                        it.hasNext(); ) {
+                for (Iterator<?> it = violations.iterator(); it.hasNext(); ) {
                     Object violation = it.next();
                     Map<String, String> entry = new LinkedHashMap<String, String>();
                     entry.put("path", String.valueOf(

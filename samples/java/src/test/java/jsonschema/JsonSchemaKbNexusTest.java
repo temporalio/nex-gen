@@ -21,6 +21,7 @@ import io.temporal.api.common.v1.Payload;
 import io.temporal.client.WorkflowOptions;
 import io.temporal.common.converter.DataConverter;
 import io.temporal.common.converter.DefaultDataConverter;
+import io.temporal.failure.ApplicationFailure;
 import io.temporal.testing.TestWorkflowEnvironment;
 import io.temporal.worker.Worker;
 import io.temporal.workflow.NexusOperationOptions;
@@ -255,6 +256,13 @@ final class JsonSchemaKbNexusTest {
     private static String messageChain(Throwable error) {
         StringBuilder builder = new StringBuilder();
         for (Throwable current = error; current != null; current = current.getCause()) {
+            if (current instanceof ApplicationFailure) {
+                ApplicationFailure failure = (ApplicationFailure) current;
+                if ("PayloadValidationError".equals(failure.getType())
+                        && failure.getDetails().getSize() > 0) {
+                    builder.append(failure.getDetails().get(0, java.util.List.class)).append('\n');
+                }
+            }
             if (current.getMessage() != null) {
                 builder.append(current.getMessage()).append('\n');
             }

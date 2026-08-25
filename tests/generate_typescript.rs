@@ -1898,9 +1898,23 @@ fn typescript_json_emits_complete_matchers_and_typed_mixed_extras() {
     let runtime_test = output_path.join("wave2-conformance.ts");
     fs::write(
         &runtime_test,
-        r#"import { expect, test } from "vitest";
+r#"import { expect, test } from "vitest";
+import { ApplicationFailure } from "@temporalio/common";
 import { probeTransferTypeConverter } from "./models.ts";
-import { ValidationError } from "./definitions.ts";
+import type { Violation } from "./definitions.ts";
+
+function violations(fn: () => unknown): Violation[] {
+  try {
+    fn();
+  } catch (error) {
+    expect(error).toBeInstanceOf(ApplicationFailure);
+    const failure = error as ApplicationFailure;
+    expect(failure.type).toBe("PayloadValidationError");
+    expect(failure.nonRetryable).toBe(true);
+    return failure.details?.[0] as Violation[];
+  }
+  throw new Error("expected validation failure");
+}
 
 test("mixed extras, matchers, and wire-string constraints run both ways", () => {
   const model = probeTransferTypeConverter.fromTransferType({
@@ -1920,13 +1934,13 @@ test("mixed extras, matchers, and wire-string constraints run both ways", () => 
     payload: "aGk=",
     schedule: ["2024-01-02"],
   });
-  expect(() => probeTransferTypeConverter.fromTransferType({ integral: [2.5] })).toThrow(ValidationError);
-  expect(() => probeTransferTypeConverter.fromTransferType({ emails: ["dev@invalid"] })).toThrow(ValidationError);
-  expect(() => probeTransferTypeConverter.fromTransferType({ payload: "Pj4+" })).toThrow(/pattern/);
-  expect(() => probeTransferTypeConverter.toTransferType({
+  expect(violations(() => probeTransferTypeConverter.fromTransferType({ integral: [2.5] }))).not.toHaveLength(0);
+  expect(violations(() => probeTransferTypeConverter.fromTransferType({ emails: ["dev@invalid"] }))).not.toHaveLength(0);
+  expect(violations(() => probeTransferTypeConverter.fromTransferType({ payload: "Pj4+" }))[0]?.reason).toContain("pattern");
+  expect(violations(() => probeTransferTypeConverter.toTransferType({
     ...model,
     additionalProperties: { id: [Temporal.PlainDate.from("2024-01-02")] },
-  })).toThrow(/id.*collides with declared property/);
+  }))[0]?.reason).toContain("collides with declared property");
 });
 "#,
     )
@@ -2091,8 +2105,9 @@ fn typescript_json_wave3_pairwise_runtime_matrix() {
     fs::write(
         &runtime_test,
         r#"import { expect, test } from "vitest";
+import { ApplicationFailure } from "@temporalio/common";
 import { auditTransferTypeConverter } from "./models.ts";
-import { ValidationError } from "./definitions.ts";
+import type { Violation } from "./definitions.ts";
 
 const base = {
   requiredPlain: "present",
@@ -2115,12 +2130,15 @@ const base = {
   mixed: { id: "m", schedule: ["2024-01-01"] },
 };
 
-function violations(fn: () => unknown) {
+function violations(fn: () => unknown): Violation[] {
   try {
     fn();
   } catch (error) {
-    expect(error).toBeInstanceOf(ValidationError);
-    return (error as ValidationError).violations;
+    expect(error).toBeInstanceOf(ApplicationFailure);
+    const failure = error as ApplicationFailure;
+    expect(failure.type).toBe("PayloadValidationError");
+    expect(failure.nonRetryable).toBe(true);
+    return failure.details?.[0] as Violation[];
   }
   throw new Error("expected validation failure");
 }
@@ -2154,12 +2172,12 @@ test("presence, closed scalars, and numeric boundaries agree both ways", () => {
     expect(violations(() => auditTransferTypeConverter.fromTransferType({ ...base, [field]: replacement }))
       .some(({ path }) => path === field)).toBe(true);
   }
-  expect(() => auditTransferTypeConverter.fromTransferType({ ...base, bounded: 10 })).toThrow(/must be < 10/);
+  expect(violations(() => auditTransferTypeConverter.fromTransferType({ ...base, bounded: 10 }))[0]?.reason).toContain("must be < 10");
   expect(auditTransferTypeConverter.fromTransferType({ ...base, bounded: -15 }).bounded).toBe(-15);
 
   const invalidClosed = { ...value, constNumber: 2.5 as unknown as 1.5 };
-  expect(() => auditTransferTypeConverter.toTransferType(invalidClosed)).toThrow(/constNumber/);
-  expect(() => auditTransferTypeConverter.toTransferType({ ...value, bounded: 10 })).toThrow(/must be < 10/);
+  expect(violations(() => auditTransferTypeConverter.toTransferType(invalidClosed))[0]?.path).toBe("constNumber");
+  expect(violations(() => auditTransferTypeConverter.toTransferType({ ...value, bounded: 10 }))[0]?.reason).toContain("must be < 10");
 });
 
 test("contains, propertyNames, arrays, and typed-extra counts aggregate both ways", () => {
@@ -2186,26 +2204,26 @@ test("contains, propertyNames, arrays, and typed-extra counts aggregate both way
     ...base, checkedArray: ["ok", "ok", "x", "x"],
   }));
   expect(crowded.filter(({ path }) => path === "checkedArray").length).toBeGreaterThanOrEqual(3);
-  expect(() => auditTransferTypeConverter.toTransferType({ ...value, checkedArray: [] })).toThrow(ValidationError);
-  expect(() => auditTransferTypeConverter.toTransferType({ ...value, checkedArray: ["ok", "ok", "x", "x"] })).toThrow(ValidationError);
+  expect(violations(() => auditTransferTypeConverter.toTransferType({ ...value, checkedArray: [] }))).not.toHaveLength(0);
+  expect(violations(() => auditTransferTypeConverter.toTransferType({ ...value, checkedArray: ["ok", "ok", "x", "x"] }))).not.toHaveLength(0);
 
   for (const key of ["x", "bad key@example.com", "c@example.com"]) {
     expect(violations(() => auditTransferTypeConverter.fromTransferType({ ...base, names: { [key]: "x" } }))
       .some(({ path }) => path === `names.${key}`)).toBe(true);
   }
-  expect(() => auditTransferTypeConverter.toTransferType({
+  expect(violations(() => auditTransferTypeConverter.toTransferType({
     ...value, names: { additionalProperties: { "c@example.com": "x" } },
-  })).toThrow(/c@example.com/);
+  })).some(({ path }) => path.includes("c@example.com"))).toBe(true);
 
-  expect(() => auditTransferTypeConverter.fromTransferType({ ...base, mixed: { id: "m" } })).toThrow(/at least 2 properties/);
-  expect(() => auditTransferTypeConverter.fromTransferType({
+  expect(violations(() => auditTransferTypeConverter.fromTransferType({ ...base, mixed: { id: "m" } }))[0]?.reason).toContain("at least 2 properties");
+  expect(violations(() => auditTransferTypeConverter.fromTransferType({
     ...base,
     mixed: { id: "m", a: ["2024-01-01"], b: ["2024-01-02"], c: ["2024-01-03"] },
-  })).toThrow(/at most 3 properties/);
-  expect(() => auditTransferTypeConverter.toTransferType({
+  }))[0]?.reason).toContain("at most 3 properties");
+  expect(violations(() => auditTransferTypeConverter.toTransferType({
     ...value, mixed: { ...value.mixed, additionalProperties: {} },
-  })).toThrow(/at least 2 properties/);
-  expect(() => auditTransferTypeConverter.toTransferType({
+  }))[0]?.reason).toContain("at least 2 properties");
+  expect(violations(() => auditTransferTypeConverter.toTransferType({
     ...value,
     mixed: {
       ...value.mixed,
@@ -2215,14 +2233,14 @@ test("contains, propertyNames, arrays, and typed-extra counts aggregate both way
         c: [Temporal.PlainDate.from("2024-01-03")],
       },
     },
-  })).toThrow(/at most 3 properties/);
-  expect(() => auditTransferTypeConverter.toTransferType({
+  }))[0]?.reason).toContain("at most 3 properties");
+  expect(violations(() => auditTransferTypeConverter.toTransferType({
     ...value,
     mixed: {
       ...value.mixed,
       additionalProperties: { id: [Temporal.PlainDate.from("2024-01-01")] },
     },
-  })).toThrow(/id.*collides with declared property/);
+  })).some(({ path, reason }) => path.endsWith("id") && reason.includes("collides with declared property"))).toBe(true);
 });
 "#,
     )
@@ -2450,8 +2468,9 @@ fn typescript_json_wave7_discrete_defects_typecheck_and_run() {
     fs::write(
         &runtime_test,
         r#"import { expect, test } from "vitest";
+import { ApplicationFailure } from "@temporalio/common";
 import { probeTransferTypeConverter, emptyTransferTypeConverter } from "./models.ts";
-import { ValidationError } from "./definitions.ts";
+import type { Violation } from "./definitions.ts";
 
 const base = {
   matrix: [[1, 2]],
@@ -2462,12 +2481,13 @@ const base = {
   label: "a/b",
 };
 
-function violations(fn: () => unknown) {
+function violations(fn: () => unknown): Violation[] {
   try {
     fn();
   } catch (error) {
-    if (error instanceof ValidationError) {
-      return error.violations;
+    if (error instanceof ApplicationFailure && error.type === "PayloadValidationError") {
+      expect(error.nonRetryable).toBe(true);
+      return error.details?.[0] as Violation[];
     }
     throw error;
   }
@@ -2607,8 +2627,8 @@ fn typescript_json_dispatches_cross_module_ref_union_branches() {
     fs::write(
         &runtime_test,
         r#"import { expect, test } from "vitest";
+import { ApplicationFailure } from "@temporalio/common";
 import { mainTransferTypeConverter } from "./main/models.ts";
-import { ValidationError } from "./definitions.ts";
 
 test("every cross-file branch round-trips", () => {
   for (const wire of [{ shape: { kind: "square", s: 2 } }, { shape: { kind: "circle", r: 1 } }, { shape: "x" }]) {
@@ -2616,7 +2636,7 @@ test("every cross-file branch round-trips", () => {
     expect(mainTransferTypeConverter.toTransferType(model)).toEqual(wire);
   }
   expect(() => mainTransferTypeConverter.fromTransferType({ shape: { kind: "tri" } })).toThrow(
-    ValidationError,
+    ApplicationFailure,
   );
 });
 "#,
@@ -2702,17 +2722,19 @@ fn typescript_json_guards_nullable_elements_in_array_keywords() {
     fs::write(
         &runtime_test,
         r#"import { expect, test } from "vitest";
+import { ApplicationFailure } from "@temporalio/common";
 import { bagTransferTypeConverter } from "./models.ts";
-import { ValidationError } from "./definitions.ts";
+import type { Violation } from "./definitions.ts";
 
 const base = { tags: ["ab"], nums: [1], blobs: ["AQI="] };
 
-function violations(fn: () => unknown) {
+function violations(fn: () => unknown): Violation[] {
   try {
     fn();
   } catch (error) {
-    if (error instanceof ValidationError) {
-      return error.violations;
+    if (error instanceof ApplicationFailure && error.type === "PayloadValidationError") {
+      expect(error.nonRetryable).toBe(true);
+      return error.details?.[0] as Violation[];
     }
     throw error;
   }
@@ -2794,13 +2816,22 @@ properties:
     fs::write(
         &runtime_test,
         r#"import { expect, test } from "vitest";
+import { ApplicationFailure } from "@temporalio/common";
 import { pinTransferTypeConverter } from "./models.ts";
 
 test("an optional const member round-trips and stays absent when omitted", () => {
   expect(pinTransferTypeConverter.toTransferType(pinTransferTypeConverter.fromTransferType({}))).toEqual({});
   const wire = { plain: "x", num: 3, tag: "aGk=", span: "PT1H30M" };
   expect(pinTransferTypeConverter.toTransferType(pinTransferTypeConverter.fromTransferType(wire))).toEqual(wire);
-  expect(() => pinTransferTypeConverter.fromTransferType({ plain: "y" })).toThrow(/must equal/);
+  try {
+    pinTransferTypeConverter.fromTransferType({ plain: "y" });
+    throw new Error("expected validation failure");
+  } catch (error) {
+    expect(error).toBeInstanceOf(ApplicationFailure);
+    const failure = error as ApplicationFailure;
+    expect(failure.type).toBe("PayloadValidationError");
+    expect((failure.details?.[0] as Array<{ reason: string }>)[0]?.reason).toContain("must equal");
+  }
 });
 "#,
     )
@@ -2822,7 +2853,7 @@ properties:
 /// to lose. `Temporal.ZonedDateTime` caps at nanoseconds exactly like
 /// `java.time`, and its ISO parser *throws* past nine digits — so the `temporal`
 /// repr must truncate before constructing, or it both splits the accept set and
-/// escapes as a bare `RangeError` instead of an aggregated `ValidationError`
+/// escapes as a bare `RangeError` instead of an aggregated payload-validation failure
 /// (P11). The truncated forms below are byte-identical to the ones the generated
 /// Go emits for the same inputs (measured).
 #[test]

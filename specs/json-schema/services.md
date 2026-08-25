@@ -448,10 +448,11 @@ Per [[generated-file-layout]]:
 Services and operations emit **no runtime validator**. An operation is a
 typed *reference*; validation happens on its `input`/`output` **types**,
 which carry their own shared `Validate` (de)serializers ([[type]],
-[[properties]], [[ref]] delegation). A bad payload surfaces as that
-type's aggregated `ValidationError`/`ValidationException` (P11), which the
-Nexus handler maps to a `BAD_REQUEST` `HandlerError` — the service
-binding itself adds nothing to that path. Void I/O (`nexus.NoValue` / TS
+[[properties]], [[ref]] delegation). A bad payload surfaces as that type's
+non-retryable Temporal application failure with type `PayloadValidationError`
+and the aggregated violations as its first detail (P11). The SDK's Nexus
+integration recognizes that reserved type; the generated service binding adds
+no wrapper or behavior to the path. Void I/O (`nexus.NoValue` / TS
 `void` / Python `None` / Java `void` return or no-arg method) has no value
 to validate.
 

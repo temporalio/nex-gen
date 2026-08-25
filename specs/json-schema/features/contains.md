@@ -127,10 +127,10 @@ pushed.
 
 | Language | Strategy |
 |---|---|
-| Go | Deserialize scans the original `json.RawMessage` elements with the matcher's scalar parser and predicates; serialize scans the typed slice in shared `Validate`. A miss collects one violation into `ValidationError`. |
+| Go | Deserialize scans the original `json.RawMessage` elements with the matcher's scalar parser and predicates; serialize scans the typed slice in shared `Validate`. A miss collects one violation into `PayloadValidationError` application failure. |
 | TypeScript | After the `Array.isArray` guard ([[items]]), deserialize scans the raw array and serialize scans the typed array with the same scalar matcher predicates. A miss pushes one violation. |
 | Python | The transfer converter calls `_check_contains` with the raw list on deserialize and the typed list on serialize. The matcher uses the same scalar predicates in either direction, including for typed-map members and [[oneOf]] branches. |
-| Java | The per-POJO collecting deserializer scans the original `JsonNode` elements with the matcher type guard and predicates; serialize scans the typed `List<T>`. A miss pushes one violation into the single `ValidationException`. Not bean-validation. |
+| Java | The per-POJO collecting deserializer scans the original `JsonNode` elements with the matcher type guard and predicates; serialize scans the typed `List<T>`. A miss pushes one violation into the single `PayloadValidationError` application failure. Not bean-validation. |
 
 Reason strings name **what was required**, not a bare keyword — the matcher
 is described by its own constraint (`no element equals "admin"` for a
@@ -187,7 +187,7 @@ directions.
 
 - At least one element matches → OK (both directions), regardless of how
   many.
-- No element matches → one `ValidationError` naming the required matcher
+- No element matches → one `PayloadValidationError` application failure naming the required matcher
   (`no element equals "admin"`).
 - Empty array `[]` → **rejected** (nothing to match; the default is
   ≥ 1 match). Contrast [[minItems]] `0` / [[uniqueItems]], which pass

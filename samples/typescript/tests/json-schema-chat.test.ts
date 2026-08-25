@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 import type { TransferTypeConverter } from "nexus-rpc";
+import { ApplicationFailure } from "@temporalio/common";
 
 import {
   DEFAULT_PRIORITY,
@@ -8,15 +9,23 @@ import {
   roomTransferTypeConverter,
   sendMessageInputTransferTypeConverter,
   sendMessageOutputTransferTypeConverter,
-  ValidationError,
   type Labels,
   type Message,
 } from "../chat/index.ts";
 import {
+  exposeValidationDetails,
   fixtureBytes,
   loadFixture as loadFixtureFrom,
   roundTripFixture,
 } from "./json-converter-helper.ts";
+
+exposeValidationDetails(
+  labelsTransferTypeConverter,
+  messageTransferTypeConverter,
+  roomTransferTypeConverter,
+  sendMessageInputTransferTypeConverter,
+  sendMessageOutputTransferTypeConverter,
+);
 
 const wireFixtureDir = new URL("../../wire/json_schema/chat/", import.meta.url);
 
@@ -85,22 +94,27 @@ describe("json-schema chat generated definitions", () => {
         message: { kind: "text", body: "hi" },
         extra: true,
       }),
-    ).toThrow(ValidationError);
+    ).toThrow(ApplicationFailure);
 
     expect(() =>
       messageTransferTypeConverter.fromTransferType({ kind: "image", body: "hi" }),
-    ).toThrow(ValidationError);
+    ).toThrow(ApplicationFailure);
 
     expect(() => sendMessageOutputTransferTypeConverter.fromTransferType({})).toThrow(
-      ValidationError,
+      ApplicationFailure,
     );
 
     try {
       messageTransferTypeConverter.fromTransferType({ kind: "image", body: "hi" });
       throw new Error("expected invalid payload to fail");
     } catch (error) {
-      expect(error).toBeInstanceOf(ValidationError);
-      expect((error as ValidationError).type).toBe("BAD_REQUEST");
+      expect(error).toBeInstanceOf(ApplicationFailure);
+      const failure = error as ApplicationFailure;
+      expect(failure.type).toBe("PayloadValidationError");
+      expect(failure.nonRetryable).toBe(true);
+      expect(failure.details?.[0]).toEqual([
+        { path: "kind", reason: 'must equal "text"' },
+      ]);
     }
 
     expect(() =>

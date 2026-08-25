@@ -13,6 +13,7 @@
  * case's failure instead of blinding the whole target.
  */
 import { readFileSync, writeFileSync } from "node:fs";
+import { ApplicationFailure } from "@temporalio/common";
 import { test } from "vitest";
 // eslint-disable-next-line import/no-unresolved -- written by the Rust driver
 import { REGISTRY } from "./registry";
@@ -60,7 +61,15 @@ function canonicalStringify(value: unknown): string {
 function violationsOf(
   error: unknown,
 ): { path: string; reason: string }[] | null {
-  const found = (error as { violations?: unknown })?.violations;
+  if (
+    !(error instanceof ApplicationFailure) ||
+    error.type !== "PayloadValidationError"
+  ) {
+    return null;
+  }
+  // Locally-created failures retain the original array as their first detail;
+  // this cast is cheap and performs no serialization.
+  const found = error.details?.[0] as unknown;
   if (!Array.isArray(found)) {
     return null;
   }

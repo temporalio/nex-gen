@@ -5,7 +5,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
-	"fmt"
+	"go.temporal.io/sdk/temporal"
 	"math"
 	"reflect"
 	"strconv"
@@ -28,29 +28,29 @@ func (v Violation) String() string {
 	return v.Path + ": " + v.Reason
 }
 
-// ValidationError aggregates every Violation found while (de)serializing a
-// value, surfacing them all in one error (never a partial first-failure).
-type ValidationError struct {
-	Violations []Violation
+func newPayloadValidationError(violations []Violation) error {
+	// TODO: Use temporal.NewPayloadValidationError once it is available in an SDK release.
+	return temporal.NewNonRetryableApplicationError("Payload validation failed", "PayloadValidationError", nil, violations)
 }
 
-// Error implements the error interface, joining every Violation into one
-// message.
-func (e *ValidationError) Error() string {
-	parts := make([]string, len(e.Violations))
-	for i, v := range e.Violations {
-		parts[i] = v.String()
+func payloadValidationErrorViolations(err error) ([]Violation, bool) {
+	var applicationError *temporal.ApplicationError
+	if !errors.As(err, &applicationError) || applicationError.Type() != "PayloadValidationError" {
+		return nil, false
 	}
-	return fmt.Sprintf("%d validation error(s): %s", len(e.Violations), strings.Join(parts, "; "))
+	var violations []Violation
+	if err := applicationError.Details(&violations); err != nil {
+		return nil, false
+	}
+	return violations, true
 }
 
 func addViolations(errs *[]Violation, err error) {
 	if err == nil {
 		return
 	}
-	var ve *ValidationError
-	if errors.As(err, &ve) {
-		*errs = append(*errs, ve.Violations...)
+	if violations, ok := payloadValidationErrorViolations(err); ok {
+		*errs = append(*errs, violations...)
 		return
 	}
 	*errs = append(*errs, Violation{"", err.Error()})
@@ -60,9 +60,8 @@ func mergeNested(errs *[]Violation, path string, err error) {
 	if err == nil {
 		return
 	}
-	var ve *ValidationError
-	if errors.As(err, &ve) {
-		for _, v := range ve.Violations {
+	if violations, ok := payloadValidationErrorViolations(err); ok {
+		for _, v := range violations {
 			p := v.Path
 			if p == "" {
 				p = path

@@ -24,7 +24,7 @@ use crate::planning::{PlannedFamily, PlannedJsonType, PlannedSpec};
 use crate::spec::{ApiSpecBranch, ApiSpecNode};
 use crate::spec::{ExternalTypeSpec, ModulePath, RecordSpec};
 
-const JSON_PUBLIC_RUNTIME_NAMES: &[&str] = &["ValidationError", "Violation"];
+const JSON_PUBLIC_RUNTIME_NAMES: &[&str] = &["Violation"];
 
 #[derive(Debug, Clone, Deserialize, Default)]
 struct Schema {
@@ -750,6 +750,7 @@ pub(in crate::generator) fn render_external_models(
     // `pattern`/`format` regex); the shared import writer does that filtering.
     let module_imports = BTreeSet::from([
         "temporalio.converter".to_string(),
+        "temporalio.exceptions".to_string(),
         "datetime".to_string(),
         "math".to_string(),
         "re".to_string(),
@@ -782,7 +783,6 @@ pub(in crate::generator) fn render_external_models(
 
 /// The runtime symbols a generated model module may import from `_definitions`.
 const JSON_RUNTIME_SYMBOLS: &[&str] = &[
-    "ValidationError",
     "Violation",
     "_binary64",
     "_check_contains",
@@ -868,13 +868,13 @@ fn render_json_runtime_module() -> String {
     output.push_str("import json\n");
     output.push_str("import re\n");
     output.push_str("import typing\n");
-    output.push_str("import temporalio.converter\n\n\n");
+    output.push_str("import temporalio.converter\n");
+    output.push_str("import temporalio.exceptions\n\n\n");
     // The underscore-prefixed helpers below are imported by sibling generated
     // modules (e.g. `models.py`); listing them keeps type checkers from flagging
     // them as unused private symbols.
     output.push_str("__all__ = [\n");
     for name in [
-        "ValidationError",
         "Violation",
         "_binary64",
         "_check_contains",
@@ -924,7 +924,7 @@ fn render_json_runtime_module() -> String {
 }
 
 /// Emits the error-aggregation core: the `Violation` record, the single
-/// aggregating `ValidationError`, and the `_collect` re-pather that lifts a
+/// aggregating payload-validation failure, and the `_collect` re-pather that lifts a
 /// nested model's violations under the parent's path. One error type carrying
 /// every violation, structurally identical to Go/TypeScript/Java (P11).
 fn render_validator_core(output: &mut String) {
@@ -939,17 +939,6 @@ class Violation:
     reason: str
 
 
-class ValidationError(Exception):
-    """Every constraint failure found in one (de)serialization pass."""
-
-    violations: list[Violation]
-
-    def __init__(self, violations: list[Violation]) -> None:
-        self.violations = violations
-        detail = "; ".join(f"{item.path}: {item.reason}" for item in violations)
-        super().__init__(f"{len(violations)} validation error(s): {detail}")
-
-
 def _quote(value: object) -> str:
     """Renders a value in the JSON form every target quotes offending values in."""
 
@@ -959,10 +948,19 @@ def _quote(value: object) -> str:
         return repr(value)
 
 
-def _collect(violations: list[Violation], path: str, error: ValidationError) -> None:
+def _collect(
+    violations: list[Violation],
+    path: str,
+    error: temporalio.exceptions.ApplicationError,
+) -> None:
     """Re-paths a nested model's violations under `path` and appends them."""
 
-    for inner in error.violations:
+    if error.type != "PayloadValidationError" or not error.details:
+        raise error
+    # Generated failures retain the original list as their first detail. The
+    # cast is type-checker-only and performs no serialization.
+    nested_violations = typing.cast(list[Violation], error.details[0])
+    for inner in nested_violations:
         # A nested violation about the value *itself* carries no path of its own
         # (a union branch's own constraint, an element-level check), so the
         # prefix is the whole path -- never a dangling separator (P11).
@@ -1466,7 +1464,7 @@ const CONTAINS_HELPER_BODY: &str = r#"def _check_contains(
 // One set of emitters, called by both converter directions, so a value is held
 // to identical predicates on the way in and on the way out. Every check appends
 // a `Violation` and keeps going; the caller raises the single aggregated
-// `ValidationError` (P11). The emitted lines are deliberately unwrapped —
+// payload-validation failure (P11). The emitted lines are deliberately unwrapped —
 // `ruff format` reflows them to the 88-column budget.
 // ---------------------------------------------------------------------------
 
@@ -1532,7 +1530,7 @@ const PY_BINARY64_MAX: &str = "1.7976931348623157e308";
 /// has to be rejected *before* the other predicates: `nan` compares false
 /// against every bound, and `math.fmod` raises rather than returns
 /// (`ValueError` on `inf`, `OverflowError` on an int past the binary64 range),
-/// which would escape the aggregated `ValidationError` (P11). An `integer`
+/// which would escape the aggregated payload-validation failure (P11). An `integer`
 /// needs no guard — `_parse_spec_integer` rejects a non-finite wire value and
 /// caps the magnitude, and an in-memory `int` is always finite.
 fn render_py_numeric_checks(
@@ -3113,7 +3111,7 @@ fn render_py_union_object_branch(
         variant.py_type
     ));
     output.push_str(indent);
-    output.push_str("except ValidationError as error:\n");
+    output.push_str("except temporalio.exceptions.ApplicationError as error:\n");
     output.push_str(indent);
     output.push_str(&format!("    _collect(violations, {path_expr}, error)\n"));
     output.push_str(indent);
@@ -3287,7 +3285,7 @@ fn render_union_parse_function(
 /// Emits a union's `_<base>_to_transfer_type`: the value's checks, the raise that
 /// aggregates them, then the dispatch. The order is the point — the dispatch's
 /// last branch is unguarded, so a value matching no branch has to fail here, as
-/// the union's own aggregated `ValidationError`, rather than reach a converter
+/// the union's own aggregated payload-validation failure, rather than reach a converter
 /// that would raise whatever its first attribute access raises. Callers report the
 /// checks' violations under the member's path through `_collect` (P11), which is
 /// what the checks' empty `path` is for.
@@ -3309,7 +3307,9 @@ fn render_union_serialize_function(
         output.push_str("    violations: list[Violation] = []\n");
         output.push_str(&checks);
         output.push_str("    if violations:\n");
-        output.push_str("        raise ValidationError(violations)\n");
+        output.push_str(
+            "        raise temporalio.converter.create_payload_validation_error(violations)\n",
+        );
     }
     render_py_union_serialize(output, union, "value", "    ");
     Ok(())
@@ -3620,7 +3620,7 @@ fn render_model_parser_body(
     // report a violation against.
     output.push_str("if not isinstance(value, dict):\n");
     output.push_str(
-        "    raise ValidationError([Violation(path=\"\", reason=\"expected object\")])\n",
+        "    raise temporalio.converter.create_payload_validation_error([Violation(path=\"\", reason=\"expected object\")])\n",
     );
     output.push_str("raw = typing.cast(\"dict[str, typing.Any]\", value)\n");
 
@@ -3663,7 +3663,7 @@ fn render_model_parser_body(
     render_py_dependent_required(output, "raw", schema, "");
 
     output.push_str("if violations:\n");
-    output.push_str("    raise ValidationError(violations)\n");
+    output.push_str("    raise temporalio.converter.create_payload_validation_error(violations)\n");
     if fields.is_empty() && !open {
         output.push_str(&format!("return {}()\n", model.model_name));
         return Ok(());
@@ -3723,7 +3723,7 @@ fn render_map_parser_body(
         }
     }
     output.push_str("if violations:\n");
-    output.push_str("    raise ValidationError(violations)\n");
+    output.push_str("    raise temporalio.converter.create_payload_validation_error(violations)\n");
     output.push_str(&format!(
         "return {}(additional_properties=additional_properties)\n",
         model.model_name
@@ -3738,7 +3738,7 @@ fn render_model_serializer_body(
     models: &[&PlannedJsonType],
 ) -> Result<()> {
     // Serialize-side (P12): re-run the shared field validation over the
-    // in-memory model and raise the aggregated `ValidationError` before emitting
+    // in-memory model and raise the aggregated payload-validation failure before emitting
     // the wire object — both directions over one set of check emitters. A nested
     // conversion aggregates into the same list, so the violations declared here
     // also hold everything the members below report (P11).
@@ -3773,7 +3773,9 @@ fn render_model_serializer_body(
                 render_py_property_name_checks(output, "out", subschema, "");
             }
             output.push_str("if violations:\n");
-            output.push_str("    raise ValidationError(violations)\n");
+            output.push_str(
+                "    raise temporalio.converter.create_payload_validation_error(violations)\n",
+            );
         }
         output.push_str("return out\n");
         return Ok(());
@@ -3883,7 +3885,9 @@ fn render_model_serializer_body(
         }
         render_py_dependent_required(output, "out", schema, "");
         output.push_str("if violations:\n");
-        output.push_str("    raise ValidationError(violations)\n");
+        output.push_str(
+            "    raise temporalio.converter.create_payload_validation_error(violations)\n",
+        );
     }
     output.push_str("return out\n");
     Ok(())
@@ -3922,7 +3926,7 @@ fn py_model_serialize_can_raise(schema: &Schema) -> Result<bool> {
 }
 
 /// True when a value's wire form is produced by a nested converter or a union
-/// dispatcher — the calls that raise their own `ValidationError`, whose violations
+/// dispatcher — the calls that raise their own payload-validation failure, whose violations
 /// are relative to the nested value and so have to be re-pathed and merged into
 /// the caller's list rather than left to propagate (P11; Go's `mergeNested`).
 ///
@@ -4050,7 +4054,7 @@ fn render_py_serialize_call(
     output.push_str(&sink.statement(call_expr));
     output.push('\n');
     output.push_str(indent);
-    output.push_str("except ValidationError as error:\n");
+    output.push_str("except temporalio.exceptions.ApplicationError as error:\n");
     output.push_str(indent);
     output.push_str(&format!("    _collect(violations, {path_expr}, error)\n"));
 }
@@ -4278,7 +4282,7 @@ fn render_value_parser(
             converter_expr(&model_name)
         ));
         output.push_str(indent);
-        output.push_str("except ValidationError as error:\n");
+        output.push_str("except temporalio.exceptions.ApplicationError as error:\n");
         output.push_str(indent);
         output.push_str(&format!("    _collect(violations, {path_expr}, error)\n"));
         return Ok(());

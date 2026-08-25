@@ -41,7 +41,7 @@ export const categoryTransferTypeConverter =
     public fromTransferType(raw: unknown): Category {
       const violations: __nexgenDefinitions.Violation[] = [];
       if (!__nexgenDefinitions.isPlainObject(raw)) {
-        throw new __nexgenDefinitions.ValidationError([
+        throw __nexgenDefinitions.payloadValidationError([
           { path: "", reason: "expected object" },
         ]);
       }
@@ -99,7 +99,7 @@ export const categoryTransferTypeConverter =
       }
 
       if (violations.length) {
-        throw new __nexgenDefinitions.ValidationError(violations);
+        throw __nexgenDefinitions.payloadValidationError(violations);
       }
       const out: Category = { id, name };
       if (children !== undefined) {
@@ -127,7 +127,7 @@ export const categoryTransferTypeConverter =
         );
       }
       if (violations.length) {
-        throw new __nexgenDefinitions.ValidationError(violations);
+        throw __nexgenDefinitions.payloadValidationError(violations);
       }
       return out;
     }
@@ -138,7 +138,7 @@ export const paletteTransferTypeConverter =
     public fromTransferType(raw: unknown): Palette {
       const violations: __nexgenDefinitions.Violation[] = [];
       if (!__nexgenDefinitions.isPlainObject(raw)) {
-        throw new __nexgenDefinitions.ValidationError([
+        throw __nexgenDefinitions.payloadValidationError([
           { path: "", reason: "expected object" },
         ]);
       }
@@ -175,7 +175,7 @@ export const paletteTransferTypeConverter =
       }
 
       if (violations.length) {
-        throw new __nexgenDefinitions.ValidationError(violations);
+        throw __nexgenDefinitions.payloadValidationError(violations);
       }
       const out: Palette = { swatches };
       return out;

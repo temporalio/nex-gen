@@ -8,7 +8,6 @@ import typing_extensions
 import temporalio.converter
 
 from ..._definitions import (
-    ValidationError,
     Violation,
     _parse_spec_integer,
     _transfer_type_convertible,
@@ -24,7 +23,9 @@ class _BlockStyleTransferTypeConverter(
     ) -> "BlockStyle":
         violations: list[Violation] = []
         if not isinstance(value, dict):
-            raise ValidationError([Violation(path="", reason="expected object")])
+            raise temporalio.converter.create_payload_validation_error(
+                [Violation(path="", reason="expected object")]
+            )
         raw = typing.cast("dict[str, typing.Any]", value)
 
         bold_value: bool | None = None
@@ -65,7 +66,7 @@ class _BlockStyleTransferTypeConverter(
             if key != "bold" and key != "indent":
                 violations.append(Violation(path=key, reason="unknown field"))
         if violations:
-            raise ValidationError(violations)
+            raise temporalio.converter.create_payload_validation_error(violations)
         return BlockStyle(
             bold=bold_value,
             indent=indent_value,
@@ -88,7 +89,7 @@ class _BlockStyleTransferTypeConverter(
                 )
             out["indent"] = value.indent
         if violations:
-            raise ValidationError(violations)
+            raise temporalio.converter.create_payload_validation_error(violations)
         return out
 
 

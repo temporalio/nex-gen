@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.SerializerProvider;
 import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
 import com.fasterxml.jackson.databind.annotation.JsonSerialize;
+import io.temporal.failure.ApplicationFailure;
 import java.io.IOException;
 import java.time.Duration;
 import java.time.LocalDate;
@@ -205,7 +206,8 @@ public final class Temporal {
                 TemporalSupport.checkDate(value.archivedOn, "archivedOn", violations);
             }
             if (!violations.isEmpty()) {
-                throw new ValidationException(violations);
+                // TODO: Use PayloadValidationException.newPayloadValidationException once it is available in an SDK release.
+                throw ApplicationFailure.newNonRetryableFailure("Payload validation failed", "PayloadValidationError", violations);
             }
             gen.writeStartObject();
             if (value.createdAt != null) {
@@ -249,7 +251,8 @@ public final class Temporal {
             List<Violation> violations = new ArrayList<>();
             if (node == null || !node.isObject()) {
                 violations.add(new Violation("", "expected object"));
-                throw new ValidationException(violations);
+                // TODO: Use PayloadValidationException.newPayloadValidationException once it is available in an SDK release.
+                throw ApplicationFailure.newNonRetryableFailure("Payload validation failed", "PayloadValidationError", violations);
             }
             Iterator<String> fieldNames = node.fieldNames();
             while (fieldNames.hasNext()) {
@@ -413,7 +416,8 @@ public final class Temporal {
                 }
             }
             if (!violations.isEmpty()) {
-                throw new ValidationException(violations);
+                // TODO: Use PayloadValidationException.newPayloadValidationException once it is available in an SDK release.
+                throw ApplicationFailure.newNonRetryableFailure("Payload validation failed", "PayloadValidationError", violations);
             }
             return new Temporal(createdAt, birthday, alarm, timeout, updatedAt, expiresOn, reminder, retryDelay, deletedAt, archivedOn);
         }

@@ -9,9 +9,9 @@ import datetime
 import math
 import re
 import temporalio.converter
+import temporalio.exceptions
 
 from ._definitions import (
-    ValidationError,
     Violation,
     _binary64,
     _check_contains,
@@ -111,7 +111,9 @@ class _AddressTransferTypeConverter(
     ) -> "Address":
         violations: list[Violation] = []
         if not isinstance(value, dict):
-            raise ValidationError([Violation(path="", reason="expected object")])
+            raise temporalio.converter.create_payload_validation_error(
+                [Violation(path="", reason="expected object")]
+            )
         raw = typing.cast("dict[str, typing.Any]", value)
 
         street_value: str = typing.cast("typing.Any", None)
@@ -154,7 +156,7 @@ class _AddressTransferTypeConverter(
             if key not in _ADDRESS_DECLARED:
                 additional_properties[key] = raw[key]
         if violations:
-            raise ValidationError(violations)
+            raise temporalio.converter.create_payload_validation_error(violations)
         return Address(
             street=street_value,
             city=city_value,
@@ -186,7 +188,7 @@ class _AddressTransferTypeConverter(
             else:
                 out[key] = entry
         if violations:
-            raise ValidationError(violations)
+            raise temporalio.converter.create_payload_validation_error(violations)
         return out
 
 
@@ -215,7 +217,9 @@ class _AddressBookTransferTypeConverter(
     ) -> "AddressBook":
         violations: list[Violation] = []
         if not isinstance(value, dict):
-            raise ValidationError([Violation(path="", reason="expected object")])
+            raise temporalio.converter.create_payload_validation_error(
+                [Violation(path="", reason="expected object")]
+            )
         raw = typing.cast("dict[str, typing.Any]", value)
         additional_properties: dict[str, Address] = {}
         for key in raw:
@@ -225,11 +229,11 @@ class _AddressBookTransferTypeConverter(
                 member = _AddressTransferTypeConverter().from_transfer_type(
                     member_raw, Address
                 )
-            except ValidationError as error:
+            except temporalio.exceptions.ApplicationError as error:
                 _collect(violations, key, error)
             additional_properties[key] = member
         if violations:
-            raise ValidationError(violations)
+            raise temporalio.converter.create_payload_validation_error(violations)
         return AddressBook(additional_properties=additional_properties)
 
     @typing_extensions.override
@@ -239,10 +243,10 @@ class _AddressBookTransferTypeConverter(
         for key, entry in value.additional_properties.items():
             try:
                 out[key] = _AddressTransferTypeConverter().to_transfer_type(entry)
-            except ValidationError as error:
+            except temporalio.exceptions.ApplicationError as error:
                 _collect(violations, key, error)
         if violations:
-            raise ValidationError(violations)
+            raise temporalio.converter.create_payload_validation_error(violations)
         return out
 
 
@@ -263,7 +267,9 @@ class _AttributesTransferTypeConverter(
     ) -> "Attributes":
         violations: list[Violation] = []
         if not isinstance(value, dict):
-            raise ValidationError([Violation(path="", reason="expected object")])
+            raise temporalio.converter.create_payload_validation_error(
+                [Violation(path="", reason="expected object")]
+            )
         raw = typing.cast("dict[str, typing.Any]", value)
         if len(raw) < 1:
             violations.append(
@@ -295,7 +301,7 @@ class _AttributesTransferTypeConverter(
                 member = member_raw
             additional_properties[key] = member
         if violations:
-            raise ValidationError(violations)
+            raise temporalio.converter.create_payload_validation_error(violations)
         return Attributes(additional_properties=additional_properties)
 
     @typing_extensions.override
@@ -325,7 +331,7 @@ class _AttributesTransferTypeConverter(
                     )
                 )
         if violations:
-            raise ValidationError(violations)
+            raise temporalio.converter.create_payload_validation_error(violations)
         return out
 
 
@@ -349,7 +355,9 @@ class _BlobIndexTransferTypeConverter(
     ) -> "BlobIndex":
         violations: list[Violation] = []
         if not isinstance(value, dict):
-            raise ValidationError([Violation(path="", reason="expected object")])
+            raise temporalio.converter.create_payload_validation_error(
+                [Violation(path="", reason="expected object")]
+            )
         raw = typing.cast("dict[str, typing.Any]", value)
         additional_properties: dict[str, bytes] = {}
         for key in raw:
@@ -363,7 +371,7 @@ class _BlobIndexTransferTypeConverter(
                     member = member_parsed
             additional_properties[key] = member
         if violations:
-            raise ValidationError(violations)
+            raise temporalio.converter.create_payload_validation_error(violations)
         return BlobIndex(additional_properties=additional_properties)
 
     @typing_extensions.override
@@ -391,7 +399,9 @@ class _ChoicesTransferTypeConverter(
     ) -> "Choices":
         violations: list[Violation] = []
         if not isinstance(value, dict):
-            raise ValidationError([Violation(path="", reason="expected object")])
+            raise temporalio.converter.create_payload_validation_error(
+                [Violation(path="", reason="expected object")]
+            )
         raw = typing.cast("dict[str, typing.Any]", value)
         additional_properties: dict[str, ChoicesValue] = {}
         for key in raw:
@@ -404,7 +414,7 @@ class _ChoicesTransferTypeConverter(
                 member = member_parsed
             additional_properties[key] = member
         if violations:
-            raise ValidationError(violations)
+            raise temporalio.converter.create_payload_validation_error(violations)
         return Choices(additional_properties=additional_properties)
 
     @typing_extensions.override
@@ -414,10 +424,10 @@ class _ChoicesTransferTypeConverter(
         for key, entry in value.additional_properties.items():
             try:
                 out[key] = _choices_value_to_transfer_type(entry)
-            except ValidationError as error:
+            except temporalio.exceptions.ApplicationError as error:
                 _collect(violations, key, error)
         if violations:
-            raise ValidationError(violations)
+            raise temporalio.converter.create_payload_validation_error(violations)
         return out
 
 
@@ -444,7 +454,9 @@ class _CircleTransferTypeConverter(
     ) -> "Circle":
         violations: list[Violation] = []
         if not isinstance(value, dict):
-            raise ValidationError([Violation(path="", reason="expected object")])
+            raise temporalio.converter.create_payload_validation_error(
+                [Violation(path="", reason="expected object")]
+            )
         raw = typing.cast("dict[str, typing.Any]", value)
 
         kind_value: typing.Literal["circle"] = typing.cast("typing.Any", None)
@@ -488,7 +500,7 @@ class _CircleTransferTypeConverter(
             if key not in _CIRCLE_DECLARED:
                 additional_properties[key] = raw[key]
         if violations:
-            raise ValidationError(violations)
+            raise temporalio.converter.create_payload_validation_error(violations)
         return Circle(
             kind=kind_value,
             radius=radius_value,
@@ -520,7 +532,7 @@ class _CircleTransferTypeConverter(
             else:
                 out[key] = entry
         if violations:
-            raise ValidationError(violations)
+            raise temporalio.converter.create_payload_validation_error(violations)
         return out
 
 
@@ -547,7 +559,9 @@ class _ContactPyTransferTypeConverter(
     ) -> "ContactPy":
         violations: list[Violation] = []
         if not isinstance(value, dict):
-            raise ValidationError([Violation(path="", reason="expected object")])
+            raise temporalio.converter.create_payload_validation_error(
+                [Violation(path="", reason="expected object")]
+            )
         raw = typing.cast("dict[str, typing.Any]", value)
 
         email_value: str | None = None
@@ -618,7 +632,7 @@ class _ContactPyTransferTypeConverter(
                     )
                 )
         if violations:
-            raise ValidationError(violations)
+            raise temporalio.converter.create_payload_validation_error(violations)
         return ContactPy(
             email=email_value,
             shipping_street=shipping_street_value,
@@ -667,7 +681,7 @@ class _ContactPyTransferTypeConverter(
                     )
                 )
         if violations:
-            raise ValidationError(violations)
+            raise temporalio.converter.create_payload_validation_error(violations)
         return out
 
 
@@ -703,7 +717,9 @@ class _DateIndexTransferTypeConverter(
     ) -> "DateIndex":
         violations: list[Violation] = []
         if not isinstance(value, dict):
-            raise ValidationError([Violation(path="", reason="expected object")])
+            raise temporalio.converter.create_payload_validation_error(
+                [Violation(path="", reason="expected object")]
+            )
         raw = typing.cast("dict[str, typing.Any]", value)
         additional_properties: dict[str, datetime.date] = {}
         for key in raw:
@@ -717,7 +733,7 @@ class _DateIndexTransferTypeConverter(
                     member = member_parsed
             additional_properties[key] = member
         if violations:
-            raise ValidationError(violations)
+            raise temporalio.converter.create_payload_validation_error(violations)
         return DateIndex(additional_properties=additional_properties)
 
     @typing_extensions.override
@@ -727,7 +743,7 @@ class _DateIndexTransferTypeConverter(
         for key, entry in value.additional_properties.items():
             out[key] = _format_date(entry)
         if violations:
-            raise ValidationError(violations)
+            raise temporalio.converter.create_payload_validation_error(violations)
         return out
 
 
@@ -750,7 +766,9 @@ class _ExtrasTransferTypeConverter(
     ) -> "Extras":
         violations: list[Violation] = []
         if not isinstance(value, dict):
-            raise ValidationError([Violation(path="", reason="expected object")])
+            raise temporalio.converter.create_payload_validation_error(
+                [Violation(path="", reason="expected object")]
+            )
         raw = typing.cast("dict[str, typing.Any]", value)
         if len(raw) > 4:
             violations.append(
@@ -762,7 +780,7 @@ class _ExtrasTransferTypeConverter(
         for key in raw:
             additional_properties[key] = raw[key]
         if violations:
-            raise ValidationError(violations)
+            raise temporalio.converter.create_payload_validation_error(violations)
         return Extras(additional_properties=additional_properties)
 
     @typing_extensions.override
@@ -778,7 +796,7 @@ class _ExtrasTransferTypeConverter(
                 )
             )
         if violations:
-            raise ValidationError(violations)
+            raise temporalio.converter.create_payload_validation_error(violations)
         return out
 
 
@@ -804,7 +822,9 @@ class _LabelsTransferTypeConverter(
     ) -> "Labels":
         violations: list[Violation] = []
         if not isinstance(value, dict):
-            raise ValidationError([Violation(path="", reason="expected object")])
+            raise temporalio.converter.create_payload_validation_error(
+                [Violation(path="", reason="expected object")]
+            )
         raw = typing.cast("dict[str, typing.Any]", value)
         if len(raw) > 50:
             violations.append(
@@ -822,7 +842,7 @@ class _LabelsTransferTypeConverter(
                 member = member_raw
             additional_properties[key] = member
         if violations:
-            raise ValidationError(violations)
+            raise temporalio.converter.create_payload_validation_error(violations)
         return Labels(additional_properties=additional_properties)
 
     @typing_extensions.override
@@ -838,7 +858,7 @@ class _LabelsTransferTypeConverter(
                 )
             )
         if violations:
-            raise ValidationError(violations)
+            raise temporalio.converter.create_payload_validation_error(violations)
         return out
 
 
@@ -859,7 +879,9 @@ class _LinkNoteTransferTypeConverter(
     ) -> "LinkNote":
         violations: list[Violation] = []
         if not isinstance(value, dict):
-            raise ValidationError([Violation(path="", reason="expected object")])
+            raise temporalio.converter.create_payload_validation_error(
+                [Violation(path="", reason="expected object")]
+            )
         raw = typing.cast("dict[str, typing.Any]", value)
 
         kind_value: typing.Literal["link"] = typing.cast("typing.Any", None)
@@ -896,7 +918,7 @@ class _LinkNoteTransferTypeConverter(
             if key not in _LINK_NOTE_DECLARED:
                 additional_properties[key] = raw[key]
         if violations:
-            raise ValidationError(violations)
+            raise temporalio.converter.create_payload_validation_error(violations)
         return LinkNote(
             kind=kind_value,
             href=href_value,
@@ -928,7 +950,7 @@ class _LinkNoteTransferTypeConverter(
             else:
                 out[key] = entry
         if violations:
-            raise ValidationError(violations)
+            raise temporalio.converter.create_payload_validation_error(violations)
         return out
 
 
@@ -955,7 +977,9 @@ class _MetricsTransferTypeConverter(
     ) -> "Metrics":
         violations: list[Violation] = []
         if not isinstance(value, dict):
-            raise ValidationError([Violation(path="", reason="expected object")])
+            raise temporalio.converter.create_payload_validation_error(
+                [Violation(path="", reason="expected object")]
+            )
         raw = typing.cast("dict[str, typing.Any]", value)
         additional_properties: dict[str, float] = {}
         for key in raw:
@@ -979,7 +1003,7 @@ class _MetricsTransferTypeConverter(
                     )
             additional_properties[key] = member
         if violations:
-            raise ValidationError(violations)
+            raise temporalio.converter.create_payload_validation_error(violations)
         return Metrics(additional_properties=additional_properties)
 
     @typing_extensions.override
@@ -993,7 +1017,7 @@ class _MetricsTransferTypeConverter(
                 )
             out[key] = _binary64(entry)
         if violations:
-            raise ValidationError(violations)
+            raise temporalio.converter.create_payload_validation_error(violations)
         return out
 
 
@@ -1014,7 +1038,9 @@ class _NicknamesTransferTypeConverter(
     ) -> "Nicknames":
         violations: list[Violation] = []
         if not isinstance(value, dict):
-            raise ValidationError([Violation(path="", reason="expected object")])
+            raise temporalio.converter.create_payload_validation_error(
+                [Violation(path="", reason="expected object")]
+            )
         raw = typing.cast("dict[str, typing.Any]", value)
         additional_properties: dict[str, str | None] = {}
         for key in raw:
@@ -1036,7 +1062,7 @@ class _NicknamesTransferTypeConverter(
                         )
             additional_properties[key] = member
         if violations:
-            raise ValidationError(violations)
+            raise temporalio.converter.create_payload_validation_error(violations)
         return Nicknames(additional_properties=additional_properties)
 
     @typing_extensions.override
@@ -1053,7 +1079,7 @@ class _NicknamesTransferTypeConverter(
                     )
             out[key] = entry
         if violations:
-            raise ValidationError(violations)
+            raise temporalio.converter.create_payload_validation_error(violations)
         return out
 
 
@@ -1079,7 +1105,9 @@ class _QuotasTransferTypeConverter(
     ) -> "Quotas":
         violations: list[Violation] = []
         if not isinstance(value, dict):
-            raise ValidationError([Violation(path="", reason="expected object")])
+            raise temporalio.converter.create_payload_validation_error(
+                [Violation(path="", reason="expected object")]
+            )
         raw = typing.cast("dict[str, typing.Any]", value)
         additional_properties: dict[str, int] = {}
         for key in raw:
@@ -1104,7 +1132,7 @@ class _QuotasTransferTypeConverter(
                     )
             additional_properties[key] = member
         if violations:
-            raise ValidationError(violations)
+            raise temporalio.converter.create_payload_validation_error(violations)
         return Quotas(additional_properties=additional_properties)
 
     @typing_extensions.override
@@ -1130,7 +1158,7 @@ class _QuotasTransferTypeConverter(
                 )
             out[key] = entry
         if violations:
-            raise ValidationError(violations)
+            raise temporalio.converter.create_payload_validation_error(violations)
         return out
 
 
@@ -1155,7 +1183,9 @@ class _SettingsTransferTypeConverter(
     ) -> "Settings":
         violations: list[Violation] = []
         if not isinstance(value, dict):
-            raise ValidationError([Violation(path="", reason="expected object")])
+            raise temporalio.converter.create_payload_validation_error(
+                [Violation(path="", reason="expected object")]
+            )
         raw = typing.cast("dict[str, typing.Any]", value)
 
         theme_value: str | None = None
@@ -1189,7 +1219,7 @@ class _SettingsTransferTypeConverter(
             if key != "theme" and key != "fontSize":
                 violations.append(Violation(path=key, reason="unknown field"))
         if violations:
-            raise ValidationError(violations)
+            raise temporalio.converter.create_payload_validation_error(violations)
         return Settings(
             theme=theme_value,
             font_size=font_size_value,
@@ -1208,7 +1238,7 @@ class _SettingsTransferTypeConverter(
                 )
             out["fontSize"] = value.font_size
         if violations:
-            raise ValidationError(violations)
+            raise temporalio.converter.create_payload_validation_error(violations)
         return out
 
 
@@ -1231,7 +1261,9 @@ class _ShowcaseTransferTypeConverter(
     ) -> "Showcase":
         violations: list[Violation] = []
         if not isinstance(value, dict):
-            raise ValidationError([Violation(path="", reason="expected object")])
+            raise temporalio.converter.create_payload_validation_error(
+                [Violation(path="", reason="expected object")]
+            )
         raw = typing.cast("dict[str, typing.Any]", value)
 
         kind_value: typing.Literal["showcase"] = typing.cast("typing.Any", None)
@@ -2382,7 +2414,7 @@ class _ShowcaseTransferTypeConverter(
                                     addresses_value_element, Address
                                 )
                             )
-                        except ValidationError as error:
+                        except temporalio.exceptions.ApplicationError as error:
                             _collect(violations, addresses_value_item_path, error)
                         if len(violations) == addresses_value_item_violation_count:
                             addresses_value_list.append(addresses_value_item)
@@ -2402,7 +2434,7 @@ class _ShowcaseTransferTypeConverter(
                             address_book_value_raw, AddressBook
                         )
                     )
-                except ValidationError as error:
+                except temporalio.exceptions.ApplicationError as error:
                     _collect(violations, "addressBook", error)
 
         dates_value: list[datetime.date] | None = None
@@ -2455,7 +2487,7 @@ class _ShowcaseTransferTypeConverter(
                             date_index_value_raw, DateIndex
                         )
                     )
-                except ValidationError as error:
+                except temporalio.exceptions.ApplicationError as error:
                     _collect(violations, "dateIndex", error)
 
         blobs_value: list[bytes] | None = None
@@ -2506,7 +2538,7 @@ class _ShowcaseTransferTypeConverter(
                             blob_index_value_raw, BlobIndex
                         )
                     )
-                except ValidationError as error:
+                except temporalio.exceptions.ApplicationError as error:
                     _collect(violations, "blobIndex", error)
 
         metrics_value: Metrics | None = None
@@ -2521,7 +2553,7 @@ class _ShowcaseTransferTypeConverter(
                     metrics_value = _MetricsTransferTypeConverter().from_transfer_type(
                         metrics_value_raw, Metrics
                     )
-                except ValidationError as error:
+                except temporalio.exceptions.ApplicationError as error:
                     _collect(violations, "metrics", error)
 
         metric_or_label_value: float | str | None = None
@@ -2574,7 +2606,7 @@ class _ShowcaseTransferTypeConverter(
                             location_value_raw, ShowcaseLocation
                         )
                     )
-                except ValidationError as error:
+                except temporalio.exceptions.ApplicationError as error:
                     _collect(violations, "location", error)
 
         audit_value: ShowcaseAudit | None = None
@@ -2589,7 +2621,7 @@ class _ShowcaseTransferTypeConverter(
                             audit_value_raw, ShowcaseAudit
                         )
                     )
-                except ValidationError as error:
+                except temporalio.exceptions.ApplicationError as error:
                     _collect(violations, "audit", error)
 
         rows_value: list[ShowcaseRowsItem] | None = None
@@ -2616,7 +2648,7 @@ class _ShowcaseTransferTypeConverter(
                             rows_value_item = _ShowcaseRowsItemTransferTypeConverter().from_transfer_type(
                                 rows_value_element, ShowcaseRowsItem
                             )
-                        except ValidationError as error:
+                        except temporalio.exceptions.ApplicationError as error:
                             _collect(violations, rows_value_item_path, error)
                         if len(violations) == rows_value_item_violation_count:
                             rows_value_list.append(rows_value_item)
@@ -2636,7 +2668,7 @@ class _ShowcaseTransferTypeConverter(
                             ledger_py_value_raw, ShowcaseLedger
                         )
                     )
-                except ValidationError as error:
+                except temporalio.exceptions.ApplicationError as error:
                     _collect(violations, "ledger", error)
 
         metadata_value: ShowcaseMetadata | None = None
@@ -2653,7 +2685,7 @@ class _ShowcaseTransferTypeConverter(
                             metadata_value_raw, ShowcaseMetadata
                         )
                     )
-                except ValidationError as error:
+                except temporalio.exceptions.ApplicationError as error:
                     _collect(violations, "metadata", error)
 
         quotas_value: Quotas | None = None
@@ -2668,7 +2700,7 @@ class _ShowcaseTransferTypeConverter(
                     quotas_value = _QuotasTransferTypeConverter().from_transfer_type(
                         quotas_value_raw, Quotas
                     )
-                except ValidationError as error:
+                except temporalio.exceptions.ApplicationError as error:
                     _collect(violations, "quotas", error)
 
         tokens_value: Tokens | None = None
@@ -2683,7 +2715,7 @@ class _ShowcaseTransferTypeConverter(
                     tokens_value = _TokensTransferTypeConverter().from_transfer_type(
                         tokens_value_raw, Tokens
                     )
-                except ValidationError as error:
+                except temporalio.exceptions.ApplicationError as error:
                     _collect(violations, "tokens", error)
 
         nicknames_value: Nicknames | None = None
@@ -2700,7 +2732,7 @@ class _ShowcaseTransferTypeConverter(
                             nicknames_value_raw, Nicknames
                         )
                     )
-                except ValidationError as error:
+                except temporalio.exceptions.ApplicationError as error:
                     _collect(violations, "nicknames", error)
 
         choices_value: Choices | None = None
@@ -2715,7 +2747,7 @@ class _ShowcaseTransferTypeConverter(
                     choices_value = _ChoicesTransferTypeConverter().from_transfer_type(
                         choices_value_raw, Choices
                     )
-                except ValidationError as error:
+                except temporalio.exceptions.ApplicationError as error:
                     _collect(violations, "choices", error)
 
         extras_value: Extras | None = None
@@ -2730,7 +2762,7 @@ class _ShowcaseTransferTypeConverter(
                     extras_value = _ExtrasTransferTypeConverter().from_transfer_type(
                         extras_value_raw, Extras
                     )
-                except ValidationError as error:
+                except temporalio.exceptions.ApplicationError as error:
                     _collect(violations, "extras", error)
 
         shape_value: Shape | None = None
@@ -2773,7 +2805,7 @@ class _ShowcaseTransferTypeConverter(
                     address_value = _AddressTransferTypeConverter().from_transfer_type(
                         address_value_raw, Address
                     )
-                except ValidationError as error:
+                except temporalio.exceptions.ApplicationError as error:
                     _collect(violations, "address", error)
 
         labels_value: Labels | None = None
@@ -2788,7 +2820,7 @@ class _ShowcaseTransferTypeConverter(
                     labels_value = _LabelsTransferTypeConverter().from_transfer_type(
                         labels_value_raw, Labels
                     )
-                except ValidationError as error:
+                except temporalio.exceptions.ApplicationError as error:
                     _collect(violations, "labels", error)
 
         settings_value: Settings | None = None
@@ -2805,7 +2837,7 @@ class _ShowcaseTransferTypeConverter(
                             settings_value_raw, Settings
                         )
                     )
-                except ValidationError as error:
+                except temporalio.exceptions.ApplicationError as error:
                     _collect(violations, "settings", error)
 
         attributes_value: Attributes | None = None
@@ -2822,7 +2854,7 @@ class _ShowcaseTransferTypeConverter(
                             attributes_value_raw, Attributes
                         )
                     )
-                except ValidationError as error:
+                except temporalio.exceptions.ApplicationError as error:
                     _collect(violations, "attributes", error)
 
         contact_value: ContactPy | None = None
@@ -2839,7 +2871,7 @@ class _ShowcaseTransferTypeConverter(
                             contact_value_raw, ContactPy
                         )
                     )
-                except ValidationError as error:
+                except temporalio.exceptions.ApplicationError as error:
                     _collect(violations, "contact", error)
 
         nullable_count_value: int | None = None
@@ -3231,7 +3263,7 @@ class _ShowcaseTransferTypeConverter(
             ):
                 violations.append(Violation(path=key, reason="unknown field"))
         if violations:
-            raise ValidationError(violations)
+            raise temporalio.converter.create_payload_validation_error(violations)
         return Showcase(
             kind=kind_value,
             revision=revision_value,
@@ -3665,14 +3697,14 @@ class _ShowcaseTransferTypeConverter(
         if value.detail is not None:
             try:
                 out["detail"] = _showcase_detail_to_transfer_type(value.detail)
-            except ValidationError as error:
+            except temporalio.exceptions.ApplicationError as error:
                 _collect(violations, "detail", error)
         if value.shape_or_name is not None:
             try:
                 out["shapeOrName"] = _showcase_shape_or_name_to_transfer_type(
                     value.shape_or_name
                 )
-            except ValidationError as error:
+            except temporalio.exceptions.ApplicationError as error:
                 _collect(violations, "shapeOrName", error)
         if value.measurements is not None:
             if isinstance(value.measurements, list):
@@ -3718,7 +3750,7 @@ class _ShowcaseTransferTypeConverter(
             for shapes_index, shapes_element in enumerate(value.shapes):
                 try:
                     shapes_out.append(_shape_to_transfer_type(shapes_element))
-                except ValidationError as error:
+                except temporalio.exceptions.ApplicationError as error:
                     _collect(violations, f"shapes[{shapes_index}]", error)
             out["shapes"] = shapes_out
         if value.segments is not None:
@@ -3728,7 +3760,7 @@ class _ShowcaseTransferTypeConverter(
                     segments_out.append(
                         _showcase_segments_item_to_transfer_type(segments_element)
                     )
-                except ValidationError as error:
+                except temporalio.exceptions.ApplicationError as error:
                     _collect(violations, f"segments[{segments_index}]", error)
             out["segments"] = segments_out
         if value.slots is not None:
@@ -3791,7 +3823,7 @@ class _ShowcaseTransferTypeConverter(
                             addresses_element
                         )
                     )
-                except ValidationError as error:
+                except temporalio.exceptions.ApplicationError as error:
                     _collect(violations, f"addresses[{addresses_index}]", error)
             out["addresses"] = addresses_out
         if value.address_book is not None:
@@ -3801,7 +3833,7 @@ class _ShowcaseTransferTypeConverter(
                         value.address_book
                     )
                 )
-            except ValidationError as error:
+            except temporalio.exceptions.ApplicationError as error:
                 _collect(violations, "addressBook", error)
         if value.dates is not None:
             out["dates"] = [_format_date(element) for element in value.dates]
@@ -3810,7 +3842,7 @@ class _ShowcaseTransferTypeConverter(
                 out["dateIndex"] = _DateIndexTransferTypeConverter().to_transfer_type(
                     value.date_index
                 )
-            except ValidationError as error:
+            except temporalio.exceptions.ApplicationError as error:
                 _collect(violations, "dateIndex", error)
         if value.blobs is not None:
             out["blobs"] = [_format_base64(element) for element in value.blobs]
@@ -3819,14 +3851,14 @@ class _ShowcaseTransferTypeConverter(
                 out["blobIndex"] = _BlobIndexTransferTypeConverter().to_transfer_type(
                     value.blob_index
                 )
-            except ValidationError as error:
+            except temporalio.exceptions.ApplicationError as error:
                 _collect(violations, "blobIndex", error)
         if value.metrics is not None:
             try:
                 out["metrics"] = _MetricsTransferTypeConverter().to_transfer_type(
                     value.metrics
                 )
-            except ValidationError as error:
+            except temporalio.exceptions.ApplicationError as error:
                 _collect(violations, "metrics", error)
         if value.metric_or_label is not None:
             if not isinstance(value.metric_or_label, bool) and isinstance(
@@ -3898,14 +3930,14 @@ class _ShowcaseTransferTypeConverter(
                         value.location
                     )
                 )
-            except ValidationError as error:
+            except temporalio.exceptions.ApplicationError as error:
                 _collect(violations, "location", error)
         if value.audit is not None:
             try:
                 out["audit"] = _ShowcaseAuditTransferTypeConverter().to_transfer_type(
                     value.audit
                 )
-            except ValidationError as error:
+            except temporalio.exceptions.ApplicationError as error:
                 _collect(violations, "audit", error)
         if value.rows is not None:
             rows_out: list[typing.Any] = []
@@ -3916,7 +3948,7 @@ class _ShowcaseTransferTypeConverter(
                             rows_element
                         )
                     )
-                except ValidationError as error:
+                except temporalio.exceptions.ApplicationError as error:
                     _collect(violations, f"rows[{rows_index}]", error)
             out["rows"] = rows_out
         if value.ledger_py is not None:
@@ -3924,7 +3956,7 @@ class _ShowcaseTransferTypeConverter(
                 out["ledger"] = _ShowcaseLedgerTransferTypeConverter().to_transfer_type(
                     value.ledger_py
                 )
-            except ValidationError as error:
+            except temporalio.exceptions.ApplicationError as error:
                 _collect(violations, "ledger", error)
         if value.metadata is not None:
             try:
@@ -3933,87 +3965,87 @@ class _ShowcaseTransferTypeConverter(
                         value.metadata
                     )
                 )
-            except ValidationError as error:
+            except temporalio.exceptions.ApplicationError as error:
                 _collect(violations, "metadata", error)
         if value.quotas is not None:
             try:
                 out["quotas"] = _QuotasTransferTypeConverter().to_transfer_type(
                     value.quotas
                 )
-            except ValidationError as error:
+            except temporalio.exceptions.ApplicationError as error:
                 _collect(violations, "quotas", error)
         if value.tokens is not None:
             try:
                 out["tokens"] = _TokensTransferTypeConverter().to_transfer_type(
                     value.tokens
                 )
-            except ValidationError as error:
+            except temporalio.exceptions.ApplicationError as error:
                 _collect(violations, "tokens", error)
         if value.nicknames is not None:
             try:
                 out["nicknames"] = _NicknamesTransferTypeConverter().to_transfer_type(
                     value.nicknames
                 )
-            except ValidationError as error:
+            except temporalio.exceptions.ApplicationError as error:
                 _collect(violations, "nicknames", error)
         if value.choices is not None:
             try:
                 out["choices"] = _ChoicesTransferTypeConverter().to_transfer_type(
                     value.choices
                 )
-            except ValidationError as error:
+            except temporalio.exceptions.ApplicationError as error:
                 _collect(violations, "choices", error)
         if value.extras is not None:
             try:
                 out["extras"] = _ExtrasTransferTypeConverter().to_transfer_type(
                     value.extras
                 )
-            except ValidationError as error:
+            except temporalio.exceptions.ApplicationError as error:
                 _collect(violations, "extras", error)
         if value.shape is not None:
             try:
                 out["shape"] = _shape_to_transfer_type(value.shape)
-            except ValidationError as error:
+            except temporalio.exceptions.ApplicationError as error:
                 _collect(violations, "shape", error)
         if value.note is not None:
             try:
                 out["note"] = _note_to_transfer_type(value.note)
-            except ValidationError as error:
+            except temporalio.exceptions.ApplicationError as error:
                 _collect(violations, "note", error)
         if value.address is not None:
             try:
                 out["address"] = _AddressTransferTypeConverter().to_transfer_type(
                     value.address
                 )
-            except ValidationError as error:
+            except temporalio.exceptions.ApplicationError as error:
                 _collect(violations, "address", error)
         if value.labels is not None:
             try:
                 out["labels"] = _LabelsTransferTypeConverter().to_transfer_type(
                     value.labels
                 )
-            except ValidationError as error:
+            except temporalio.exceptions.ApplicationError as error:
                 _collect(violations, "labels", error)
         if value.settings is not None:
             try:
                 out["settings"] = _SettingsTransferTypeConverter().to_transfer_type(
                     value.settings
                 )
-            except ValidationError as error:
+            except temporalio.exceptions.ApplicationError as error:
                 _collect(violations, "settings", error)
         if value.attributes is not None:
             try:
                 out["attributes"] = _AttributesTransferTypeConverter().to_transfer_type(
                     value.attributes
                 )
-            except ValidationError as error:
+            except temporalio.exceptions.ApplicationError as error:
                 _collect(violations, "attributes", error)
         if value.contact is not None:
             try:
                 out["contact"] = _ContactPyTransferTypeConverter().to_transfer_type(
                     value.contact
                 )
-            except ValidationError as error:
+            except temporalio.exceptions.ApplicationError as error:
                 _collect(violations, "contact", error)
         if value.nullable_count is not None:
             if abs(value.nullable_count) > 9007199254740991:
@@ -4136,7 +4168,7 @@ class _ShowcaseTransferTypeConverter(
         if value.quoted is not None:
             out["quoted"] = value.quoted
         if violations:
-            raise ValidationError(violations)
+            raise temporalio.converter.create_payload_validation_error(violations)
         return out
 
 
@@ -4750,7 +4782,9 @@ class _ShowcaseAuditTransferTypeConverter(
     ) -> "ShowcaseAudit":
         violations: list[Violation] = []
         if not isinstance(value, dict):
-            raise ValidationError([Violation(path="", reason="expected object")])
+            raise temporalio.converter.create_payload_validation_error(
+                [Violation(path="", reason="expected object")]
+            )
         raw = typing.cast("dict[str, typing.Any]", value)
 
         by_value: str = typing.cast("typing.Any", None)
@@ -4775,7 +4809,7 @@ class _ShowcaseAuditTransferTypeConverter(
             if key not in _SHOWCASE_AUDIT_DECLARED:
                 additional_properties[key] = raw[key]
         if violations:
-            raise ValidationError(violations)
+            raise temporalio.converter.create_payload_validation_error(violations)
         return ShowcaseAudit(
             by=by_value,
             additional_properties=additional_properties,
@@ -4803,7 +4837,7 @@ class _ShowcaseAuditTransferTypeConverter(
             else:
                 out[key] = entry
         if violations:
-            raise ValidationError(violations)
+            raise temporalio.converter.create_payload_validation_error(violations)
         return out
 
 
@@ -4826,7 +4860,9 @@ class _ShowcaseDetailObjectTransferTypeConverter(
     ) -> "ShowcaseDetailObject":
         violations: list[Violation] = []
         if not isinstance(value, dict):
-            raise ValidationError([Violation(path="", reason="expected object")])
+            raise temporalio.converter.create_payload_validation_error(
+                [Violation(path="", reason="expected object")]
+            )
         raw = typing.cast("dict[str, typing.Any]", value)
 
         code_value: str = typing.cast("typing.Any", None)
@@ -4864,7 +4900,7 @@ class _ShowcaseDetailObjectTransferTypeConverter(
             if key not in _SHOWCASE_DETAIL_OBJECT_DECLARED:
                 additional_properties[key] = raw[key]
         if violations:
-            raise ValidationError(violations)
+            raise temporalio.converter.create_payload_validation_error(violations)
         return ShowcaseDetailObject(
             code=code_value,
             hint=hint_value,
@@ -4895,7 +4931,7 @@ class _ShowcaseDetailObjectTransferTypeConverter(
             else:
                 out[key] = entry
         if violations:
-            raise ValidationError(violations)
+            raise temporalio.converter.create_payload_validation_error(violations)
         return out
 
 
@@ -4920,7 +4956,9 @@ class _ShowcaseLedgerTransferTypeConverter(
     ) -> "ShowcaseLedger":
         violations: list[Violation] = []
         if not isinstance(value, dict):
-            raise ValidationError([Violation(path="", reason="expected object")])
+            raise temporalio.converter.create_payload_validation_error(
+                [Violation(path="", reason="expected object")]
+            )
         raw = typing.cast("dict[str, typing.Any]", value)
         additional_properties: dict[str, ShowcaseLedgerValue] = {}
         for key in raw:
@@ -4930,11 +4968,11 @@ class _ShowcaseLedgerTransferTypeConverter(
                 member = _ShowcaseLedgerValueTransferTypeConverter().from_transfer_type(
                     member_raw, ShowcaseLedgerValue
                 )
-            except ValidationError as error:
+            except temporalio.exceptions.ApplicationError as error:
                 _collect(violations, key, error)
             additional_properties[key] = member
         if violations:
-            raise ValidationError(violations)
+            raise temporalio.converter.create_payload_validation_error(violations)
         return ShowcaseLedger(additional_properties=additional_properties)
 
     @typing_extensions.override
@@ -4946,10 +4984,10 @@ class _ShowcaseLedgerTransferTypeConverter(
                 out[key] = _ShowcaseLedgerValueTransferTypeConverter().to_transfer_type(
                     entry
                 )
-            except ValidationError as error:
+            except temporalio.exceptions.ApplicationError as error:
                 _collect(violations, key, error)
         if violations:
-            raise ValidationError(violations)
+            raise temporalio.converter.create_payload_validation_error(violations)
         return out
 
 
@@ -4978,7 +5016,9 @@ class _ShowcaseLedgerValueTransferTypeConverter(
     ) -> "ShowcaseLedgerValue":
         violations: list[Violation] = []
         if not isinstance(value, dict):
-            raise ValidationError([Violation(path="", reason="expected object")])
+            raise temporalio.converter.create_payload_validation_error(
+                [Violation(path="", reason="expected object")]
+            )
         raw = typing.cast("dict[str, typing.Any]", value)
 
         amount_value: int = typing.cast("typing.Any", None)
@@ -5003,7 +5043,7 @@ class _ShowcaseLedgerValueTransferTypeConverter(
             if key not in _SHOWCASE_LEDGER_VALUE_DECLARED:
                 additional_properties[key] = raw[key]
         if violations:
-            raise ValidationError(violations)
+            raise temporalio.converter.create_payload_validation_error(violations)
         return ShowcaseLedgerValue(
             amount=amount_value,
             additional_properties=additional_properties,
@@ -5033,7 +5073,7 @@ class _ShowcaseLedgerValueTransferTypeConverter(
             else:
                 out[key] = entry
         if violations:
-            raise ValidationError(violations)
+            raise temporalio.converter.create_payload_validation_error(violations)
         return out
 
 
@@ -5056,7 +5096,9 @@ class _ShowcaseLocationTransferTypeConverter(
     ) -> "ShowcaseLocation":
         violations: list[Violation] = []
         if not isinstance(value, dict):
-            raise ValidationError([Violation(path="", reason="expected object")])
+            raise temporalio.converter.create_payload_validation_error(
+                [Violation(path="", reason="expected object")]
+            )
         raw = typing.cast("dict[str, typing.Any]", value)
 
         city_value: str = typing.cast("typing.Any", None)
@@ -5090,7 +5132,7 @@ class _ShowcaseLocationTransferTypeConverter(
                             geo_value_raw, ShowcaseLocationGeo
                         )
                     )
-                except ValidationError as error:
+                except temporalio.exceptions.ApplicationError as error:
                     _collect(violations, "geo", error)
 
         additional_properties: dict[str, typing.Any] = {}
@@ -5098,7 +5140,7 @@ class _ShowcaseLocationTransferTypeConverter(
             if key not in _SHOWCASE_LOCATION_DECLARED:
                 additional_properties[key] = raw[key]
         if violations:
-            raise ValidationError(violations)
+            raise temporalio.converter.create_payload_validation_error(violations)
         return ShowcaseLocation(
             city=city_value,
             geo=geo_value,
@@ -5123,7 +5165,7 @@ class _ShowcaseLocationTransferTypeConverter(
                         value.geo
                     )
                 )
-            except ValidationError as error:
+            except temporalio.exceptions.ApplicationError as error:
                 _collect(violations, "geo", error)
         for key, entry in value.additional_properties.items():
             if key in _SHOWCASE_LOCATION_DECLARED:
@@ -5136,7 +5178,7 @@ class _ShowcaseLocationTransferTypeConverter(
             else:
                 out[key] = entry
         if violations:
-            raise ValidationError(violations)
+            raise temporalio.converter.create_payload_validation_error(violations)
         return out
 
 
@@ -5169,7 +5211,9 @@ class _ShowcaseLocationGeoTransferTypeConverter(
     ) -> "ShowcaseLocationGeo":
         violations: list[Violation] = []
         if not isinstance(value, dict):
-            raise ValidationError([Violation(path="", reason="expected object")])
+            raise temporalio.converter.create_payload_validation_error(
+                [Violation(path="", reason="expected object")]
+            )
         raw = typing.cast("dict[str, typing.Any]", value)
 
         lat_value: float | None = None
@@ -5231,7 +5275,7 @@ class _ShowcaseLocationGeoTransferTypeConverter(
             if key not in _SHOWCASE_LOCATION_GEO_DECLARED:
                 additional_properties[key] = raw[key]
         if violations:
-            raise ValidationError(violations)
+            raise temporalio.converter.create_payload_validation_error(violations)
         return ShowcaseLocationGeo(
             lat=lat_value,
             lon=lon_value,
@@ -5269,7 +5313,7 @@ class _ShowcaseLocationGeoTransferTypeConverter(
             else:
                 out[key] = entry
         if violations:
-            raise ValidationError(violations)
+            raise temporalio.converter.create_payload_validation_error(violations)
         return out
 
 
@@ -5294,7 +5338,9 @@ class _ShowcaseMetadataTransferTypeConverter(
     ) -> "ShowcaseMetadata":
         violations: list[Violation] = []
         if not isinstance(value, dict):
-            raise ValidationError([Violation(path="", reason="expected object")])
+            raise temporalio.converter.create_payload_validation_error(
+                [Violation(path="", reason="expected object")]
+            )
         raw = typing.cast("dict[str, typing.Any]", value)
         if len(raw) > 3:
             violations.append(
@@ -5306,7 +5352,7 @@ class _ShowcaseMetadataTransferTypeConverter(
         for key in raw:
             additional_properties[key] = raw[key]
         if violations:
-            raise ValidationError(violations)
+            raise temporalio.converter.create_payload_validation_error(violations)
         return ShowcaseMetadata(additional_properties=additional_properties)
 
     @typing_extensions.override
@@ -5322,7 +5368,7 @@ class _ShowcaseMetadataTransferTypeConverter(
                 )
             )
         if violations:
-            raise ValidationError(violations)
+            raise temporalio.converter.create_payload_validation_error(violations)
         return out
 
 
@@ -5349,7 +5395,9 @@ class _ShowcaseRowsItemTransferTypeConverter(
     ) -> "ShowcaseRowsItem":
         violations: list[Violation] = []
         if not isinstance(value, dict):
-            raise ValidationError([Violation(path="", reason="expected object")])
+            raise temporalio.converter.create_payload_validation_error(
+                [Violation(path="", reason="expected object")]
+            )
         raw = typing.cast("dict[str, typing.Any]", value)
 
         cell_value: str = typing.cast("typing.Any", None)
@@ -5374,7 +5422,7 @@ class _ShowcaseRowsItemTransferTypeConverter(
             if key not in _SHOWCASE_ROWS_ITEM_DECLARED:
                 additional_properties[key] = raw[key]
         if violations:
-            raise ValidationError(violations)
+            raise temporalio.converter.create_payload_validation_error(violations)
         return ShowcaseRowsItem(
             cell=cell_value,
             additional_properties=additional_properties,
@@ -5402,7 +5450,7 @@ class _ShowcaseRowsItemTransferTypeConverter(
             else:
                 out[key] = entry
         if violations:
-            raise ValidationError(violations)
+            raise temporalio.converter.create_payload_validation_error(violations)
         return out
 
 
@@ -5425,7 +5473,9 @@ class _GetShowcaseInputTransferTypeConverter(
     ) -> "GetShowcaseInput":
         violations: list[Violation] = []
         if not isinstance(value, dict):
-            raise ValidationError([Violation(path="", reason="expected object")])
+            raise temporalio.converter.create_payload_validation_error(
+                [Violation(path="", reason="expected object")]
+            )
         raw = typing.cast("dict[str, typing.Any]", value)
 
         id_value: str = typing.cast("typing.Any", None)
@@ -5442,7 +5492,7 @@ class _GetShowcaseInputTransferTypeConverter(
             if key != "id":
                 violations.append(Violation(path=key, reason="unknown field"))
         if violations:
-            raise ValidationError(violations)
+            raise temporalio.converter.create_payload_validation_error(violations)
         return GetShowcaseInput(
             id=id_value,
         )
@@ -5469,7 +5519,9 @@ class _SquareTransferTypeConverter(
     ) -> "Square":
         violations: list[Violation] = []
         if not isinstance(value, dict):
-            raise ValidationError([Violation(path="", reason="expected object")])
+            raise temporalio.converter.create_payload_validation_error(
+                [Violation(path="", reason="expected object")]
+            )
         raw = typing.cast("dict[str, typing.Any]", value)
 
         kind_value: typing.Literal["square"] = typing.cast("typing.Any", None)
@@ -5511,7 +5563,7 @@ class _SquareTransferTypeConverter(
             if key not in _SQUARE_DECLARED:
                 additional_properties[key] = raw[key]
         if violations:
-            raise ValidationError(violations)
+            raise temporalio.converter.create_payload_validation_error(violations)
         return Square(
             kind=kind_value,
             side=side_value,
@@ -5543,7 +5595,7 @@ class _SquareTransferTypeConverter(
             else:
                 out[key] = entry
         if violations:
-            raise ValidationError(violations)
+            raise temporalio.converter.create_payload_validation_error(violations)
         return out
 
 
@@ -5570,7 +5622,9 @@ class _TextNoteTransferTypeConverter(
     ) -> "TextNote":
         violations: list[Violation] = []
         if not isinstance(value, dict):
-            raise ValidationError([Violation(path="", reason="expected object")])
+            raise temporalio.converter.create_payload_validation_error(
+                [Violation(path="", reason="expected object")]
+            )
         raw = typing.cast("dict[str, typing.Any]", value)
 
         kind_value: typing.Literal["text"] = typing.cast("typing.Any", None)
@@ -5607,7 +5661,7 @@ class _TextNoteTransferTypeConverter(
             if key not in _TEXT_NOTE_DECLARED:
                 additional_properties[key] = raw[key]
         if violations:
-            raise ValidationError(violations)
+            raise temporalio.converter.create_payload_validation_error(violations)
         return TextNote(
             kind=kind_value,
             body=body_value,
@@ -5639,7 +5693,7 @@ class _TextNoteTransferTypeConverter(
             else:
                 out[key] = entry
         if violations:
-            raise ValidationError(violations)
+            raise temporalio.converter.create_payload_validation_error(violations)
         return out
 
 
@@ -5666,7 +5720,9 @@ class _TokensTransferTypeConverter(
     ) -> "Tokens":
         violations: list[Violation] = []
         if not isinstance(value, dict):
-            raise ValidationError([Violation(path="", reason="expected object")])
+            raise temporalio.converter.create_payload_validation_error(
+                [Violation(path="", reason="expected object")]
+            )
         raw = typing.cast("dict[str, typing.Any]", value)
         additional_properties: dict[str, str] = {}
         for key in raw:
@@ -5699,7 +5755,7 @@ class _TokensTransferTypeConverter(
                     )
             additional_properties[key] = member
         if violations:
-            raise ValidationError(violations)
+            raise temporalio.converter.create_payload_validation_error(violations)
         return Tokens(additional_properties=additional_properties)
 
     @typing_extensions.override
@@ -5728,7 +5784,7 @@ class _TokensTransferTypeConverter(
                 )
             out[key] = entry
         if violations:
-            raise ValidationError(violations)
+            raise temporalio.converter.create_payload_validation_error(violations)
         return out
 
 
@@ -5751,7 +5807,9 @@ class _WidgetTransferTypeConverter(
     ) -> "Widget":
         violations: list[Violation] = []
         if not isinstance(value, dict):
-            raise ValidationError([Violation(path="", reason="expected object")])
+            raise temporalio.converter.create_payload_validation_error(
+                [Violation(path="", reason="expected object")]
+            )
         raw = typing.cast("dict[str, typing.Any]", value)
 
         id_value: str = typing.cast("typing.Any", None)
@@ -5818,7 +5876,7 @@ class _WidgetTransferTypeConverter(
             if key not in _WIDGET_DECLARED:
                 additional_properties[key] = raw[key]
         if violations:
-            raise ValidationError(violations)
+            raise temporalio.converter.create_payload_validation_error(violations)
         return Widget(
             id=id_value,
             kind=kind_value,
@@ -5860,7 +5918,7 @@ class _WidgetTransferTypeConverter(
             else:
                 out[key] = entry
         if violations:
-            raise ValidationError(violations)
+            raise temporalio.converter.create_payload_validation_error(violations)
         return out
 
 
@@ -5897,7 +5955,9 @@ class _WidgetBaseTransferTypeConverter(
     ) -> "WidgetBase":
         violations: list[Violation] = []
         if not isinstance(value, dict):
-            raise ValidationError([Violation(path="", reason="expected object")])
+            raise temporalio.converter.create_payload_validation_error(
+                [Violation(path="", reason="expected object")]
+            )
         raw = typing.cast("dict[str, typing.Any]", value)
 
         id_value: str = typing.cast("typing.Any", None)
@@ -5928,7 +5988,7 @@ class _WidgetBaseTransferTypeConverter(
             if key not in _WIDGET_BASE_DECLARED:
                 additional_properties[key] = raw[key]
         if violations:
-            raise ValidationError(violations)
+            raise temporalio.converter.create_payload_validation_error(violations)
         return WidgetBase(
             id=id_value,
             kind=kind_value,
@@ -5953,7 +6013,7 @@ class _WidgetBaseTransferTypeConverter(
             else:
                 out[key] = entry
         if violations:
-            raise ValidationError(violations)
+            raise temporalio.converter.create_payload_validation_error(violations)
         return out
 
 
@@ -5982,13 +6042,13 @@ def _choices_value_from_transfer_type(
         if tag == "circle":
             try:
                 return _CircleTransferTypeConverter().from_transfer_type(value, Circle)
-            except ValidationError as error:
+            except temporalio.exceptions.ApplicationError as error:
                 _collect(violations, path, error)
                 return None
         if tag == "square":
             try:
                 return _SquareTransferTypeConverter().from_transfer_type(value, Square)
-            except ValidationError as error:
+            except temporalio.exceptions.ApplicationError as error:
                 _collect(violations, path, error)
                 return None
         violations.append(
@@ -6008,7 +6068,7 @@ def _choices_value_to_transfer_type(value: ChoicesValue) -> typing.Any:
     if not (isinstance(candidate, Circle) or isinstance(candidate, Square)):
         violations.append(Violation(path="", reason="expected one of: Circle, Square"))
     if violations:
-        raise ValidationError(violations)
+        raise temporalio.converter.create_payload_validation_error(violations)
     if isinstance(value, Circle):
         return _CircleTransferTypeConverter().to_transfer_type(value)
     return _SquareTransferTypeConverter().to_transfer_type(value)
@@ -6025,7 +6085,7 @@ def _note_from_transfer_type(
                 return _TextNoteTransferTypeConverter().from_transfer_type(
                     value, TextNote
                 )
-            except ValidationError as error:
+            except temporalio.exceptions.ApplicationError as error:
                 _collect(violations, path, error)
                 return None
         if tag == "link":
@@ -6033,7 +6093,7 @@ def _note_from_transfer_type(
                 return _LinkNoteTransferTypeConverter().from_transfer_type(
                     value, LinkNote
                 )
-            except ValidationError as error:
+            except temporalio.exceptions.ApplicationError as error:
                 _collect(violations, path, error)
                 return None
         violations.append(
@@ -6057,7 +6117,7 @@ def _note_to_transfer_type(value: Note) -> typing.Any:
             Violation(path="", reason="expected one of: TextNote, LinkNote")
         )
     if violations:
-        raise ValidationError(violations)
+        raise temporalio.converter.create_payload_validation_error(violations)
     if isinstance(value, TextNote):
         return _TextNoteTransferTypeConverter().to_transfer_type(value)
     return _LinkNoteTransferTypeConverter().to_transfer_type(value)
@@ -6072,13 +6132,13 @@ def _shape_from_transfer_type(
         if tag == "circle":
             try:
                 return _CircleTransferTypeConverter().from_transfer_type(value, Circle)
-            except ValidationError as error:
+            except temporalio.exceptions.ApplicationError as error:
                 _collect(violations, path, error)
                 return None
         if tag == "square":
             try:
                 return _SquareTransferTypeConverter().from_transfer_type(value, Square)
-            except ValidationError as error:
+            except temporalio.exceptions.ApplicationError as error:
                 _collect(violations, path, error)
                 return None
         violations.append(
@@ -6098,7 +6158,7 @@ def _shape_to_transfer_type(value: Shape) -> typing.Any:
     if not (isinstance(candidate, Circle) or isinstance(candidate, Square)):
         violations.append(Violation(path="", reason="expected one of: Circle, Square"))
     if violations:
-        raise ValidationError(violations)
+        raise temporalio.converter.create_payload_validation_error(violations)
     if isinstance(value, Circle):
         return _CircleTransferTypeConverter().to_transfer_type(value)
     return _SquareTransferTypeConverter().to_transfer_type(value)
@@ -6150,7 +6210,7 @@ def _showcase_segments_item_to_transfer_type(value: ShowcaseSegmentsItem) -> typ
     ):
         violations.append(Violation(path="", reason="expected one of: string, integer"))
     if violations:
-        raise ValidationError(violations)
+        raise temporalio.converter.create_payload_validation_error(violations)
     return value
 
 
@@ -6227,7 +6287,7 @@ def _showcase_detail_from_transfer_type(
             return _ShowcaseDetailObjectTransferTypeConverter().from_transfer_type(
                 value, ShowcaseDetailObject
             )
-        except ValidationError as error:
+        except temporalio.exceptions.ApplicationError as error:
             _collect(violations, path, error)
             return None
     if isinstance(value, str):
@@ -6246,7 +6306,7 @@ def _showcase_detail_to_transfer_type(value: ShowcaseDetailObject | str) -> typi
             Violation(path="", reason="expected one of: ShowcaseDetailObject, string")
         )
     if violations:
-        raise ValidationError(violations)
+        raise temporalio.converter.create_payload_validation_error(violations)
     if isinstance(value, ShowcaseDetailObject):
         return _ShowcaseDetailObjectTransferTypeConverter().to_transfer_type(value)
     return value
@@ -6261,13 +6321,13 @@ def _showcase_shape_or_name_from_transfer_type(
         if tag == "circle":
             try:
                 return _CircleTransferTypeConverter().from_transfer_type(value, Circle)
-            except ValidationError as error:
+            except temporalio.exceptions.ApplicationError as error:
                 _collect(violations, path, error)
                 return None
         if tag == "square":
             try:
                 return _SquareTransferTypeConverter().from_transfer_type(value, Square)
-            except ValidationError as error:
+            except temporalio.exceptions.ApplicationError as error:
                 _collect(violations, path, error)
                 return None
         violations.append(
@@ -6308,7 +6368,7 @@ def _showcase_shape_or_name_to_transfer_type(
             Violation(path="", reason="expected one of: Circle, Square, string")
         )
     if violations:
-        raise ValidationError(violations)
+        raise temporalio.converter.create_payload_validation_error(violations)
     if isinstance(value, Circle):
         return _CircleTransferTypeConverter().to_transfer_type(value)
     if isinstance(value, Square):
@@ -6405,7 +6465,7 @@ def _showcase_address_list_or_label_from_transfer_type(
                 items_item = _AddressTransferTypeConverter().from_transfer_type(
                     items_element, Address
                 )
-            except ValidationError as error:
+            except temporalio.exceptions.ApplicationError as error:
                 _collect(violations, items_item_path, error)
             if len(violations) == items_item_violation_count:
                 items_list.append(items_item)

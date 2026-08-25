@@ -2,12 +2,8 @@
 
 from __future__ import annotations
 
-from ._definitions import (
-    ValidationError,
-    Violation,
-)
+from ._definitions import Violation
 
 __all__ = [
-    "ValidationError",
     "Violation",
 ]

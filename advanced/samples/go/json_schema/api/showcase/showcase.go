@@ -314,7 +314,7 @@ type ShowcaseAddressListOrLabelArray []Address
 
 func (ShowcaseAddressListOrLabelArray) isShowcaseAddressListOrLabel() {}
 
-// Validate checks v against every constraint and returns a *ValidationError
+// Validate checks v against every constraint and returns a PayloadValidationError
 // listing any violations.
 func (v ShowcaseAddressListOrLabelArray) Validate() error {
 	var errs []Violation
@@ -326,7 +326,7 @@ func (v ShowcaseAddressListOrLabelArray) Validate() error {
 		mergeNested(&errs, p0, v0.Validate())
 	}
 	if len(errs) > 0 {
-		return &ValidationError{Violations: errs}
+		return newPayloadValidationError(errs)
 	}
 	return nil
 }
@@ -337,7 +337,7 @@ type ShowcaseAddressListOrLabelString string
 
 func (ShowcaseAddressListOrLabelString) isShowcaseAddressListOrLabel() {}
 
-// Validate checks v against every constraint and returns a *ValidationError
+// Validate checks v against every constraint and returns a PayloadValidationError
 // listing any violations.
 func (v ShowcaseAddressListOrLabelString) Validate() error {
 	var errs []Violation
@@ -345,7 +345,7 @@ func (v ShowcaseAddressListOrLabelString) Validate() error {
 		errs = append(errs, Violation{"", fmt.Sprintf("must have length >= 1, got %d", n)})
 	}
 	if len(errs) > 0 {
-		return &ValidationError{Violations: errs}
+		return newPayloadValidationError(errs)
 	}
 	return nil
 }
@@ -419,12 +419,12 @@ type ShowcaseDetailString string
 
 func (ShowcaseDetailString) isShowcaseDetail() {}
 
-// Validate checks v against every constraint and returns a *ValidationError
+// Validate checks v against every constraint and returns a PayloadValidationError
 // listing any violations.
 func (v ShowcaseDetailString) Validate() error {
 	var errs []Violation
 	if len(errs) > 0 {
-		return &ValidationError{Violations: errs}
+		return newPayloadValidationError(errs)
 	}
 	return nil
 }
@@ -465,7 +465,7 @@ type ShowcaseIdOrNameString string
 
 func (ShowcaseIdOrNameString) isShowcaseIdOrName() {}
 
-// Validate checks v against every constraint and returns a *ValidationError
+// Validate checks v against every constraint and returns a PayloadValidationError
 // listing any violations.
 func (v ShowcaseIdOrNameString) Validate() error {
 	var errs []Violation
@@ -473,7 +473,7 @@ func (v ShowcaseIdOrNameString) Validate() error {
 		errs = append(errs, Violation{"", fmt.Sprintf("must have length >= 3, got %d", n)})
 	}
 	if len(errs) > 0 {
-		return &ValidationError{Violations: errs}
+		return newPayloadValidationError(errs)
 	}
 	return nil
 }
@@ -483,7 +483,7 @@ type ShowcaseIdOrNameInteger int64
 
 func (ShowcaseIdOrNameInteger) isShowcaseIdOrName() {}
 
-// Validate checks v against every constraint and returns a *ValidationError
+// Validate checks v against every constraint and returns a PayloadValidationError
 // listing any violations.
 func (v ShowcaseIdOrNameInteger) Validate() error {
 	var errs []Violation
@@ -494,7 +494,7 @@ func (v ShowcaseIdOrNameInteger) Validate() error {
 		errs = append(errs, Violation{"", fmt.Sprintf("must be >= 1, got %v", int64(v))})
 	}
 	if len(errs) > 0 {
-		return &ValidationError{Violations: errs}
+		return newPayloadValidationError(errs)
 	}
 	return nil
 }
@@ -548,7 +548,7 @@ type ShowcaseMeasurementsArray []float64
 
 func (ShowcaseMeasurementsArray) isShowcaseMeasurements() {}
 
-// Validate checks v against every constraint and returns a *ValidationError
+// Validate checks v against every constraint and returns a PayloadValidationError
 // listing any violations.
 func (v ShowcaseMeasurementsArray) Validate() error {
 	var errs []Violation
@@ -572,7 +572,7 @@ func (v ShowcaseMeasurementsArray) Validate() error {
 		}
 	}
 	if len(errs) > 0 {
-		return &ValidationError{Violations: errs}
+		return newPayloadValidationError(errs)
 	}
 	return nil
 }
@@ -585,7 +585,7 @@ type ShowcaseMeasurementsString string
 
 func (ShowcaseMeasurementsString) isShowcaseMeasurements() {}
 
-// Validate checks v against every constraint and returns a *ValidationError
+// Validate checks v against every constraint and returns a PayloadValidationError
 // listing any violations.
 func (v ShowcaseMeasurementsString) Validate() error {
 	var errs []Violation
@@ -593,7 +593,7 @@ func (v ShowcaseMeasurementsString) Validate() error {
 		errs = append(errs, Violation{"", fmt.Sprintf("must match pattern %q, got %q", "^[a-z]+$", string(v))})
 	}
 	if len(errs) > 0 {
-		return &ValidationError{Violations: errs}
+		return newPayloadValidationError(errs)
 	}
 	return nil
 }
@@ -684,7 +684,7 @@ type ShowcaseMetricOrLabelNumber float64
 
 func (ShowcaseMetricOrLabelNumber) isShowcaseMetricOrLabel() {}
 
-// Validate checks v against every constraint and returns a *ValidationError
+// Validate checks v against every constraint and returns a PayloadValidationError
 // listing any violations.
 func (v ShowcaseMetricOrLabelNumber) Validate() error {
 	var errs []Violation
@@ -692,7 +692,7 @@ func (v ShowcaseMetricOrLabelNumber) Validate() error {
 		errs = append(errs, Violation{"", fmt.Sprintf("must be a finite number, got %v", float64(v))})
 	}
 	if len(errs) > 0 {
-		return &ValidationError{Violations: errs}
+		return newPayloadValidationError(errs)
 	}
 	return nil
 }
@@ -703,7 +703,7 @@ type ShowcaseMetricOrLabelString string
 
 func (ShowcaseMetricOrLabelString) isShowcaseMetricOrLabel() {}
 
-// Validate checks v against every constraint and returns a *ValidationError
+// Validate checks v against every constraint and returns a PayloadValidationError
 // listing any violations.
 func (v ShowcaseMetricOrLabelString) Validate() error {
 	var errs []Violation
@@ -711,7 +711,7 @@ func (v ShowcaseMetricOrLabelString) Validate() error {
 		errs = append(errs, Violation{"", fmt.Sprintf("must have length >= 1, got %d", n)})
 	}
 	if len(errs) > 0 {
-		return &ValidationError{Violations: errs}
+		return newPayloadValidationError(errs)
 	}
 	return nil
 }
@@ -764,7 +764,7 @@ type ShowcaseModeString string
 
 func (ShowcaseModeString) isShowcaseMode() {}
 
-// Validate checks v against every constraint and returns a *ValidationError
+// Validate checks v against every constraint and returns a PayloadValidationError
 // listing any violations.
 func (v ShowcaseModeString) Validate() error {
 	var errs []Violation
@@ -774,7 +774,7 @@ func (v ShowcaseModeString) Validate() error {
 		errs = append(errs, Violation{"", fmt.Sprintf("must be one of [\"auto\",\"manual\"], got %q", string(v))})
 	}
 	if len(errs) > 0 {
-		return &ValidationError{Violations: errs}
+		return newPayloadValidationError(errs)
 	}
 	return nil
 }
@@ -784,7 +784,7 @@ type ShowcaseModeInteger int64
 
 func (ShowcaseModeInteger) isShowcaseMode() {}
 
-// Validate checks v against every constraint and returns a *ValidationError
+// Validate checks v against every constraint and returns a PayloadValidationError
 // listing any violations.
 func (v ShowcaseModeInteger) Validate() error {
 	var errs []Violation
@@ -795,7 +795,7 @@ func (v ShowcaseModeInteger) Validate() error {
 		errs = append(errs, Violation{"", fmt.Sprintf("must be >= 0, got %v", int64(v))})
 	}
 	if len(errs) > 0 {
-		return &ValidationError{Violations: errs}
+		return newPayloadValidationError(errs)
 	}
 	return nil
 }
@@ -851,18 +851,18 @@ type ShowcasePayloadObject struct {
 
 func (ShowcasePayloadObject) isShowcasePayload() {}
 
-// Validate checks m against every constraint and returns a *ValidationError
+// Validate checks m against every constraint and returns a PayloadValidationError
 // listing any violations.
 func (m ShowcasePayloadObject) Validate() error {
 	var errs []Violation
 	if len(errs) > 0 {
-		return &ValidationError{Violations: errs}
+		return newPayloadValidationError(errs)
 	}
 	return nil
 }
 
 // UnmarshalJSON parses data into m and validates it, returning a
-// *ValidationError listing any violations.
+// PayloadValidationError listing any violations.
 func (m *ShowcasePayloadObject) UnmarshalJSON(data []byte) error {
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(data, &raw); err != nil {
@@ -874,13 +874,13 @@ func (m *ShowcasePayloadObject) UnmarshalJSON(data []byte) error {
 		m.AdditionalProperties[k] = v
 	}
 	if len(errs) > 0 {
-		return &ValidationError{Violations: errs}
+		return newPayloadValidationError(errs)
 	}
 	return nil
 }
 
 // MarshalJSON validates m, then serializes it to JSON, returning a
-// *ValidationError if validation fails.
+// PayloadValidationError if validation fails.
 func (m ShowcasePayloadObject) MarshalJSON() ([]byte, error) {
 	if err := m.Validate(); err != nil {
 		return nil, err
@@ -897,12 +897,12 @@ type ShowcasePayloadString string
 
 func (ShowcasePayloadString) isShowcasePayload() {}
 
-// Validate checks v against every constraint and returns a *ValidationError
+// Validate checks v against every constraint and returns a PayloadValidationError
 // listing any violations.
 func (v ShowcasePayloadString) Validate() error {
 	var errs []Violation
 	if len(errs) > 0 {
-		return &ValidationError{Violations: errs}
+		return newPayloadValidationError(errs)
 	}
 	return nil
 }
@@ -944,7 +944,7 @@ type ShowcaseSegmentsItemString string
 
 func (ShowcaseSegmentsItemString) isShowcaseSegmentsItem() {}
 
-// Validate checks v against every constraint and returns a *ValidationError
+// Validate checks v against every constraint and returns a PayloadValidationError
 // listing any violations.
 func (v ShowcaseSegmentsItemString) Validate() error {
 	var errs []Violation
@@ -952,7 +952,7 @@ func (v ShowcaseSegmentsItemString) Validate() error {
 		errs = append(errs, Violation{"", fmt.Sprintf("must have length >= 2, got %d", n)})
 	}
 	if len(errs) > 0 {
-		return &ValidationError{Violations: errs}
+		return newPayloadValidationError(errs)
 	}
 	return nil
 }
@@ -963,7 +963,7 @@ type ShowcaseSegmentsItemInteger int64
 
 func (ShowcaseSegmentsItemInteger) isShowcaseSegmentsItem() {}
 
-// Validate checks v against every constraint and returns a *ValidationError
+// Validate checks v against every constraint and returns a PayloadValidationError
 // listing any violations.
 func (v ShowcaseSegmentsItemInteger) Validate() error {
 	var errs []Violation
@@ -974,7 +974,7 @@ func (v ShowcaseSegmentsItemInteger) Validate() error {
 		errs = append(errs, Violation{"", fmt.Sprintf("must be >= 0, got %v", int64(v))})
 	}
 	if len(errs) > 0 {
-		return &ValidationError{Violations: errs}
+		return newPayloadValidationError(errs)
 	}
 	return nil
 }
@@ -1032,7 +1032,7 @@ type ShowcaseShapeOrNameString string
 
 func (ShowcaseShapeOrNameString) isShowcaseShapeOrName() {}
 
-// Validate checks v against every constraint and returns a *ValidationError
+// Validate checks v against every constraint and returns a PayloadValidationError
 // listing any violations.
 func (v ShowcaseShapeOrNameString) Validate() error {
 	var errs []Violation
@@ -1040,7 +1040,7 @@ func (v ShowcaseShapeOrNameString) Validate() error {
 		errs = append(errs, Violation{"", fmt.Sprintf("must have length <= 32, got %d", n)})
 	}
 	if len(errs) > 0 {
-		return &ValidationError{Violations: errs}
+		return newPayloadValidationError(errs)
 	}
 	return nil
 }
@@ -1443,7 +1443,7 @@ type Address struct {
 	AdditionalProperties map[string]json.RawMessage `json:"-"`
 }
 
-// Validate checks m against every constraint and returns a *ValidationError
+// Validate checks m against every constraint and returns a PayloadValidationError
 // listing any violations.
 func (m Address) Validate() error {
 	var errs []Violation
@@ -1460,13 +1460,13 @@ func (m Address) Validate() error {
 		errs = append(errs, Violation{"zip", "catch-all key collides with declared property"})
 	}
 	if len(errs) > 0 {
-		return &ValidationError{Violations: errs}
+		return newPayloadValidationError(errs)
 	}
 	return nil
 }
 
 // UnmarshalJSON parses data into m and validates it, returning a
-// *ValidationError listing any violations.
+// PayloadValidationError listing any violations.
 func (m *Address) UnmarshalJSON(data []byte) error {
 	var all map[string]json.RawMessage
 	if err := json.Unmarshal(data, &all); err != nil {
@@ -1498,13 +1498,13 @@ func (m *Address) UnmarshalJSON(data []byte) error {
 		m.Zip = &v
 	}
 	if len(errs) > 0 {
-		return &ValidationError{Violations: errs}
+		return newPayloadValidationError(errs)
 	}
 	return nil
 }
 
 // MarshalJSON validates m, then serializes it to JSON, returning a
-// *ValidationError if validation fails.
+// PayloadValidationError if validation fails.
 func (m Address) MarshalJSON() ([]byte, error) {
 	var errs []Violation
 	addViolations(&errs, m.Validate())
@@ -1520,7 +1520,7 @@ func (m Address) MarshalJSON() ([]byte, error) {
 		marshalField(out, "zip", *m.Zip, &errs)
 	}
 	if len(errs) > 0 {
-		return nil, &ValidationError{Violations: errs}
+		return nil, newPayloadValidationError(errs)
 	}
 	return json.Marshal(out)
 }
@@ -1531,7 +1531,7 @@ type AddressBook struct {
 	AdditionalProperties map[string]Address
 }
 
-// Validate checks m against every constraint and returns a *ValidationError
+// Validate checks m against every constraint and returns a PayloadValidationError
 // listing any violations.
 func (m AddressBook) Validate() error {
 	var errs []Violation
@@ -1539,13 +1539,13 @@ func (m AddressBook) Validate() error {
 		mergeNested(&errs, k, v.Validate())
 	}
 	if len(errs) > 0 {
-		return &ValidationError{Violations: errs}
+		return newPayloadValidationError(errs)
 	}
 	return nil
 }
 
 // UnmarshalJSON parses data into m and validates it, returning a
-// *ValidationError listing any violations.
+// PayloadValidationError listing any violations.
 func (m *AddressBook) UnmarshalJSON(data []byte) error {
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(data, &raw); err != nil {
@@ -1566,13 +1566,13 @@ func (m *AddressBook) UnmarshalJSON(data []byte) error {
 		m.AdditionalProperties[k] = value
 	}
 	if len(errs) > 0 {
-		return &ValidationError{Violations: errs}
+		return newPayloadValidationError(errs)
 	}
 	return nil
 }
 
 // MarshalJSON validates m, then serializes it to JSON, returning a
-// *ValidationError if validation fails.
+// PayloadValidationError if validation fails.
 func (m AddressBook) MarshalJSON() ([]byte, error) {
 	if err := m.Validate(); err != nil {
 		return nil, err
@@ -1592,7 +1592,7 @@ type Attributes struct {
 	AdditionalProperties map[string]string
 }
 
-// Validate checks m against every constraint and returns a *ValidationError
+// Validate checks m against every constraint and returns a PayloadValidationError
 // listing any violations.
 func (m Attributes) Validate() error {
 	var errs []Violation
@@ -1608,13 +1608,13 @@ func (m Attributes) Validate() error {
 		}
 	}
 	if len(errs) > 0 {
-		return &ValidationError{Violations: errs}
+		return newPayloadValidationError(errs)
 	}
 	return nil
 }
 
 // UnmarshalJSON parses data into m and validates it, returning a
-// *ValidationError listing any violations.
+// PayloadValidationError listing any violations.
 func (m *Attributes) UnmarshalJSON(data []byte) error {
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(data, &raw); err != nil {
@@ -1639,13 +1639,13 @@ func (m *Attributes) UnmarshalJSON(data []byte) error {
 		}
 	}
 	if len(errs) > 0 {
-		return &ValidationError{Violations: errs}
+		return newPayloadValidationError(errs)
 	}
 	return nil
 }
 
 // MarshalJSON validates m, then serializes it to JSON, returning a
-// *ValidationError if validation fails.
+// PayloadValidationError if validation fails.
 func (m Attributes) MarshalJSON() ([]byte, error) {
 	if err := m.Validate(); err != nil {
 		return nil, err
@@ -1665,18 +1665,18 @@ type BlobIndex struct {
 	AdditionalProperties map[string][]byte
 }
 
-// Validate checks m against every constraint and returns a *ValidationError
+// Validate checks m against every constraint and returns a PayloadValidationError
 // listing any violations.
 func (m BlobIndex) Validate() error {
 	var errs []Violation
 	if len(errs) > 0 {
-		return &ValidationError{Violations: errs}
+		return newPayloadValidationError(errs)
 	}
 	return nil
 }
 
 // UnmarshalJSON parses data into m and validates it, returning a
-// *ValidationError listing any violations.
+// PayloadValidationError listing any violations.
 func (m *BlobIndex) UnmarshalJSON(data []byte) error {
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(data, &raw); err != nil {
@@ -1696,13 +1696,13 @@ func (m *BlobIndex) UnmarshalJSON(data []byte) error {
 		}
 	}
 	if len(errs) > 0 {
-		return &ValidationError{Violations: errs}
+		return newPayloadValidationError(errs)
 	}
 	return nil
 }
 
 // MarshalJSON validates m, then serializes it to JSON, returning a
-// *ValidationError if validation fails.
+// PayloadValidationError if validation fails.
 func (m BlobIndex) MarshalJSON() ([]byte, error) {
 	if err := m.Validate(); err != nil {
 		return nil, err
@@ -1724,7 +1724,7 @@ type Choices struct {
 	AdditionalProperties map[string]ChoicesValue
 }
 
-// Validate checks m against every constraint and returns a *ValidationError
+// Validate checks m against every constraint and returns a PayloadValidationError
 // listing any violations.
 func (m Choices) Validate() error {
 	var errs []Violation
@@ -1736,13 +1736,13 @@ func (m Choices) Validate() error {
 		}
 	}
 	if len(errs) > 0 {
-		return &ValidationError{Violations: errs}
+		return newPayloadValidationError(errs)
 	}
 	return nil
 }
 
 // UnmarshalJSON parses data into m and validates it, returning a
-// *ValidationError listing any violations.
+// PayloadValidationError listing any violations.
 func (m *Choices) UnmarshalJSON(data []byte) error {
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(data, &raw); err != nil {
@@ -1760,13 +1760,13 @@ func (m *Choices) UnmarshalJSON(data []byte) error {
 		}
 	}
 	if len(errs) > 0 {
-		return &ValidationError{Violations: errs}
+		return newPayloadValidationError(errs)
 	}
 	return nil
 }
 
 // MarshalJSON validates m, then serializes it to JSON, returning a
-// *ValidationError if validation fails.
+// PayloadValidationError if validation fails.
 func (m Choices) MarshalJSON() ([]byte, error) {
 	if err := m.Validate(); err != nil {
 		return nil, err
@@ -1788,7 +1788,7 @@ type Circle struct {
 	AdditionalProperties map[string]json.RawMessage `json:"-"`
 }
 
-// Validate checks m against every constraint and returns a *ValidationError
+// Validate checks m against every constraint and returns a PayloadValidationError
 // listing any violations.
 func (m Circle) Validate() error {
 	var errs []Violation
@@ -1805,13 +1805,13 @@ func (m Circle) Validate() error {
 		errs = append(errs, Violation{"radius", "catch-all key collides with declared property"})
 	}
 	if len(errs) > 0 {
-		return &ValidationError{Violations: errs}
+		return newPayloadValidationError(errs)
 	}
 	return nil
 }
 
 // UnmarshalJSON parses data into m and validates it, returning a
-// *ValidationError listing any violations.
+// PayloadValidationError listing any violations.
 func (m *Circle) UnmarshalJSON(data []byte) error {
 	var all map[string]json.RawMessage
 	if err := json.Unmarshal(data, &all); err != nil {
@@ -1845,13 +1845,13 @@ func (m *Circle) UnmarshalJSON(data []byte) error {
 		m.Radius = v
 	}
 	if len(errs) > 0 {
-		return &ValidationError{Violations: errs}
+		return newPayloadValidationError(errs)
 	}
 	return nil
 }
 
 // MarshalJSON validates m, then serializes it to JSON, returning a
-// *ValidationError if validation fails.
+// PayloadValidationError if validation fails.
 func (m Circle) MarshalJSON() ([]byte, error) {
 	var errs []Violation
 	addViolations(&errs, m.Validate())
@@ -1862,7 +1862,7 @@ func (m Circle) MarshalJSON() ([]byte, error) {
 	marshalField(out, "kind", m.Kind, &errs)
 	marshalField(out, "radius", m.Radius, &errs)
 	if len(errs) > 0 {
-		return nil, &ValidationError{Violations: errs}
+		return nil, newPayloadValidationError(errs)
 	}
 	return json.Marshal(out)
 }
@@ -1885,7 +1885,7 @@ type ContactGo struct {
 	AdditionalProperties map[string]json.RawMessage `json:"-"`
 }
 
-// Validate checks m against every constraint and returns a *ValidationError
+// Validate checks m against every constraint and returns a PayloadValidationError
 // listing any violations.
 func (m ContactGo) Validate() error {
 	var errs []Violation
@@ -1923,13 +1923,13 @@ func (m ContactGo) Validate() error {
 		}
 	}
 	if len(errs) > 0 {
-		return &ValidationError{Violations: errs}
+		return newPayloadValidationError(errs)
 	}
 	return nil
 }
 
 // UnmarshalJSON parses data into m and validates it, returning a
-// *ValidationError listing any violations.
+// PayloadValidationError listing any violations.
 func (m *ContactGo) UnmarshalJSON(data []byte) error {
 	var all map[string]json.RawMessage
 	if err := json.Unmarshal(data, &all); err != nil {
@@ -1972,13 +1972,13 @@ func (m *ContactGo) UnmarshalJSON(data []byte) error {
 		}
 	}
 	if len(errs) > 0 {
-		return &ValidationError{Violations: errs}
+		return newPayloadValidationError(errs)
 	}
 	return nil
 }
 
 // MarshalJSON validates m, then serializes it to JSON, returning a
-// *ValidationError if validation fails.
+// PayloadValidationError if validation fails.
 func (m ContactGo) MarshalJSON() ([]byte, error) {
 	var errs []Violation
 	addViolations(&errs, m.Validate())
@@ -1996,7 +1996,7 @@ func (m ContactGo) MarshalJSON() ([]byte, error) {
 		marshalField(out, "shippingZip", *m.ShippingZip, &errs)
 	}
 	if len(errs) > 0 {
-		return nil, &ValidationError{Violations: errs}
+		return nil, newPayloadValidationError(errs)
 	}
 	return json.Marshal(out)
 }
@@ -2007,7 +2007,7 @@ type DateIndex struct {
 	AdditionalProperties map[string]time.Time
 }
 
-// Validate checks m against every constraint and returns a *ValidationError
+// Validate checks m against every constraint and returns a PayloadValidationError
 // listing any violations.
 func (m DateIndex) Validate() error {
 	var errs []Violation
@@ -2015,13 +2015,13 @@ func (m DateIndex) Validate() error {
 		checkDate(v, k, &errs)
 	}
 	if len(errs) > 0 {
-		return &ValidationError{Violations: errs}
+		return newPayloadValidationError(errs)
 	}
 	return nil
 }
 
 // UnmarshalJSON parses data into m and validates it, returning a
-// *ValidationError listing any violations.
+// PayloadValidationError listing any violations.
 func (m *DateIndex) UnmarshalJSON(data []byte) error {
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(data, &raw); err != nil {
@@ -2041,13 +2041,13 @@ func (m *DateIndex) UnmarshalJSON(data []byte) error {
 		}
 	}
 	if len(errs) > 0 {
-		return &ValidationError{Violations: errs}
+		return newPayloadValidationError(errs)
 	}
 	return nil
 }
 
 // MarshalJSON validates m, then serializes it to JSON, returning a
-// *ValidationError if validation fails.
+// PayloadValidationError if validation fails.
 func (m DateIndex) MarshalJSON() ([]byte, error) {
 	if err := m.Validate(); err != nil {
 		return nil, err
@@ -2067,7 +2067,7 @@ type Extras struct {
 	AdditionalProperties map[string]json.RawMessage
 }
 
-// Validate checks m against every constraint and returns a *ValidationError
+// Validate checks m against every constraint and returns a PayloadValidationError
 // listing any violations.
 func (m Extras) Validate() error {
 	var errs []Violation
@@ -2075,13 +2075,13 @@ func (m Extras) Validate() error {
 		errs = append(errs, Violation{"", fmt.Sprintf("must have at most 4 properties, got %d", n)})
 	}
 	if len(errs) > 0 {
-		return &ValidationError{Violations: errs}
+		return newPayloadValidationError(errs)
 	}
 	return nil
 }
 
 // UnmarshalJSON parses data into m and validates it, returning a
-// *ValidationError listing any violations.
+// PayloadValidationError listing any violations.
 func (m *Extras) UnmarshalJSON(data []byte) error {
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(data, &raw); err != nil {
@@ -2096,13 +2096,13 @@ func (m *Extras) UnmarshalJSON(data []byte) error {
 		errs = append(errs, Violation{"", fmt.Sprintf("must have at most 4 properties, got %d", n)})
 	}
 	if len(errs) > 0 {
-		return &ValidationError{Violations: errs}
+		return newPayloadValidationError(errs)
 	}
 	return nil
 }
 
 // MarshalJSON validates m, then serializes it to JSON, returning a
-// *ValidationError if validation fails.
+// PayloadValidationError if validation fails.
 func (m Extras) MarshalJSON() ([]byte, error) {
 	if err := m.Validate(); err != nil {
 		return nil, err
@@ -2120,7 +2120,7 @@ type Labels struct {
 	AdditionalProperties map[string]string
 }
 
-// Validate checks m against every constraint and returns a *ValidationError
+// Validate checks m against every constraint and returns a PayloadValidationError
 // listing any violations.
 func (m Labels) Validate() error {
 	var errs []Violation
@@ -2128,13 +2128,13 @@ func (m Labels) Validate() error {
 		errs = append(errs, Violation{"", fmt.Sprintf("must have at most 50 properties, got %d", n)})
 	}
 	if len(errs) > 0 {
-		return &ValidationError{Violations: errs}
+		return newPayloadValidationError(errs)
 	}
 	return nil
 }
 
 // UnmarshalJSON parses data into m and validates it, returning a
-// *ValidationError listing any violations.
+// PayloadValidationError listing any violations.
 func (m *Labels) UnmarshalJSON(data []byte) error {
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(data, &raw); err != nil {
@@ -2151,13 +2151,13 @@ func (m *Labels) UnmarshalJSON(data []byte) error {
 		errs = append(errs, Violation{"", fmt.Sprintf("must have at most 50 properties, got %d", n)})
 	}
 	if len(errs) > 0 {
-		return &ValidationError{Violations: errs}
+		return newPayloadValidationError(errs)
 	}
 	return nil
 }
 
 // MarshalJSON validates m, then serializes it to JSON, returning a
-// *ValidationError if validation fails.
+// PayloadValidationError if validation fails.
 func (m Labels) MarshalJSON() ([]byte, error) {
 	if err := m.Validate(); err != nil {
 		return nil, err
@@ -2179,7 +2179,7 @@ type LinkNote struct {
 	AdditionalProperties map[string]json.RawMessage `json:"-"`
 }
 
-// Validate checks m against every constraint and returns a *ValidationError
+// Validate checks m against every constraint and returns a PayloadValidationError
 // listing any violations.
 func (m LinkNote) Validate() error {
 	var errs []Violation
@@ -2196,13 +2196,13 @@ func (m LinkNote) Validate() error {
 		errs = append(errs, Violation{"href", "catch-all key collides with declared property"})
 	}
 	if len(errs) > 0 {
-		return &ValidationError{Violations: errs}
+		return newPayloadValidationError(errs)
 	}
 	return nil
 }
 
 // UnmarshalJSON parses data into m and validates it, returning a
-// *ValidationError listing any violations.
+// PayloadValidationError listing any violations.
 func (m *LinkNote) UnmarshalJSON(data []byte) error {
 	var all map[string]json.RawMessage
 	if err := json.Unmarshal(data, &all); err != nil {
@@ -2239,13 +2239,13 @@ func (m *LinkNote) UnmarshalJSON(data []byte) error {
 		}
 	}
 	if len(errs) > 0 {
-		return &ValidationError{Violations: errs}
+		return newPayloadValidationError(errs)
 	}
 	return nil
 }
 
 // MarshalJSON validates m, then serializes it to JSON, returning a
-// *ValidationError if validation fails.
+// PayloadValidationError if validation fails.
 func (m LinkNote) MarshalJSON() ([]byte, error) {
 	var errs []Violation
 	addViolations(&errs, m.Validate())
@@ -2256,7 +2256,7 @@ func (m LinkNote) MarshalJSON() ([]byte, error) {
 	marshalField(out, "kind", m.Kind, &errs)
 	marshalField(out, "href", m.Href, &errs)
 	if len(errs) > 0 {
-		return nil, &ValidationError{Violations: errs}
+		return nil, newPayloadValidationError(errs)
 	}
 	return json.Marshal(out)
 }
@@ -2267,7 +2267,7 @@ type Metrics struct {
 	AdditionalProperties map[string]float64
 }
 
-// Validate checks m against every constraint and returns a *ValidationError
+// Validate checks m against every constraint and returns a PayloadValidationError
 // listing any violations.
 func (m Metrics) Validate() error {
 	var errs []Violation
@@ -2277,13 +2277,13 @@ func (m Metrics) Validate() error {
 		}
 	}
 	if len(errs) > 0 {
-		return &ValidationError{Violations: errs}
+		return newPayloadValidationError(errs)
 	}
 	return nil
 }
 
 // UnmarshalJSON parses data into m and validates it, returning a
-// *ValidationError listing any violations.
+// PayloadValidationError listing any violations.
 func (m *Metrics) UnmarshalJSON(data []byte) error {
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(data, &raw); err != nil {
@@ -2300,13 +2300,13 @@ func (m *Metrics) UnmarshalJSON(data []byte) error {
 		}
 	}
 	if len(errs) > 0 {
-		return &ValidationError{Violations: errs}
+		return newPayloadValidationError(errs)
 	}
 	return nil
 }
 
 // MarshalJSON validates m, then serializes it to JSON, returning a
-// *ValidationError if validation fails.
+// PayloadValidationError if validation fails.
 func (m Metrics) MarshalJSON() ([]byte, error) {
 	if err := m.Validate(); err != nil {
 		return nil, err
@@ -2326,7 +2326,7 @@ type Nicknames struct {
 	AdditionalProperties map[string]*string
 }
 
-// Validate checks m against every constraint and returns a *ValidationError
+// Validate checks m against every constraint and returns a PayloadValidationError
 // listing any violations.
 func (m Nicknames) Validate() error {
 	var errs []Violation
@@ -2339,13 +2339,13 @@ func (m Nicknames) Validate() error {
 		}
 	}
 	if len(errs) > 0 {
-		return &ValidationError{Violations: errs}
+		return newPayloadValidationError(errs)
 	}
 	return nil
 }
 
 // UnmarshalJSON parses data into m and validates it, returning a
-// *ValidationError listing any violations.
+// PayloadValidationError listing any violations.
 func (m *Nicknames) UnmarshalJSON(data []byte) error {
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(data, &raw); err != nil {
@@ -2366,13 +2366,13 @@ func (m *Nicknames) UnmarshalJSON(data []byte) error {
 		}
 	}
 	if len(errs) > 0 {
-		return &ValidationError{Violations: errs}
+		return newPayloadValidationError(errs)
 	}
 	return nil
 }
 
 // MarshalJSON validates m, then serializes it to JSON, returning a
-// *ValidationError if validation fails.
+// PayloadValidationError if validation fails.
 func (m Nicknames) MarshalJSON() ([]byte, error) {
 	if err := m.Validate(); err != nil {
 		return nil, err
@@ -2393,7 +2393,7 @@ type Quotas struct {
 	AdditionalProperties map[string]int64
 }
 
-// Validate checks m against every constraint and returns a *ValidationError
+// Validate checks m against every constraint and returns a PayloadValidationError
 // listing any violations.
 func (m Quotas) Validate() error {
 	var errs []Violation
@@ -2412,13 +2412,13 @@ func (m Quotas) Validate() error {
 		}
 	}
 	if len(errs) > 0 {
-		return &ValidationError{Violations: errs}
+		return newPayloadValidationError(errs)
 	}
 	return nil
 }
 
 // UnmarshalJSON parses data into m and validates it, returning a
-// *ValidationError listing any violations.
+// PayloadValidationError listing any violations.
 func (m *Quotas) UnmarshalJSON(data []byte) error {
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(data, &raw); err != nil {
@@ -2441,13 +2441,13 @@ func (m *Quotas) UnmarshalJSON(data []byte) error {
 		}
 	}
 	if len(errs) > 0 {
-		return &ValidationError{Violations: errs}
+		return newPayloadValidationError(errs)
 	}
 	return nil
 }
 
 // MarshalJSON validates m, then serializes it to JSON, returning a
-// *ValidationError if validation fails.
+// PayloadValidationError if validation fails.
 func (m Quotas) MarshalJSON() ([]byte, error) {
 	if err := m.Validate(); err != nil {
 		return nil, err
@@ -2467,7 +2467,7 @@ type Settings struct {
 	FontSize *int64 `json:"fontSize,omitempty"`
 }
 
-// Validate checks m against every constraint and returns a *ValidationError
+// Validate checks m against every constraint and returns a PayloadValidationError
 // listing any violations.
 func (m Settings) Validate() error {
 	var errs []Violation
@@ -2475,13 +2475,13 @@ func (m Settings) Validate() error {
 		errs = append(errs, Violation{"fontSize", "exceeds ±(2^53-1) integer cap"})
 	}
 	if len(errs) > 0 {
-		return &ValidationError{Violations: errs}
+		return newPayloadValidationError(errs)
 	}
 	return nil
 }
 
 // UnmarshalJSON parses data into m and validates it, returning a
-// *ValidationError listing any violations.
+// PayloadValidationError listing any violations.
 func (m *Settings) UnmarshalJSON(data []byte) error {
 	var all map[string]json.RawMessage
 	if err := json.Unmarshal(data, &all); err != nil {
@@ -2509,13 +2509,13 @@ func (m *Settings) UnmarshalJSON(data []byte) error {
 		m.FontSize = &v
 	}
 	if len(errs) > 0 {
-		return &ValidationError{Violations: errs}
+		return newPayloadValidationError(errs)
 	}
 	return nil
 }
 
 // MarshalJSON validates m, then serializes it to JSON, returning a
-// *ValidationError if validation fails.
+// PayloadValidationError if validation fails.
 func (m Settings) MarshalJSON() ([]byte, error) {
 	var errs []Violation
 	addViolations(&errs, m.Validate())
@@ -2527,7 +2527,7 @@ func (m Settings) MarshalJSON() ([]byte, error) {
 		marshalField(out, "fontSize", *m.FontSize, &errs)
 	}
 	if len(errs) > 0 {
-		return nil, &ValidationError{Violations: errs}
+		return nil, newPayloadValidationError(errs)
 	}
 	return json.Marshal(out)
 }
@@ -2842,7 +2842,7 @@ func (m Showcase) DebugOrDefault() bool {
 	return false
 }
 
-// Validate checks m against every constraint and returns a *ValidationError
+// Validate checks m against every constraint and returns a PayloadValidationError
 // listing any violations.
 func (m Showcase) Validate() error {
 	var errs []Violation
@@ -3245,13 +3245,13 @@ func (m Showcase) Validate() error {
 		}
 	}
 	if len(errs) > 0 {
-		return &ValidationError{Violations: errs}
+		return newPayloadValidationError(errs)
 	}
 	return nil
 }
 
 // UnmarshalJSON parses data into m and validates it, returning a
-// *ValidationError listing any violations.
+// PayloadValidationError listing any violations.
 func (m *Showcase) UnmarshalJSON(data []byte) error {
 	var all map[string]json.RawMessage
 	if err := json.Unmarshal(data, &all); err != nil {
@@ -4195,13 +4195,13 @@ func (m *Showcase) UnmarshalJSON(data []byte) error {
 		m.Quoted = &v
 	}
 	if len(errs) > 0 {
-		return &ValidationError{Violations: errs}
+		return newPayloadValidationError(errs)
 	}
 	return nil
 }
 
 // MarshalJSON validates m, then serializes it to JSON, returning a
-// *ValidationError if validation fails.
+// PayloadValidationError if validation fails.
 func (m Showcase) MarshalJSON() ([]byte, error) {
 	var errs []Violation
 	addViolations(&errs, m.Validate())
@@ -4445,7 +4445,7 @@ func (m Showcase) MarshalJSON() ([]byte, error) {
 		marshalField(out, "quoted", *m.Quoted, &errs)
 	}
 	if len(errs) > 0 {
-		return nil, &ValidationError{Violations: errs}
+		return nil, newPayloadValidationError(errs)
 	}
 	return json.Marshal(out)
 }
@@ -4458,7 +4458,7 @@ type ShowcaseAudit struct {
 	AdditionalProperties map[string]json.RawMessage `json:"-"`
 }
 
-// Validate checks m against every constraint and returns a *ValidationError
+// Validate checks m against every constraint and returns a PayloadValidationError
 // listing any violations.
 func (m ShowcaseAudit) Validate() error {
 	var errs []Violation
@@ -4469,13 +4469,13 @@ func (m ShowcaseAudit) Validate() error {
 		errs = append(errs, Violation{"by", "catch-all key collides with declared property"})
 	}
 	if len(errs) > 0 {
-		return &ValidationError{Violations: errs}
+		return newPayloadValidationError(errs)
 	}
 	return nil
 }
 
 // UnmarshalJSON parses data into m and validates it, returning a
-// *ValidationError listing any violations.
+// PayloadValidationError listing any violations.
 func (m *ShowcaseAudit) UnmarshalJSON(data []byte) error {
 	var all map[string]json.RawMessage
 	if err := json.Unmarshal(data, &all); err != nil {
@@ -4504,13 +4504,13 @@ func (m *ShowcaseAudit) UnmarshalJSON(data []byte) error {
 		}
 	}
 	if len(errs) > 0 {
-		return &ValidationError{Violations: errs}
+		return newPayloadValidationError(errs)
 	}
 	return nil
 }
 
 // MarshalJSON validates m, then serializes it to JSON, returning a
-// *ValidationError if validation fails.
+// PayloadValidationError if validation fails.
 func (m ShowcaseAudit) MarshalJSON() ([]byte, error) {
 	var errs []Violation
 	addViolations(&errs, m.Validate())
@@ -4520,7 +4520,7 @@ func (m ShowcaseAudit) MarshalJSON() ([]byte, error) {
 	}
 	marshalField(out, "by", m.By, &errs)
 	if len(errs) > 0 {
-		return nil, &ValidationError{Violations: errs}
+		return nil, newPayloadValidationError(errs)
 	}
 	return json.Marshal(out)
 }
@@ -4535,7 +4535,7 @@ type ShowcaseDetailObject struct {
 	AdditionalProperties map[string]json.RawMessage `json:"-"`
 }
 
-// Validate checks m against every constraint and returns a *ValidationError
+// Validate checks m against every constraint and returns a PayloadValidationError
 // listing any violations.
 func (m ShowcaseDetailObject) Validate() error {
 	var errs []Violation
@@ -4549,13 +4549,13 @@ func (m ShowcaseDetailObject) Validate() error {
 		errs = append(errs, Violation{"hint", "catch-all key collides with declared property"})
 	}
 	if len(errs) > 0 {
-		return &ValidationError{Violations: errs}
+		return newPayloadValidationError(errs)
 	}
 	return nil
 }
 
 // UnmarshalJSON parses data into m and validates it, returning a
-// *ValidationError listing any violations.
+// PayloadValidationError listing any violations.
 func (m *ShowcaseDetailObject) UnmarshalJSON(data []byte) error {
 	var all map[string]json.RawMessage
 	if err := json.Unmarshal(data, &all); err != nil {
@@ -4587,13 +4587,13 @@ func (m *ShowcaseDetailObject) UnmarshalJSON(data []byte) error {
 		m.Hint = &v
 	}
 	if len(errs) > 0 {
-		return &ValidationError{Violations: errs}
+		return newPayloadValidationError(errs)
 	}
 	return nil
 }
 
 // MarshalJSON validates m, then serializes it to JSON, returning a
-// *ValidationError if validation fails.
+// PayloadValidationError if validation fails.
 func (m ShowcaseDetailObject) MarshalJSON() ([]byte, error) {
 	var errs []Violation
 	addViolations(&errs, m.Validate())
@@ -4606,7 +4606,7 @@ func (m ShowcaseDetailObject) MarshalJSON() ([]byte, error) {
 		marshalField(out, "hint", *m.Hint, &errs)
 	}
 	if len(errs) > 0 {
-		return nil, &ValidationError{Violations: errs}
+		return nil, newPayloadValidationError(errs)
 	}
 	return json.Marshal(out)
 }
@@ -4622,7 +4622,7 @@ type ShowcaseLedger struct {
 	AdditionalProperties map[string]ShowcaseLedgerValue
 }
 
-// Validate checks m against every constraint and returns a *ValidationError
+// Validate checks m against every constraint and returns a PayloadValidationError
 // listing any violations.
 func (m ShowcaseLedger) Validate() error {
 	var errs []Violation
@@ -4630,13 +4630,13 @@ func (m ShowcaseLedger) Validate() error {
 		mergeNested(&errs, k, v.Validate())
 	}
 	if len(errs) > 0 {
-		return &ValidationError{Violations: errs}
+		return newPayloadValidationError(errs)
 	}
 	return nil
 }
 
 // UnmarshalJSON parses data into m and validates it, returning a
-// *ValidationError listing any violations.
+// PayloadValidationError listing any violations.
 func (m *ShowcaseLedger) UnmarshalJSON(data []byte) error {
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(data, &raw); err != nil {
@@ -4657,13 +4657,13 @@ func (m *ShowcaseLedger) UnmarshalJSON(data []byte) error {
 		m.AdditionalProperties[k] = value
 	}
 	if len(errs) > 0 {
-		return &ValidationError{Violations: errs}
+		return newPayloadValidationError(errs)
 	}
 	return nil
 }
 
 // MarshalJSON validates m, then serializes it to JSON, returning a
-// *ValidationError if validation fails.
+// PayloadValidationError if validation fails.
 func (m ShowcaseLedger) MarshalJSON() ([]byte, error) {
 	if err := m.Validate(); err != nil {
 		return nil, err
@@ -4683,7 +4683,7 @@ type ShowcaseLedgerValue struct {
 	AdditionalProperties map[string]json.RawMessage `json:"-"`
 }
 
-// Validate checks m against every constraint and returns a *ValidationError
+// Validate checks m against every constraint and returns a PayloadValidationError
 // listing any violations.
 func (m ShowcaseLedgerValue) Validate() error {
 	var errs []Violation
@@ -4697,13 +4697,13 @@ func (m ShowcaseLedgerValue) Validate() error {
 		errs = append(errs, Violation{"amount", "catch-all key collides with declared property"})
 	}
 	if len(errs) > 0 {
-		return &ValidationError{Violations: errs}
+		return newPayloadValidationError(errs)
 	}
 	return nil
 }
 
 // UnmarshalJSON parses data into m and validates it, returning a
-// *ValidationError listing any violations.
+// PayloadValidationError listing any violations.
 func (m *ShowcaseLedgerValue) UnmarshalJSON(data []byte) error {
 	var all map[string]json.RawMessage
 	if err := json.Unmarshal(data, &all); err != nil {
@@ -4732,13 +4732,13 @@ func (m *ShowcaseLedgerValue) UnmarshalJSON(data []byte) error {
 		m.Amount = v
 	}
 	if len(errs) > 0 {
-		return &ValidationError{Violations: errs}
+		return newPayloadValidationError(errs)
 	}
 	return nil
 }
 
 // MarshalJSON validates m, then serializes it to JSON, returning a
-// *ValidationError if validation fails.
+// PayloadValidationError if validation fails.
 func (m ShowcaseLedgerValue) MarshalJSON() ([]byte, error) {
 	var errs []Violation
 	addViolations(&errs, m.Validate())
@@ -4748,7 +4748,7 @@ func (m ShowcaseLedgerValue) MarshalJSON() ([]byte, error) {
 	}
 	marshalField(out, "amount", m.Amount, &errs)
 	if len(errs) > 0 {
-		return nil, &ValidationError{Violations: errs}
+		return nil, newPayloadValidationError(errs)
 	}
 	return json.Marshal(out)
 }
@@ -4768,7 +4768,7 @@ type ShowcaseLocation struct {
 	AdditionalProperties map[string]json.RawMessage `json:"-"`
 }
 
-// Validate checks m against every constraint and returns a *ValidationError
+// Validate checks m against every constraint and returns a PayloadValidationError
 // listing any violations.
 func (m ShowcaseLocation) Validate() error {
 	var errs []Violation
@@ -4785,13 +4785,13 @@ func (m ShowcaseLocation) Validate() error {
 		errs = append(errs, Violation{"geo", "catch-all key collides with declared property"})
 	}
 	if len(errs) > 0 {
-		return &ValidationError{Violations: errs}
+		return newPayloadValidationError(errs)
 	}
 	return nil
 }
 
 // UnmarshalJSON parses data into m and validates it, returning a
-// *ValidationError listing any violations.
+// PayloadValidationError listing any violations.
 func (m *ShowcaseLocation) UnmarshalJSON(data []byte) error {
 	var all map[string]json.RawMessage
 	if err := json.Unmarshal(data, &all); err != nil {
@@ -4831,13 +4831,13 @@ func (m *ShowcaseLocation) UnmarshalJSON(data []byte) error {
 		}
 	}
 	if len(errs) > 0 {
-		return &ValidationError{Violations: errs}
+		return newPayloadValidationError(errs)
 	}
 	return nil
 }
 
 // MarshalJSON validates m, then serializes it to JSON, returning a
-// *ValidationError if validation fails.
+// PayloadValidationError if validation fails.
 func (m ShowcaseLocation) MarshalJSON() ([]byte, error) {
 	var errs []Violation
 	addViolations(&errs, m.Validate())
@@ -4850,7 +4850,7 @@ func (m ShowcaseLocation) MarshalJSON() ([]byte, error) {
 		marshalField(out, "geo", *m.Geo, &errs)
 	}
 	if len(errs) > 0 {
-		return nil, &ValidationError{Violations: errs}
+		return nil, newPayloadValidationError(errs)
 	}
 	return json.Marshal(out)
 }
@@ -4865,7 +4865,7 @@ type ShowcaseLocationGeo struct {
 	AdditionalProperties map[string]json.RawMessage `json:"-"`
 }
 
-// Validate checks m against every constraint and returns a *ValidationError
+// Validate checks m against every constraint and returns a PayloadValidationError
 // listing any violations.
 func (m ShowcaseLocationGeo) Validate() error {
 	var errs []Violation
@@ -4886,13 +4886,13 @@ func (m ShowcaseLocationGeo) Validate() error {
 		errs = append(errs, Violation{"lon", "catch-all key collides with declared property"})
 	}
 	if len(errs) > 0 {
-		return &ValidationError{Violations: errs}
+		return newPayloadValidationError(errs)
 	}
 	return nil
 }
 
 // UnmarshalJSON parses data into m and validates it, returning a
-// *ValidationError listing any violations.
+// PayloadValidationError listing any violations.
 func (m *ShowcaseLocationGeo) UnmarshalJSON(data []byte) error {
 	var all map[string]json.RawMessage
 	if err := json.Unmarshal(data, &all); err != nil {
@@ -4921,13 +4921,13 @@ func (m *ShowcaseLocationGeo) UnmarshalJSON(data []byte) error {
 		m.Lon = &v
 	}
 	if len(errs) > 0 {
-		return &ValidationError{Violations: errs}
+		return newPayloadValidationError(errs)
 	}
 	return nil
 }
 
 // MarshalJSON validates m, then serializes it to JSON, returning a
-// *ValidationError if validation fails.
+// PayloadValidationError if validation fails.
 func (m ShowcaseLocationGeo) MarshalJSON() ([]byte, error) {
 	var errs []Violation
 	addViolations(&errs, m.Validate())
@@ -4942,7 +4942,7 @@ func (m ShowcaseLocationGeo) MarshalJSON() ([]byte, error) {
 		marshalField(out, "lon", *m.Lon, &errs)
 	}
 	if len(errs) > 0 {
-		return nil, &ValidationError{Violations: errs}
+		return nil, newPayloadValidationError(errs)
 	}
 	return json.Marshal(out)
 }
@@ -4956,7 +4956,7 @@ type ShowcaseMetadata struct {
 	AdditionalProperties map[string]json.RawMessage
 }
 
-// Validate checks m against every constraint and returns a *ValidationError
+// Validate checks m against every constraint and returns a PayloadValidationError
 // listing any violations.
 func (m ShowcaseMetadata) Validate() error {
 	var errs []Violation
@@ -4964,13 +4964,13 @@ func (m ShowcaseMetadata) Validate() error {
 		errs = append(errs, Violation{"", fmt.Sprintf("must have at most 3 properties, got %d", n)})
 	}
 	if len(errs) > 0 {
-		return &ValidationError{Violations: errs}
+		return newPayloadValidationError(errs)
 	}
 	return nil
 }
 
 // UnmarshalJSON parses data into m and validates it, returning a
-// *ValidationError listing any violations.
+// PayloadValidationError listing any violations.
 func (m *ShowcaseMetadata) UnmarshalJSON(data []byte) error {
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(data, &raw); err != nil {
@@ -4985,13 +4985,13 @@ func (m *ShowcaseMetadata) UnmarshalJSON(data []byte) error {
 		errs = append(errs, Violation{"", fmt.Sprintf("must have at most 3 properties, got %d", n)})
 	}
 	if len(errs) > 0 {
-		return &ValidationError{Violations: errs}
+		return newPayloadValidationError(errs)
 	}
 	return nil
 }
 
 // MarshalJSON validates m, then serializes it to JSON, returning a
-// *ValidationError if validation fails.
+// PayloadValidationError if validation fails.
 func (m ShowcaseMetadata) MarshalJSON() ([]byte, error) {
 	if err := m.Validate(); err != nil {
 		return nil, err
@@ -5011,7 +5011,7 @@ type ShowcaseRowsItem struct {
 	AdditionalProperties map[string]json.RawMessage `json:"-"`
 }
 
-// Validate checks m against every constraint and returns a *ValidationError
+// Validate checks m against every constraint and returns a PayloadValidationError
 // listing any violations.
 func (m ShowcaseRowsItem) Validate() error {
 	var errs []Violation
@@ -5022,13 +5022,13 @@ func (m ShowcaseRowsItem) Validate() error {
 		errs = append(errs, Violation{"cell", "catch-all key collides with declared property"})
 	}
 	if len(errs) > 0 {
-		return &ValidationError{Violations: errs}
+		return newPayloadValidationError(errs)
 	}
 	return nil
 }
 
 // UnmarshalJSON parses data into m and validates it, returning a
-// *ValidationError listing any violations.
+// PayloadValidationError listing any violations.
 func (m *ShowcaseRowsItem) UnmarshalJSON(data []byte) error {
 	var all map[string]json.RawMessage
 	if err := json.Unmarshal(data, &all); err != nil {
@@ -5057,13 +5057,13 @@ func (m *ShowcaseRowsItem) UnmarshalJSON(data []byte) error {
 		}
 	}
 	if len(errs) > 0 {
-		return &ValidationError{Violations: errs}
+		return newPayloadValidationError(errs)
 	}
 	return nil
 }
 
 // MarshalJSON validates m, then serializes it to JSON, returning a
-// *ValidationError if validation fails.
+// PayloadValidationError if validation fails.
 func (m ShowcaseRowsItem) MarshalJSON() ([]byte, error) {
 	var errs []Violation
 	addViolations(&errs, m.Validate())
@@ -5073,7 +5073,7 @@ func (m ShowcaseRowsItem) MarshalJSON() ([]byte, error) {
 	}
 	marshalField(out, "cell", m.Cell, &errs)
 	if len(errs) > 0 {
-		return nil, &ValidationError{Violations: errs}
+		return nil, newPayloadValidationError(errs)
 	}
 	return json.Marshal(out)
 }
@@ -5084,18 +5084,18 @@ type GetShowcaseInput struct {
 	Id string `json:"id"`
 }
 
-// Validate checks m against every constraint and returns a *ValidationError
+// Validate checks m against every constraint and returns a PayloadValidationError
 // listing any violations.
 func (m GetShowcaseInput) Validate() error {
 	var errs []Violation
 	if len(errs) > 0 {
-		return &ValidationError{Violations: errs}
+		return newPayloadValidationError(errs)
 	}
 	return nil
 }
 
 // UnmarshalJSON parses data into m and validates it, returning a
-// *ValidationError listing any violations.
+// PayloadValidationError listing any violations.
 func (m *GetShowcaseInput) UnmarshalJSON(data []byte) error {
 	var all map[string]json.RawMessage
 	if err := json.Unmarshal(data, &all); err != nil {
@@ -5120,20 +5120,20 @@ func (m *GetShowcaseInput) UnmarshalJSON(data []byte) error {
 		m.Id = v
 	}
 	if len(errs) > 0 {
-		return &ValidationError{Violations: errs}
+		return newPayloadValidationError(errs)
 	}
 	return nil
 }
 
 // MarshalJSON validates m, then serializes it to JSON, returning a
-// *ValidationError if validation fails.
+// PayloadValidationError if validation fails.
 func (m GetShowcaseInput) MarshalJSON() ([]byte, error) {
 	var errs []Violation
 	addViolations(&errs, m.Validate())
 	out := map[string]json.RawMessage{}
 	marshalField(out, "id", m.Id, &errs)
 	if len(errs) > 0 {
-		return nil, &ValidationError{Violations: errs}
+		return nil, newPayloadValidationError(errs)
 	}
 	return json.Marshal(out)
 }
@@ -5148,7 +5148,7 @@ type Square struct {
 	AdditionalProperties map[string]json.RawMessage `json:"-"`
 }
 
-// Validate checks m against every constraint and returns a *ValidationError
+// Validate checks m against every constraint and returns a PayloadValidationError
 // listing any violations.
 func (m Square) Validate() error {
 	var errs []Violation
@@ -5165,13 +5165,13 @@ func (m Square) Validate() error {
 		errs = append(errs, Violation{"side", "catch-all key collides with declared property"})
 	}
 	if len(errs) > 0 {
-		return &ValidationError{Violations: errs}
+		return newPayloadValidationError(errs)
 	}
 	return nil
 }
 
 // UnmarshalJSON parses data into m and validates it, returning a
-// *ValidationError listing any violations.
+// PayloadValidationError listing any violations.
 func (m *Square) UnmarshalJSON(data []byte) error {
 	var all map[string]json.RawMessage
 	if err := json.Unmarshal(data, &all); err != nil {
@@ -5205,13 +5205,13 @@ func (m *Square) UnmarshalJSON(data []byte) error {
 		m.Side = v
 	}
 	if len(errs) > 0 {
-		return &ValidationError{Violations: errs}
+		return newPayloadValidationError(errs)
 	}
 	return nil
 }
 
 // MarshalJSON validates m, then serializes it to JSON, returning a
-// *ValidationError if validation fails.
+// PayloadValidationError if validation fails.
 func (m Square) MarshalJSON() ([]byte, error) {
 	var errs []Violation
 	addViolations(&errs, m.Validate())
@@ -5222,7 +5222,7 @@ func (m Square) MarshalJSON() ([]byte, error) {
 	marshalField(out, "kind", m.Kind, &errs)
 	marshalField(out, "side", m.Side, &errs)
 	if len(errs) > 0 {
-		return nil, &ValidationError{Violations: errs}
+		return nil, newPayloadValidationError(errs)
 	}
 	return json.Marshal(out)
 }
@@ -5237,7 +5237,7 @@ type TextNote struct {
 	AdditionalProperties map[string]json.RawMessage `json:"-"`
 }
 
-// Validate checks m against every constraint and returns a *ValidationError
+// Validate checks m against every constraint and returns a PayloadValidationError
 // listing any violations.
 func (m TextNote) Validate() error {
 	var errs []Violation
@@ -5254,13 +5254,13 @@ func (m TextNote) Validate() error {
 		errs = append(errs, Violation{"body", "catch-all key collides with declared property"})
 	}
 	if len(errs) > 0 {
-		return &ValidationError{Violations: errs}
+		return newPayloadValidationError(errs)
 	}
 	return nil
 }
 
 // UnmarshalJSON parses data into m and validates it, returning a
-// *ValidationError listing any violations.
+// PayloadValidationError listing any violations.
 func (m *TextNote) UnmarshalJSON(data []byte) error {
 	var all map[string]json.RawMessage
 	if err := json.Unmarshal(data, &all); err != nil {
@@ -5297,13 +5297,13 @@ func (m *TextNote) UnmarshalJSON(data []byte) error {
 		}
 	}
 	if len(errs) > 0 {
-		return &ValidationError{Violations: errs}
+		return newPayloadValidationError(errs)
 	}
 	return nil
 }
 
 // MarshalJSON validates m, then serializes it to JSON, returning a
-// *ValidationError if validation fails.
+// PayloadValidationError if validation fails.
 func (m TextNote) MarshalJSON() ([]byte, error) {
 	var errs []Violation
 	addViolations(&errs, m.Validate())
@@ -5314,7 +5314,7 @@ func (m TextNote) MarshalJSON() ([]byte, error) {
 	marshalField(out, "kind", m.Kind, &errs)
 	marshalField(out, "body", m.Body, &errs)
 	if len(errs) > 0 {
-		return nil, &ValidationError{Violations: errs}
+		return nil, newPayloadValidationError(errs)
 	}
 	return json.Marshal(out)
 }
@@ -5329,7 +5329,7 @@ type Tokens struct {
 	AdditionalProperties map[string]string
 }
 
-// Validate checks m against every constraint and returns a *ValidationError
+// Validate checks m against every constraint and returns a PayloadValidationError
 // listing any violations.
 func (m Tokens) Validate() error {
 	var errs []Violation
@@ -5345,13 +5345,13 @@ func (m Tokens) Validate() error {
 		}
 	}
 	if len(errs) > 0 {
-		return &ValidationError{Violations: errs}
+		return newPayloadValidationError(errs)
 	}
 	return nil
 }
 
 // UnmarshalJSON parses data into m and validates it, returning a
-// *ValidationError listing any violations.
+// PayloadValidationError listing any violations.
 func (m *Tokens) UnmarshalJSON(data []byte) error {
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(data, &raw); err != nil {
@@ -5374,13 +5374,13 @@ func (m *Tokens) UnmarshalJSON(data []byte) error {
 		}
 	}
 	if len(errs) > 0 {
-		return &ValidationError{Violations: errs}
+		return newPayloadValidationError(errs)
 	}
 	return nil
 }
 
 // MarshalJSON validates m, then serializes it to JSON, returning a
-// *ValidationError if validation fails.
+// PayloadValidationError if validation fails.
 func (m Tokens) MarshalJSON() ([]byte, error) {
 	if err := m.Validate(); err != nil {
 		return nil, err
@@ -5411,7 +5411,7 @@ type Widget struct {
 	AdditionalProperties map[string]json.RawMessage `json:"-"`
 }
 
-// Validate checks m against every constraint and returns a *ValidationError
+// Validate checks m against every constraint and returns a PayloadValidationError
 // listing any violations.
 func (m Widget) Validate() error {
 	var errs []Violation
@@ -5439,13 +5439,13 @@ func (m Widget) Validate() error {
 		errs = append(errs, Violation{"size", "catch-all key collides with declared property"})
 	}
 	if len(errs) > 0 {
-		return &ValidationError{Violations: errs}
+		return newPayloadValidationError(errs)
 	}
 	return nil
 }
 
 // UnmarshalJSON parses data into m and validates it, returning a
-// *ValidationError listing any violations.
+// PayloadValidationError listing any violations.
 func (m *Widget) UnmarshalJSON(data []byte) error {
 	var all map[string]json.RawMessage
 	if err := json.Unmarshal(data, &all); err != nil {
@@ -5486,13 +5486,13 @@ func (m *Widget) UnmarshalJSON(data []byte) error {
 		m.Size = &v
 	}
 	if len(errs) > 0 {
-		return &ValidationError{Violations: errs}
+		return newPayloadValidationError(errs)
 	}
 	return nil
 }
 
 // MarshalJSON validates m, then serializes it to JSON, returning a
-// *ValidationError if validation fails.
+// PayloadValidationError if validation fails.
 func (m Widget) MarshalJSON() ([]byte, error) {
 	var errs []Violation
 	addViolations(&errs, m.Validate())
@@ -5509,7 +5509,7 @@ func (m Widget) MarshalJSON() ([]byte, error) {
 		marshalField(out, "size", *m.Size, &errs)
 	}
 	if len(errs) > 0 {
-		return nil, &ValidationError{Violations: errs}
+		return nil, newPayloadValidationError(errs)
 	}
 	return json.Marshal(out)
 }
@@ -5525,7 +5525,7 @@ type WidgetBase struct {
 	AdditionalProperties map[string]json.RawMessage `json:"-"`
 }
 
-// Validate checks m against every constraint and returns a *ValidationError
+// Validate checks m against every constraint and returns a PayloadValidationError
 // listing any violations.
 func (m WidgetBase) Validate() error {
 	var errs []Violation
@@ -5536,13 +5536,13 @@ func (m WidgetBase) Validate() error {
 		errs = append(errs, Violation{"kind", "catch-all key collides with declared property"})
 	}
 	if len(errs) > 0 {
-		return &ValidationError{Violations: errs}
+		return newPayloadValidationError(errs)
 	}
 	return nil
 }
 
 // UnmarshalJSON parses data into m and validates it, returning a
-// *ValidationError listing any violations.
+// PayloadValidationError listing any violations.
 func (m *WidgetBase) UnmarshalJSON(data []byte) error {
 	var all map[string]json.RawMessage
 	if err := json.Unmarshal(data, &all); err != nil {
@@ -5571,13 +5571,13 @@ func (m *WidgetBase) UnmarshalJSON(data []byte) error {
 		m.Kind = &v
 	}
 	if len(errs) > 0 {
-		return &ValidationError{Violations: errs}
+		return newPayloadValidationError(errs)
 	}
 	return nil
 }
 
 // MarshalJSON validates m, then serializes it to JSON, returning a
-// *ValidationError if validation fails.
+// PayloadValidationError if validation fails.
 func (m WidgetBase) MarshalJSON() ([]byte, error) {
 	var errs []Violation
 	addViolations(&errs, m.Validate())
@@ -5590,7 +5590,7 @@ func (m WidgetBase) MarshalJSON() ([]byte, error) {
 		marshalField(out, "kind", *m.Kind, &errs)
 	}
 	if len(errs) > 0 {
-		return nil, &ValidationError{Violations: errs}
+		return nil, newPayloadValidationError(errs)
 	}
 	return json.Marshal(out)
 }

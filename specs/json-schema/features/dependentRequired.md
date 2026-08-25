@@ -75,17 +75,18 @@ dependent is also present.
 
 | Language | Strategy |
 |---|---|
-| Go | The cross-field check is a predicate in the shared `Validate`, which `UnmarshalJSON` calls after decoding the shadow: for each present trigger, each dependent's shadow must be non-`nil`; a missing one → `Violation{Path:dependent, Reason: fmt.Sprintf("property %q is required when %q is present", dependent, trigger)}`, collected into one `ValidationError`. |
-| TypeScript | the shared `Validate` predicate: for each present trigger key, each dependent must be `!== undefined`; a missing one → push ``Violation{path, reason: `property "${dependent}" is required when "${trigger}" is present`}``, throw one `ValidationError`. |
-| Python | `from_transfer_type` reads the raw wire dict: for each present trigger, append `Violation(path=dependent, reason=f'property "{dependent}" is required when "{trigger}" is present')` per absent dependent, into the single generated `ValidationError`. The dependency map is a module-level private constant, alongside `_<MODEL>_DECLARED`. |
-| Java | in the per-POJO collecting deserializer (PRINCIPLES Java §5): over the parsed tree's present-key set, for each present trigger push a `Violation{path:dependent, "property \"" + dependent + "\" is required when \"" + trigger + "\" is present"}` per missing dependent into the single `ValidationException`. |
+| Go | The cross-field check is a predicate in the shared `Validate`, which `UnmarshalJSON` calls after decoding the shadow: for each present trigger, each dependent's shadow must be non-`nil`; a missing one → `Violation{Path:dependent, Reason: fmt.Sprintf("property %q is required when %q is present", dependent, trigger)}`, collected into one `PayloadValidationError` application failure. |
+| TypeScript | the shared `Validate` predicate: for each present trigger key, each dependent must be `!== undefined`; a missing one → push ``Violation{path, reason: `property "${dependent}" is required when "${trigger}" is present`}``, throw one `PayloadValidationError` application failure. |
+| Python | `from_transfer_type` reads the raw wire dict: for each present trigger, append `Violation(path=dependent, reason=f'property "{dependent}" is required when "{trigger}" is present')` per absent dependent, into the single generated `PayloadValidationError` application failure. The dependency map is a module-level private constant, alongside `_<MODEL>_DECLARED`. |
+| Java | in the per-POJO collecting deserializer (PRINCIPLES Java §5): over the parsed tree's present-key set, for each present trigger push a `Violation{path:dependent, "property \"" + dependent + "\" is required when \"" + trigger + "\" is present"}` per missing dependent into the single `PayloadValidationError` application failure. |
 
 ### Serialize-side (P12)
 
 The cross-field check runs again before emit, over the **to-be-emitted**
 member set (present = will be written, after default omission). If a
 trigger will be emitted but a dependent is unset/omitted, serialize fails
-with the same `ValidationError{path:dependent, reason}` — symmetric with
+with the same `Violation{path:dependent, reason}` in the payload-validation
+application failure — symmetric with
 deserialize, where "present" means "on the wire." A dependent satisfied
 only by an omitted default does **not** count as present.
 
@@ -114,7 +115,7 @@ only by an omitted default does **not** count as present.
 - Trigger absent → no constraint (dependents may be absent).
 - Trigger present + all dependents present → OK.
 - Trigger present + a dependent absent → one
-  `ValidationError{path:dependent, reason}`.
+  `Violation{path:dependent, reason}` in the payload-validation application failure.
 - Multiple triggers each missing dependents → all reported in one shot
   (P11).
 

@@ -116,11 +116,6 @@ pub(crate) fn generate(
     )?;
     insert_file(
         &mut files,
-        PathBuf::from("ValidationException.java"),
-        java_json::render_validation_exception_file(root_package),
-    )?;
-    insert_file(
-        &mut files,
         PathBuf::from("SpecNumbers.java"),
         java_json::render_spec_numbers_file(root_package),
     )?;

@@ -3,8 +3,9 @@ import datetime
 import typing
 
 import pytest
+import temporalio.exceptions
 
-from temporal import Temporal, ValidationError
+from temporal import Temporal
 from temporal._definitions import (
     _TEMPORAL_FRACTION_DIGITS,
     _TEMPORAL_MAX_DURATION_SECONDS,
@@ -44,11 +45,11 @@ def parse_violations(**overrides: typing.Any) -> list[tuple[str, str]]:
     """The ``(path, reason)`` pairs one bad Temporal payload produces.
 
     Every value under test here used to escape as a bare ``ValueError`` from a
-    ``datetime`` parser rather than as an aggregated ``ValidationError`` (P11), so
-    the assertion is as much that ``ValidationError`` is what surfaces as it is
+    ``datetime`` parser rather than as an aggregated ``ApplicationError`` (P11), so
+    the assertion is as much that ``ApplicationError`` is what surfaces as it is
     about the reason text.
     """
-    with pytest.raises(ValidationError) as excinfo:
+    with pytest.raises(temporalio.exceptions.ApplicationError) as excinfo:
         _ = parse(**overrides)
     return violation_pairs(excinfo.value)
 
@@ -56,7 +57,7 @@ def parse_violations(**overrides: typing.Any) -> list[tuple[str, str]]:
 def serialize_violations(**replacements: typing.Any) -> list[tuple[str, str]]:
     """The violations serializing a ``BASE`` model with ``replacements`` produces."""
     model = dataclasses.replace(parse(), **replacements)
-    with pytest.raises(ValidationError) as excinfo:
+    with pytest.raises(temporalio.exceptions.ApplicationError) as excinfo:
         _ = converter_for(Temporal).to_transfer_type(model)
     return violation_pairs(excinfo.value)
 
@@ -131,7 +132,7 @@ def test_temporal_absent_and_explicit_null_are_indistinguishable() -> None:
 def test_missing_required_members_aggregate() -> None:
     # P11: one bad payload surfaces every violation it contains, in declared
     # property order — the aggregation pydantic used to provide for free.
-    with pytest.raises(ValidationError) as excinfo:
+    with pytest.raises(temporalio.exceptions.ApplicationError) as excinfo:
         _ = converter_for(Temporal).from_transfer_type({}, Temporal)
     assert violation_pairs(excinfo.value) == [
         ("createdAt", "required"),
@@ -142,7 +143,7 @@ def test_missing_required_members_aggregate() -> None:
 
 
 def test_non_object_payload_is_a_single_structural_violation() -> None:
-    with pytest.raises(ValidationError) as excinfo:
+    with pytest.raises(temporalio.exceptions.ApplicationError) as excinfo:
         _ = converter_for(Temporal).from_transfer_type("nope", Temporal)
     assert violation_pairs(excinfo.value) == [("", "expected object")]
 
@@ -173,7 +174,7 @@ def test_temporal_materialized_narrowing_rejects(
 def test_year_zero_is_a_violation_rather_than_a_value_error() -> None:
     """`datetime.MINYEAR` is 1, now the shared cross-language calendar floor.
 
-    Year 0000 is rejected as an aggregated `ValidationError` (P11), and the reason
+    Year 0000 is rejected as an aggregated `ApplicationError` (P11), and the reason
     names the limit rather than escaping as a native `ValueError`.
     """
     limit = f"year 0000 is not representable (datetime.MINYEAR is {datetime.MINYEAR})"

@@ -4,6 +4,7 @@ import math
 import typing
 
 import pytest
+import temporalio.exceptions
 
 from showcase import (
     Address,
@@ -23,7 +24,6 @@ from showcase import (
     ShowcaseRowsItem,
     Square,
     TextNote,
-    ValidationError,
     Violation,
     Widget,
 )
@@ -42,8 +42,13 @@ SUITE = "showcase"
 
 def test_validation_types_are_exported_from_the_package() -> None:
     violation = Violation(path="name", reason="required")
-    error = ValidationError([violation])
-    assert error.violations == [violation]
+    error = temporalio.exceptions.ApplicationError(
+        "Payload validation failed",
+        [violation],
+        type="PayloadValidationError",
+        non_retryable=True,
+    )
+    assert violation_pairs(error) == [("name", "required")]
 
 
 # The ten required members of Showcase; every negative payload starts here so the
@@ -85,7 +90,7 @@ def parse(raw: dict[str, typing.Any]) -> Showcase:
 
 def parse_violations(raw: dict[str, typing.Any]) -> list[tuple[str, str]]:
     """The ``(path, reason)`` pairs one bad Showcase payload produces."""
-    with pytest.raises(ValidationError) as excinfo:
+    with pytest.raises(temporalio.exceptions.ApplicationError) as excinfo:
         _ = parse(raw)
     return violation_pairs(excinfo.value)
 
@@ -108,7 +113,7 @@ def wire_with(member: str, literal: str) -> str:
 def parse_wire_violations(member: str, literal: str) -> list[tuple[str, str]]:
     """The violations raw wire text carrying ``literal`` at ``member`` produces."""
     raw = typing.cast("dict[str, typing.Any]", json.loads(wire_with(member, literal)))
-    with pytest.raises(ValidationError) as excinfo:
+    with pytest.raises(temporalio.exceptions.ApplicationError) as excinfo:
         _ = parse(raw)
     return violation_pairs(excinfo.value)
 
@@ -121,7 +126,7 @@ def serialize_violations(**replacements: typing.Any) -> list[tuple[str, str]]:
     is why the assertion is on the raised violations rather than on output.
     """
     model = dataclasses.replace(parse(BASE), **replacements)
-    with pytest.raises(ValidationError) as excinfo:
+    with pytest.raises(temporalio.exceptions.ApplicationError) as excinfo:
         _ = converter_for(Showcase).to_transfer_type(model)
     return violation_pairs(excinfo.value)
 
@@ -219,7 +224,7 @@ def test_nullability_states() -> None:
     assert parse_violations({**BASE, "nope": 1}) == [("nope", "unknown field")]
 
     # A non-object payload is a single structural violation at the root.
-    with pytest.raises(ValidationError) as excinfo:
+    with pytest.raises(temporalio.exceptions.ApplicationError) as excinfo:
         _ = converter_for(Showcase).from_transfer_type(7, Showcase)
     assert violation_pairs(excinfo.value) == [("", "expected object")]
 
@@ -238,11 +243,11 @@ def test_labels_typed_map_and_settings_closed_object() -> None:
         Labels(additional_properties={"env": "prod"})
     ) == {"env": "prod"}
 
-    with pytest.raises(ValidationError) as excinfo:
+    with pytest.raises(temporalio.exceptions.ApplicationError) as excinfo:
         _ = converter_for(Labels).from_transfer_type({"env": 42}, Labels)
     assert violation_pairs(excinfo.value) == [("env", "expected string")]
 
-    with pytest.raises(ValidationError) as excinfo:
+    with pytest.raises(temporalio.exceptions.ApplicationError) as excinfo:
         _ = converter_for(Settings).from_transfer_type(
             {"theme": "dark", "unknown": 1}, Settings
         )
@@ -383,7 +388,7 @@ def test_non_finite_numbers_are_rejected_in_both_directions() -> None:
     """
     # `ratio` carries `multipleOf`, whose `math.fmod(inf, 5)` raised `ValueError`
     # (and `OverflowError` for an out-of-binary64 integer literal) — escaping the
-    # aggregated `ValidationError` entirely (P11).
+    # aggregated `ApplicationError` entirely (P11).
     for literal, rendered in [
         ("Infinity", "inf"),
         ("-Infinity", "-inf"),
@@ -587,13 +592,13 @@ def test_object_constraints_roundtrip_and_reject() -> None:
 
     # minProperties/maxProperties over the distinct wire-key count sit at the
     # object root, so their violation path is empty.
-    with pytest.raises(ValidationError) as excinfo:
+    with pytest.raises(temporalio.exceptions.ApplicationError) as excinfo:
         _ = converter_for(Attributes).from_transfer_type({}, Attributes)
     assert violation_pairs(excinfo.value) == [
         ("", "must have at least 1 properties, got 0")
     ]
 
-    with pytest.raises(ValidationError) as excinfo:
+    with pytest.raises(temporalio.exceptions.ApplicationError) as excinfo:
         _ = converter_for(Attributes).from_transfer_type(
             {"a": "1", "b": "2", "c": "3", "d": "4"}, Attributes
         )
@@ -602,7 +607,7 @@ def test_object_constraints_roundtrip_and_reject() -> None:
     ]
 
     # propertyNames maxLength:8 — an over-long key, keyed by the offending key.
-    with pytest.raises(ValidationError) as excinfo:
+    with pytest.raises(temporalio.exceptions.ApplicationError) as excinfo:
         _ = converter_for(Attributes).from_transfer_type(
             {"toolongkey": "1"}, Attributes
         )
@@ -614,7 +619,7 @@ def test_object_constraints_roundtrip_and_reject() -> None:
     ]
 
     # dependentRequired — a shipping street present without a shipping zip.
-    with pytest.raises(ValidationError) as excinfo:
+    with pytest.raises(temporalio.exceptions.ApplicationError) as excinfo:
         _ = converter_for(ContactPy).from_transfer_type(
             {"shippingStreet": "1 Main St"}, ContactPy
         )
@@ -626,7 +631,7 @@ def test_object_constraints_roundtrip_and_reject() -> None:
     ]
 
     # minProperties:1 on a declared-property object — an empty object.
-    with pytest.raises(ValidationError) as excinfo:
+    with pytest.raises(temporalio.exceptions.ApplicationError) as excinfo:
         _ = converter_for(ContactPy).from_transfer_type({}, ContactPy)
     assert violation_pairs(excinfo.value) == [
         ("", "must have at least 1 properties, got 0")
@@ -651,20 +656,20 @@ def test_all_of_merged_widget() -> None:
     converter = converter_for(Widget)
 
     # `size` carries a bound tightened from two allOf branches to [10, 20].
-    with pytest.raises(ValidationError) as excinfo:
+    with pytest.raises(temporalio.exceptions.ApplicationError) as excinfo:
         _ = converter.from_transfer_type(
             {"id": "w-1", "name": "Widget One", "size": 5}, Widget
         )
     assert violation_pairs(excinfo.value) == [("size", "must be >= 10, got 5")]
 
-    with pytest.raises(ValidationError) as excinfo:
+    with pytest.raises(temporalio.exceptions.ApplicationError) as excinfo:
         _ = converter.from_transfer_type(
             {"id": "w-1", "name": "Widget One", "size": 25}, Widget
         )
     assert violation_pairs(excinfo.value) == [("size", "must be <= 20, got 25")]
 
     # A missing required member contributed by the extension branch is rejected.
-    with pytest.raises(ValidationError) as excinfo:
+    with pytest.raises(temporalio.exceptions.ApplicationError) as excinfo:
         _ = converter.from_transfer_type({"id": "w-1"}, Widget)
     assert violation_pairs(excinfo.value) == [("name", "required")]
 
@@ -771,7 +776,7 @@ def test_free_form_object_roundtrip_and_reject() -> None:
     assert extras.additional_properties["count"] == 9007199254740992
 
     # maxProperties over the member set is enforced, at the object root.
-    with pytest.raises(ValidationError) as excinfo:
+    with pytest.raises(temporalio.exceptions.ApplicationError) as excinfo:
         _ = converter_for(Extras).from_transfer_type(
             {"a": 1, "b": 2, "c": 3, "d": 4, "e": 5}, Extras
         )
@@ -1076,7 +1081,7 @@ def test_recursive_collections_and_non_finite_positions() -> None:
     ]
     for replacement, path in replacements:
         invalid = dataclasses.replace(value, **replacement)
-        with pytest.raises(ValidationError) as excinfo:
+        with pytest.raises(temporalio.exceptions.ApplicationError) as excinfo:
             _ = converter_for(Showcase).to_transfer_type(invalid)
         pairs = violation_pairs(excinfo.value)
         assert pairs[0][0] == path
@@ -1107,12 +1112,12 @@ def test_serialize_rejects_invalid_in_memory_values() -> None:
         ),
         ({"revision": typing.cast(typing.Any, 2)}, ("revision", "must equal 1")),
     ]:
-        with pytest.raises(ValidationError) as excinfo:
+        with pytest.raises(temporalio.exceptions.ApplicationError) as excinfo:
             _ = converter.to_transfer_type(dataclasses.replace(full, **replacement))
         assert violation_pairs(excinfo.value) == [expected]
 
     # Object-level checks fire on serialize too.
-    with pytest.raises(ValidationError) as excinfo:
+    with pytest.raises(temporalio.exceptions.ApplicationError) as excinfo:
         _ = converter_for(Attributes).to_transfer_type(
             Attributes(additional_properties={})
         )
@@ -1120,7 +1125,7 @@ def test_serialize_rejects_invalid_in_memory_values() -> None:
         ("", "must have at least 1 properties, got 0")
     ]
 
-    with pytest.raises(ValidationError) as excinfo:
+    with pytest.raises(temporalio.exceptions.ApplicationError) as excinfo:
         _ = converter_for(ContactPy).to_transfer_type(
             ContactPy(shipping_street="1 Main St")
         )
@@ -1137,7 +1142,7 @@ def test_serialize_aggregates_nested_violations_under_their_own_paths() -> None:
     several depths reports **all** of them, each fully pathed.
 
     `to_transfer_type` wrapped no nested conversion, so the first nested
-    `ValidationError` propagated raw — discarding both the parent's already
+    `ApplicationError` propagated raw — discarding both the parent's already
     collected violations and its own path prefix. Every nested conversion now funnels
     through `_collect`, the analogue of Go's `mergeNested`.
     """
@@ -1158,7 +1163,7 @@ def test_serialize_aggregates_nested_violations_under_their_own_paths() -> None:
             }
         ),
     )
-    with pytest.raises(ValidationError) as excinfo:
+    with pytest.raises(temporalio.exceptions.ApplicationError) as excinfo:
         _ = converter_for(Showcase).to_transfer_type(model)
     assert violation_pairs(excinfo.value) == [
         ("name", "must have length >= 1, got 0"),

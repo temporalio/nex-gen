@@ -163,7 +163,7 @@ fn insert_branch_index_file(
         contents.push_str("';\n");
     }
     if has_json_runtime_module {
-        contents.push_str("export { ValidationError } from './definitions';\n");
+        contents.push_str("export { payloadValidationError } from './definitions';\n");
         contents.push_str("export type { Violation } from './definitions';\n");
     }
     insert_generated_file(files, path, contents)
@@ -3470,7 +3470,7 @@ fn render_definitions_only_index_module(
         output.push_str("export * from './resources';\n");
     }
     if has_json_runtime_module {
-        output.push_str("export { ValidationError } from './definitions';\n");
+        output.push_str("export { payloadValidationError } from './definitions';\n");
         output.push_str("export type { Violation } from './definitions';\n");
     }
     output

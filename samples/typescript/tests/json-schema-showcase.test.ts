@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 import type { TransferTypeConverter } from "nexus-rpc";
+import { ApplicationFailure } from "@temporalio/common";
 
 import {
   addressTransferTypeConverter,
@@ -15,7 +16,6 @@ import {
   settingsTransferTypeConverter,
   showcaseTransferTypeConverter,
   tokensTransferTypeConverter,
-  ValidationError,
   widgetTransferTypeConverter,
   type LinkNote,
   type Showcase,
@@ -24,10 +24,25 @@ import {
   type Widget,
 } from "../showcase/index.ts";
 import {
+  exposeValidationDetails,
   fixtureBytes,
   loadFixture as loadFixtureFrom,
   roundTripFixture,
 } from "./json-converter-helper.ts";
+
+exposeValidationDetails(
+  addressTransferTypeConverter,
+  attributesTransferTypeConverter,
+  contactTsTransferTypeConverter,
+  extrasTransferTypeConverter,
+  labelsTransferTypeConverter,
+  nicknamesTransferTypeConverter,
+  quotasTransferTypeConverter,
+  settingsTransferTypeConverter,
+  showcaseTransferTypeConverter,
+  tokensTransferTypeConverter,
+  widgetTransferTypeConverter,
+);
 
 const wireFixtureDir = new URL("../../wire/json_schema/showcase/", import.meta.url);
 
@@ -52,8 +67,16 @@ function parseViolations(raw: unknown): { path: string; reason: string }[] {
   try {
     showcaseTransferTypeConverter.fromTransferType(raw);
   } catch (error) {
-    if (error instanceof ValidationError) {
-      return error.violations.map(({ path, reason }) => ({ path, reason }));
+    if (
+      error instanceof ApplicationFailure &&
+      error.type === "PayloadValidationError" &&
+      Array.isArray(error.details?.[0])
+    ) {
+      // The generated helper retained this array as detail 0; the cast performs
+      // no serialization.
+      return (error.details[0] as { path: string; reason: string }[]).map(
+        ({ path, reason }) => ({ path, reason }),
+      );
     }
     throw error;
   }
@@ -169,7 +192,7 @@ describe("json-schema showcase generated definitions", () => {
 
     // A missing required member contributed by the extension branch is rejected.
     expect(() => widgetTransferTypeConverter.fromTransferType({ id: "w-1" })).toThrow(
-      ValidationError,
+      ApplicationFailure,
     );
   });
 
@@ -183,7 +206,7 @@ describe("json-schema showcase generated definitions", () => {
         active: true,
         category: null,
       }),
-    ).toThrow(ValidationError);
+    ).toThrow(ApplicationFailure);
 
     // Missing required (required+nullable) field.
     expect(() =>
@@ -193,12 +216,12 @@ describe("json-schema showcase generated definitions", () => {
         count: 1,
         active: true,
       }),
-    ).toThrow(ValidationError);
+    ).toThrow(ApplicationFailure);
 
     // Unknown key on a closed object.
     expect(() =>
       settingsTransferTypeConverter.fromTransferType({ theme: "dark", nope: 1 }),
-    ).toThrow(ValidationError);
+    ).toThrow(ApplicationFailure);
 
     // Wrong integer const value.
     expect(() =>
@@ -312,8 +335,8 @@ describe("json-schema showcase generated definitions", () => {
       showcaseTransferTypeConverter.fromTransferType({ ...base, roles: [1, "admin"] });
       throw new Error("expected validation failure");
     } catch (error) {
-      expect(error).toBeInstanceOf(ValidationError);
-      expect((error as ValidationError).violations).toEqual([
+      expect(error).toBeInstanceOf(ApplicationFailure);
+      expect((error as ApplicationFailure).details?.[0]).toEqual([
         { path: "roles[0]", reason: "expected string" },
       ]);
     }

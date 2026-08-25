@@ -1,8 +1,54 @@
 import { readFileSync } from "node:fs";
-import { defaultPayloadConverter } from "@temporalio/common";
+import { ApplicationFailure, defaultPayloadConverter } from "@temporalio/common";
 import type { TransferTypeConverter } from "nexus-rpc";
 
 const encoder = new TextEncoder();
+
+/**
+ * Make legacy reason-text assertions inspect detail 0 while preserving the
+ * actual ApplicationFailure instance and metadata. This mutates test-local
+ * converter instances only; reading the retained detail performs no serialization.
+ */
+export function exposeValidationDetails(
+  ...converters: TransferTypeConverter<any>[]
+): void {
+  const rethrow = (error: unknown): never => {
+    if (
+      error instanceof ApplicationFailure &&
+      error.type === "PayloadValidationError" &&
+      Array.isArray(error.details?.[0])
+    ) {
+      error.message = (error.details[0] as { path: string; reason: string }[])
+        .map(({ path, reason }) => (path ? `${path}: ${reason}` : reason))
+        .join("\n");
+    }
+    throw error;
+  };
+  for (const converter of converters) {
+    const fromTransferType = converter.fromTransferType.bind(converter);
+    const toTransferType = converter.toTransferType.bind(converter);
+    Object.defineProperties(converter, {
+      fromTransferType: {
+        value: (value: unknown) => {
+          try {
+            return fromTransferType(value);
+          } catch (error) {
+            return rethrow(error);
+          }
+        },
+      },
+      toTransferType: {
+        value: (value: unknown) => {
+          try {
+            return toTransferType(value);
+          } catch (error) {
+            return rethrow(error);
+          }
+        },
+      },
+    });
+  }
+}
 
 /** Wrap raw fixture bytes as a json/plain Temporal payload. */
 function jsonPayload(data: Uint8Array) {

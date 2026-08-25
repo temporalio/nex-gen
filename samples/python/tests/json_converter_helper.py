@@ -16,7 +16,7 @@ through the converter object directly.
 
 :func:`converter_for` reaches the registered converter off the class the way
 ``advanced/samples/python/tests/test_start_workflow.py`` does. Negative tests use
-it so the generated ``ValidationError`` surfaces unwrapped (the payload converter
+it so the generated ``ApplicationError`` surfaces unwrapped (the payload converter
 would otherwise wrap it).
 
 Round-trip assertions compare parsed JSON values. JSON number spelling is not
@@ -31,6 +31,7 @@ from pathlib import Path
 import typing
 
 import temporalio.converter
+import temporalio.exceptions
 from temporalio.api.common.v1 import Payload
 
 T = typing.TypeVar("T")
@@ -96,7 +97,7 @@ def converter_for(
     """The ``TransferTypeConverter`` the generator registered on ``cls``.
 
     Used by negative tests: calling ``from_transfer_type`` / ``to_transfer_type``
-    directly surfaces the generated ``ValidationError`` (and its structured
+    directly surfaces the generated ``ApplicationError`` (and its structured
     ``violations``) instead of whatever the payload converter wraps it in.
     """
     return typing.cast(
@@ -215,14 +216,21 @@ def roundtrip_fixture(cls: type[T], suite: str, name: str) -> T:
 
 
 def violation_pairs(error: typing.Any) -> list[tuple[str, str]]:
-    """A generated ``ValidationError``'s violations as ``(path, reason)`` pairs.
+    """A payload-validation ``ApplicationError``'s structured violation detail.
 
     Aggregation (P11) is asserted on this list: one bad payload yields every
     violation it contains, in declared-property order.
     """
-    return [(violation.path, violation.reason) for violation in error.violations]
+    assert isinstance(error, temporalio.exceptions.ApplicationError)
+    assert error.type == "PayloadValidationError"
+    assert error.non_retryable
+    assert error.details
+    # Locally-created errors retain the original list as their first detail;
+    # this cast is type-checker-only and performs no serialization.
+    violations = typing.cast("list[typing.Any]", error.details[0])
+    return [(violation.path, violation.reason) for violation in violations]
 
 
 def violation_paths(error: typing.Any) -> list[str]:
-    """Just the paths of a generated ``ValidationError``'s violations."""
-    return [violation.path for violation in error.violations]
+    """Just the paths in a payload-validation application's first detail."""
+    return [path for path, _ in violation_pairs(error)]

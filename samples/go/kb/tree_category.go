@@ -18,7 +18,7 @@ type Category struct {
 	Children []Category `json:"children,omitempty"`
 }
 
-// Validate checks m against every constraint and returns a *ValidationError
+// Validate checks m against every constraint and returns a PayloadValidationError
 // listing any violations.
 func (m Category) Validate() error {
 	var errs []Violation
@@ -27,13 +27,13 @@ func (m Category) Validate() error {
 		mergeNested(&errs, p0, v0.Validate())
 	}
 	if len(errs) > 0 {
-		return &ValidationError{Violations: errs}
+		return newPayloadValidationError(errs)
 	}
 	return nil
 }
 
 // UnmarshalJSON parses data into m and validates it, returning a
-// *ValidationError listing any violations.
+// PayloadValidationError listing any violations.
 func (m *Category) UnmarshalJSON(data []byte) error {
 	var all map[string]json.RawMessage
 	if err := json.Unmarshal(data, &all); err != nil {
@@ -85,13 +85,13 @@ func (m *Category) UnmarshalJSON(data []byte) error {
 		}
 	}
 	if len(errs) > 0 {
-		return &ValidationError{Violations: errs}
+		return newPayloadValidationError(errs)
 	}
 	return nil
 }
 
 // MarshalJSON validates m, then serializes it to JSON, returning a
-// *ValidationError if validation fails.
+// PayloadValidationError if validation fails.
 func (m Category) MarshalJSON() ([]byte, error) {
 	var errs []Violation
 	addViolations(&errs, m.Validate())
@@ -102,7 +102,7 @@ func (m Category) MarshalJSON() ([]byte, error) {
 		marshalField(out, "children", m.Children, &errs)
 	}
 	if len(errs) > 0 {
-		return nil, &ValidationError{Violations: errs}
+		return nil, newPayloadValidationError(errs)
 	}
 	return json.Marshal(out)
 }
@@ -114,18 +114,18 @@ type Palette struct {
 	Swatches []string `json:"swatches"`
 }
 
-// Validate checks m against every constraint and returns a *ValidationError
+// Validate checks m against every constraint and returns a PayloadValidationError
 // listing any violations.
 func (m Palette) Validate() error {
 	var errs []Violation
 	if len(errs) > 0 {
-		return &ValidationError{Violations: errs}
+		return newPayloadValidationError(errs)
 	}
 	return nil
 }
 
 // UnmarshalJSON parses data into m and validates it, returning a
-// *ValidationError listing any violations.
+// PayloadValidationError listing any violations.
 func (m *Palette) UnmarshalJSON(data []byte) error {
 	var all map[string]json.RawMessage
 	if err := json.Unmarshal(data, &all); err != nil {
@@ -169,13 +169,13 @@ func (m *Palette) UnmarshalJSON(data []byte) error {
 		}
 	}
 	if len(errs) > 0 {
-		return &ValidationError{Violations: errs}
+		return newPayloadValidationError(errs)
 	}
 	return nil
 }
 
 // MarshalJSON validates m, then serializes it to JSON, returning a
-// *ValidationError if validation fails.
+// PayloadValidationError if validation fails.
 func (m Palette) MarshalJSON() ([]byte, error) {
 	var errs []Violation
 	addViolations(&errs, m.Validate())
@@ -186,7 +186,7 @@ func (m Palette) MarshalJSON() ([]byte, error) {
 		marshalField(out, "swatches", m.Swatches, &errs)
 	}
 	if len(errs) > 0 {
-		return nil, &ValidationError{Violations: errs}
+		return nil, newPayloadValidationError(errs)
 	}
 	return json.Marshal(out)
 }

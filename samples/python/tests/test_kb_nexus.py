@@ -107,7 +107,7 @@ class KnowledgeBaseCallerWorkflow:
         )
 
         # Deliberately bypass the generated input type on the caller. The server
-        # must classify the generated converter's ValidationError as BAD_REQUEST
+        # must classify the generated converter's ApplicationError as BAD_REQUEST
         # and must do so before dispatching the user handler.
         try:
             _ = await client.execute_operation(RAW_GET_PAGE, {"unexpected": True})
@@ -169,7 +169,7 @@ async def test_kb_operations_use_real_nexus_client() -> None:
         "revision": 7,
         "invalidInput": {
             "cause": "HandlerError",
-            "message": "Payload converter failed to decode Nexus operation input",
+            "message": "Invalid operation input",
             "type": "BAD_REQUEST",
         },
     }

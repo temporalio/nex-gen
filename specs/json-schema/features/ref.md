@@ -239,8 +239,9 @@ A field `{"x": {"$ref": "#/$defs/Foo"}}` emits a field `x` of type
 the recursion-pointer rule above applies to cyclic edges. Imports follow
 [[generated-file-layout]]:
 
-- **Python** — `from .b import Foo`, `from ._recursive import Node`,
-  `from .definitions import ValidationError`.
+- **Python** — `from .b import Foo`, `from ._recursive import Node`, plus
+  imports of the shared `Violation` and payload-validation helper from the
+  package's private `_definitions` module where validation is emitted.
 - **TypeScript** — `import type { Foo } from './b'`, plus
   `import { fooTransferTypeConverter } from './b'` since the referencing
   type's converter delegates to the target's (PRINCIPLES TS §4).

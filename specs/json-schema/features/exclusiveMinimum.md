@@ -60,10 +60,10 @@ failing test (`v ≤ exclusiveMinimum` → a `Violation` reading
 
 | Language | Strategy |
 |---|---|
-| Go | `if v <= exclMin { push(Violation{Reason: fmt.Sprintf("must be > %v, got %v", exclMin, v)}) }` — a predicate in the shared `Validate`, which `UnmarshalJSON` calls after decoding, collecting into one `ValidationError`. |
+| Go | `if v <= exclMin { push(Violation{Reason: fmt.Sprintf("must be > %v, got %v", exclMin, v)}) }` — a predicate in the shared `Validate`, which `UnmarshalJSON` calls after decoding, collecting into one `PayloadValidationError` application failure. |
 | TypeScript | ``if (v <= exclMin) push(Violation{path, reason: `must be > ${exclMin}, got ${v}`})``. |
 | Python | `if v <= exclMin: violations.append(Violation(path=…, reason=f"must be > {exclMin}, got {v}"))` in the transfer type converter, after `_parse_spec_integer` normalizes an integer field's wire value (see [[type]]). |
-| Java | Collecting deserializer (PRINCIPLES Java §5) checks `v <= exclMin` via the `SpecNumbers` helper, pushing a `Violation{path, "must be > " + exclMin + ", got " + v}` into the `ValidationException`. |
+| Java | Collecting deserializer (PRINCIPLES Java §5) checks `v <= exclMin` via the `SpecNumbers` helper, pushing a `Violation{path, "must be > " + exclMin + ", got " + v}` into the `PayloadValidationError` application failure. |
 
 Reason strings name the bound and offending value (`must be > 0, got 0`),
 per the [[maximum]] convention. Integer-vs-float exactness and the

@@ -21,6 +21,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+import temporalio.exceptions
+
 
 def snake_case(name: str) -> str:
     """The Python attribute the generator derives from a JSON property name.
@@ -37,9 +39,17 @@ def converter_for(cls: type) -> Any:
 
 
 def violations_of(error: BaseException) -> list[dict[str, str]] | None:
-    """`[{path, reason}]` if `error` is a generated ValidationError, else None."""
-    found = getattr(error, "violations", None)
-    if found is None or type(error).__name__ != "ValidationError":
+    """Return structured details from a payload-validation application error."""
+    if (
+        not isinstance(error, temporalio.exceptions.ApplicationError)
+        or error.type != "PayloadValidationError"
+        or not error.details
+    ):
+        return None
+    # Locally-created failures retain the original list as their first detail;
+    # this cast is only for the type checker and performs no serialization.
+    found = error.details[0]
+    if not isinstance(found, list):
         return None
     return [{"path": v.path, "reason": v.reason} for v in found]
 

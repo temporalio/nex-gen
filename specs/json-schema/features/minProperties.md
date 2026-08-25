@@ -58,10 +58,10 @@ comparison:
 
 | Language | Strategy |
 |---|---|
-| Go | `UnmarshalJSON` counts decoded members (wire keys, pre-population) and hands the count to the shared `Validate`, whose `< min` predicate raises `Violation{Reason: fmt.Sprintf("must have at least %d properties, got %d", min, n)}`; collected into one `ValidationError`. |
-| TypeScript | count `Object.keys(parsed).length` on the raw parsed wire object (before defaults applied); the shared `Validate`'s `< min` check pushes ``Violation{path, reason: `must have at least ${min} properties, got ${n}`}`` + throw one `ValidationError`. |
-| Python | `from_transfer_type` counts `len(raw)` on the raw wire dict — one number over the wire object, taken before any default is materialized — and appends `Violation(path="", reason=f"must have at least {min} properties, got {n}")` when `n < min`, into the single generated `ValidationError`. |
-| Java | the per-POJO collecting deserializer (PRINCIPLES Java §5) counts distinct keys in the parsed tree (`< min`) — one number over the wire object, **not** POJO fields + catch-all map summed post-bind; a violation joins the single `ValidationException`. |
+| Go | `UnmarshalJSON` counts decoded members (wire keys, pre-population) and hands the count to the shared `Validate`, whose `< min` predicate raises `Violation{Reason: fmt.Sprintf("must have at least %d properties, got %d", min, n)}`; collected into one `PayloadValidationError` application failure. |
+| TypeScript | count `Object.keys(parsed).length` on the raw parsed wire object (before defaults applied); the shared `Validate`'s `< min` check pushes ``Violation{path, reason: `must have at least ${min} properties, got ${n}`}`` + throw one `PayloadValidationError` application failure. |
+| Python | `from_transfer_type` counts `len(raw)` on the raw wire dict — one number over the wire object, taken before any default is materialized — and appends `Violation(path="", reason=f"must have at least {min} properties, got {n}")` when `n < min`, into the single generated `PayloadValidationError` application failure. |
+| Java | the per-POJO collecting deserializer (PRINCIPLES Java §5) counts distinct keys in the parsed tree (`< min`) — one number over the wire object, **not** POJO fields + catch-all map summed post-bind; a violation joins the single `PayloadValidationError` application failure. |
 
 ### Serialize-side (P12)
 
@@ -97,7 +97,7 @@ an under-floor object; in Python the count is `len(out)` on the dict
 ### Runtime fixtures (validator)
 
 - Member count `== min` → OK (≥ inclusive).
-- Member count `min-1` → one `ValidationError` whose reason names the
+- Member count `min-1` → one `PayloadValidationError` application failure whose reason names the
   floor and count (`must have at least 2 properties, got 1`).
 - Open struct reaching the floor via extras → OK (extras count).
 

@@ -315,10 +315,10 @@ per-member dispatch; presence/absence is [[required]], extras are
 
 | Language | Strategy |
 |---|---|
-| Go | Custom `UnmarshalJSON` decodes into a shadow of `*json.RawMessage` per member, dispatches each present member through its type helper, collects `Violation{Path, Reason}` into a single `ValidationError`. `Path` is the JSON member name. |
-| TypeScript | Hand-emitted per-member checks over the parsed object; push `Violation { path, reason }` into the list, throw one `ValidationError`. |
-| Python | hand-emitted per-member checks over the raw `dict` in the model's `_<Model>TransferTypeConverter` (**PRINCIPLES Python §3**); each appends a `Violation { path, reason }` (`path` = the JSON member name) to the list raised as one `ValidationError`. The TypeScript strategy, expressed through the SDK's transfer-type hook. |
-| Java | per-POJO collecting `@JsonDeserialize` (PRINCIPLES Java §5): a two-stage bind that reads the object into a `JsonNode` tree, then dispatches each present member through its spec-strict/constraint helper (see [[type]]), collecting `Violation{path,reason}` into one `ValidationException`. The Go parallel. |
+| Go | Custom `UnmarshalJSON` decodes into a shadow of `*json.RawMessage` per member, dispatches each present member through its type helper, collects `Violation{Path, Reason}` into a single `PayloadValidationError` application failure. `Path` is the JSON member name. |
+| TypeScript | Hand-emitted per-member checks over the parsed object; push `Violation { path, reason }` into the list, throw one `PayloadValidationError` application failure. |
+| Python | hand-emitted per-member checks over the raw `dict` in the model's `_<Model>TransferTypeConverter` (**PRINCIPLES Python §3**); each appends a `Violation { path, reason }` (`path` = the JSON member name) to the list raised as one `PayloadValidationError` application failure. The TypeScript strategy, expressed through the SDK's transfer-type hook. |
+| Java | per-POJO collecting `@JsonDeserialize` (PRINCIPLES Java §5): a two-stage bind that reads the object into a `JsonNode` tree, then dispatches each present member through its spec-strict/constraint helper (see [[type]]), collecting `Violation{path,reason}` into one `PayloadValidationError` application failure. The Go parallel. |
 
 A member subschema validates recursively — nested objects become nested
 aggregates, arrays use [[items]], etc.

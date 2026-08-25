@@ -50,7 +50,7 @@ export const blockTransferTypeConverter =
     public fromTransferType(raw: unknown): Block {
       const violations: __nexgenDefinitions.Violation[] = [];
       if (!__nexgenDefinitions.isPlainObject(raw)) {
-        throw new __nexgenDefinitions.ValidationError([
+        throw __nexgenDefinitions.payloadValidationError([
           { path: "", reason: "expected object" },
         ]);
       }
@@ -136,7 +136,7 @@ export const blockTransferTypeConverter =
       }
 
       if (violations.length) {
-        throw new __nexgenDefinitions.ValidationError(violations);
+        throw __nexgenDefinitions.payloadValidationError(violations);
       }
       const out: Block = { blockId, order };
       if (text !== undefined) {
@@ -193,7 +193,7 @@ export const blockTransferTypeConverter =
               })();
       }
       if (violations.length) {
-        throw new __nexgenDefinitions.ValidationError(violations);
+        throw __nexgenDefinitions.payloadValidationError(violations);
       }
       return out;
     }
@@ -204,7 +204,7 @@ export const blockStyleTransferTypeConverter =
     public fromTransferType(raw: unknown): BlockStyle {
       const violations: __nexgenDefinitions.Violation[] = [];
       if (!__nexgenDefinitions.isPlainObject(raw)) {
-        throw new __nexgenDefinitions.ValidationError([
+        throw __nexgenDefinitions.payloadValidationError([
           { path: "", reason: "expected object" },
         ]);
       }
@@ -244,7 +244,7 @@ export const blockStyleTransferTypeConverter =
       }
 
       if (violations.length) {
-        throw new __nexgenDefinitions.ValidationError(violations);
+        throw __nexgenDefinitions.payloadValidationError(violations);
       }
       const out: BlockStyle = {};
       if (bold !== undefined) {
@@ -276,7 +276,7 @@ export const blockStyleTransferTypeConverter =
         out.indent = value.indent;
       }
       if (violations.length) {
-        throw new __nexgenDefinitions.ValidationError(violations);
+        throw __nexgenDefinitions.payloadValidationError(violations);
       }
       return out;
     }

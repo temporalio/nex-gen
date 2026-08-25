@@ -46,7 +46,7 @@ export const pageTransferTypeConverter =
     public fromTransferType(raw: unknown): Page {
       const violations: __nexgenDefinitions.Violation[] = [];
       if (!__nexgenDefinitions.isPlainObject(raw)) {
-        throw new __nexgenDefinitions.ValidationError([
+        throw __nexgenDefinitions.payloadValidationError([
           { path: "", reason: "expected object" },
         ]);
       }
@@ -113,7 +113,7 @@ export const pageTransferTypeConverter =
       }
 
       if (violations.length) {
-        throw new __nexgenDefinitions.ValidationError(violations);
+        throw __nexgenDefinitions.payloadValidationError(violations);
       }
       const out: Page = { pageId, title, meta };
       if (blocks !== undefined) {
@@ -149,7 +149,7 @@ export const pageTransferTypeConverter =
         );
       }
       if (violations.length) {
-        throw new __nexgenDefinitions.ValidationError(violations);
+        throw __nexgenDefinitions.payloadValidationError(violations);
       }
       return out;
     }
@@ -160,7 +160,7 @@ export const pageMetaTransferTypeConverter =
     public fromTransferType(raw: unknown): PageMeta {
       const violations: __nexgenDefinitions.Violation[] = [];
       if (!__nexgenDefinitions.isPlainObject(raw)) {
-        throw new __nexgenDefinitions.ValidationError([
+        throw __nexgenDefinitions.payloadValidationError([
           { path: "", reason: "expected object" },
         ]);
       }
@@ -194,7 +194,7 @@ export const pageMetaTransferTypeConverter =
       }
 
       if (violations.length) {
-        throw new __nexgenDefinitions.ValidationError(violations);
+        throw __nexgenDefinitions.payloadValidationError(violations);
       }
       const out: PageMeta = { author };
       if (wordCount !== undefined) {
@@ -217,7 +217,7 @@ export const pageMetaTransferTypeConverter =
         out.wordCount = value.wordCount;
       }
       if (violations.length) {
-        throw new __nexgenDefinitions.ValidationError(violations);
+        throw __nexgenDefinitions.payloadValidationError(violations);
       }
       return out;
     }

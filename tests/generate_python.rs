@@ -194,6 +194,7 @@ $defs:
 const PYTHON_CONFORMANCE_RUNTIME_CHECK: &str = r#"
 import datetime
 import sys
+import temporalio.exceptions
 
 root, package = sys.argv[1], sys.argv[2]
 sys.path.insert(0, root)
@@ -205,7 +206,6 @@ Extra = models.Extra
 PatternNames = models.PatternNames
 EnumNames = models.EnumNames
 FormatNames = models.FormatNames
-ValidationError = definitions.ValidationError
 
 def converter(model):
     return getattr(model, "__temporal_transfer_type_converter")
@@ -213,9 +213,11 @@ def converter(model):
 def violations(call):
     try:
         call()
-    except ValidationError as error:
-        return [(item.path, item.reason) for item in error.violations]
-    raise AssertionError("expected ValidationError")
+    except temporalio.exceptions.ApplicationError as error:
+        assert error.type == "PayloadValidationError", error
+        assert error.non_retryable, error
+        return [(item.path, item.reason) for item in error.details[0]]
+    raise AssertionError("expected payload validation failure")
 
 wire = {
     "known": "ok",
@@ -391,11 +393,12 @@ $defs:
 
 /// Drives the generated converter for `UNION_DISPATCH_FALLTHROUGH_SCHEMA`: a
 /// member matching no branch must raise the union's own aggregated
-/// `ValidationError`, at the member's path, alongside every other violation the
+/// payload-validation failure, at the member's path, alongside every other violation the
 /// model collected — not the `AttributeError` the fallthrough branch's converter
-/// used to raise, which escaped the `except ValidationError` and discarded them.
+/// used to raise, which escaped aggregation and discarded them.
 const UNION_DISPATCH_FALLTHROUGH_RUNTIME_CHECK: &str = r#"
 import sys
+import temporalio.exceptions
 
 root, package = sys.argv[1], sys.argv[2]
 sys.path.insert(0, root)
@@ -403,7 +406,6 @@ models = __import__(package + ".models", fromlist=["*"])
 definitions = __import__(package + "._definitions", fromlist=["*"])
 
 Bag, Circle = models.Bag, models.Circle
-ValidationError = definitions.ValidationError
 converter = getattr(Bag, "__temporal_transfer_type_converter")
 
 valid = {"pick": {"kind": "circle", "radius": 1.5}, "mixed": "ok"}
@@ -415,8 +417,9 @@ assert converter.to_transfer_type(model) == valid, converter.to_transfer_type(mo
 # attribute 'kind'`, taking `mixed`'s violation down with it.
 try:
     converter.to_transfer_type(Bag(pick=42, mixed=7, additional_properties={}))
-except ValidationError as error:
-    reported = [(violation.path, violation.reason) for violation in error.violations]
+except temporalio.exceptions.ApplicationError as error:
+    assert error.type == "PayloadValidationError" and error.non_retryable, error
+    reported = [(violation.path, violation.reason) for violation in error.details[0]]
 else:
     raise AssertionError("serializing members no branch admits did not raise")
 
@@ -429,8 +432,9 @@ assert reported == [
 # empty path the union function collects it at.
 try:
     converter.to_transfer_type(Bag(pick=Circle(kind="circle", radius=1.5), mixed="x", additional_properties={}))
-except ValidationError as error:
-    reported = [(violation.path, violation.reason) for violation in error.violations]
+except temporalio.exceptions.ApplicationError as error:
+    assert error.type == "PayloadValidationError" and error.non_retryable, error
+    reported = [(violation.path, violation.reason) for violation in error.details[0]]
 else:
     raise AssertionError("a short string branch did not raise")
 
@@ -476,9 +480,10 @@ properties:
 
 /// Drives the generated converter for `SHADOWED_NAME_SCHEMA` end to end: a valid
 /// payload must round-trip, and an invalid one must raise the aggregated
-/// `ValidationError` with every violation intact in **both** directions.
+/// payload-validation failure with every violation intact in **both** directions.
 const SHADOWED_NAME_RUNTIME_CHECK: &str = r#"
 import sys
+import temporalio.exceptions
 
 root, package = sys.argv[1], sys.argv[2]
 sys.path.insert(0, root)
@@ -528,8 +533,9 @@ expected = [
 bad = dict(valid, violations="a", re="ABC", math=float("inf"))
 try:
     converter.from_transfer_type(bad, Shadow)
-except definitions.ValidationError as error:
-    got = [(item.path, item.reason) for item in error.violations]
+except temporalio.exceptions.ApplicationError as error:
+    assert error.type == "PayloadValidationError" and error.non_retryable, error
+    got = [(item.path, item.reason) for item in error.details[0]]
     assert got == expected, got
 else:
     raise AssertionError("an invalid payload was accepted: validation was disabled")
@@ -541,8 +547,9 @@ model.re = "ABC"
 model.math = float("inf")
 try:
     converter.to_transfer_type(model)
-except definitions.ValidationError as error:
-    got = [(item.path, item.reason) for item in error.violations]
+except temporalio.exceptions.ApplicationError as error:
+    assert error.type == "PayloadValidationError" and error.non_retryable, error
+    got = [(item.path, item.reason) for item in error.details[0]]
     assert got == expected, got
 else:
     raise AssertionError("an invalid model was serialized: validation was disabled")
@@ -733,18 +740,13 @@ fn read_python_package_files(dir: &Path) -> BTreeMap<PathBuf, String> {
 }
 
 fn assert_python_validation_exports(package_init: &str) {
-    for expected in [
-        "from ._definitions import (",
-        "    ValidationError,",
-        "    Violation,",
-        "    \"ValidationError\",",
-        "    \"Violation\",",
-    ] {
+    for expected in ["from ._definitions import Violation", "\"Violation\","] {
         assert!(
             package_init.contains(expected),
             "{expected}\n{package_init}"
         );
     }
+    assert!(!package_init.contains("ValidationError"), "{package_init}");
 }
 
 fn render_output_files(files: BTreeMap<PathBuf, String>) -> String {
@@ -1745,7 +1747,7 @@ fn python_json_union_serializer_validates_before_dispatching() {
         "    if not (isinstance(candidate, Circle) or isinstance(candidate, Square)):\n",
         "        violations.append(Violation(path=\"\", reason=\"expected one of: Circle, Square\"))\n",
         "    if violations:\n",
-        "        raise ValidationError(violations)\n",
+        "        raise temporalio.converter.create_payload_validation_error(violations)\n",
         "    if isinstance(value, Circle):\n",
     )),
     "the `pick` dispatch is not preceded by the no-branch-matched test:\n{dispatch}");
@@ -1759,7 +1761,7 @@ fn python_json_union_serializer_validates_before_dispatching() {
         member.starts_with(concat!(
             "            try:\n",
             "                out[\"pick\"] = _bag_pick_to_transfer_type(value.pick)\n",
-            "            except ValidationError as error:\n",
+            "            except temporalio.exceptions.ApplicationError as error:\n",
             "                _collect(violations, \"pick\", error)\n",
         )),
         "the `pick` member repeats the union's checks:\n{member}"
@@ -2356,7 +2358,7 @@ $defs:
 /// Python's `$` also matches immediately before a trailing newline, so the pinned
 /// temporal patterns have to carry the same `\Z` rewrite every other emitted
 /// pattern does. Without it `"PT1H\n"` reaches the native parse and escapes as a
-/// raw `ValueError`/`KeyError` instead of an aggregated `ValidationError` (P11).
+/// raw `ValueError`/`KeyError` instead of an aggregated payload-validation failure (P11).
 /// See `specs/json-schema/features/format.md`.
 #[test]
 fn python_json_temporal_patterns_reject_a_trailing_newline() {
@@ -2458,6 +2460,7 @@ $defs:
     assert_python_script_succeeds(
         r#"
 import importlib, sys
+import temporalio.exceptions
 sys.path.insert(0, sys.argv[1])
 models = importlib.import_module(sys.argv[2] + ".models")
 definitions = importlib.import_module(sys.argv[2] + "._definitions")
@@ -2467,15 +2470,16 @@ assert converter.from_transfer_type({"n": 9007199254740993}, models.R).n is not 
 try:
     converter.from_transfer_type({"n": 9007199254740995}, models.R)
     raise AssertionError("expected the over-bound value to be rejected")
-except definitions.ValidationError:
-    pass
+except temporalio.exceptions.ApplicationError as error:
+    assert error.type == "PayloadValidationError" and error.non_retryable, error
 try:
     converter.to_transfer_type(models.R(i=9007199254740993))
     raise AssertionError("expected the over-cap integer to be rejected")
-except definitions.ValidationError as error:
-    assert [v.reason for v in error.violations] == [
+except temporalio.exceptions.ApplicationError as error:
+    assert error.type == "PayloadValidationError" and error.non_retryable, error
+    assert [v.reason for v in error.details[0]] == [
         "exceeds \u00b1(2^53-1) integer cap"
-    ], error.violations
+    ], error.details[0]
 "#,
         &[temp_dir.to_str().unwrap(), "probe_package"],
     );

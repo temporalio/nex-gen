@@ -57,10 +57,10 @@ declared-vs-extras split is a language-side artifact, not a wire fact).
 
 | Language | Strategy |
 |---|---|
-| Go | `UnmarshalJSON` counts decoded members (wire keys, pre-population) and hands the count to the shared `Validate`, whose `> max` predicate raises `Violation{Path:"", Reason: fmt.Sprintf("must have at most %d properties, got %d", max, n)}`; collected into one `ValidationError`. |
-| TypeScript | count `Object.keys(parsed).length` on the raw parsed wire object (before defaults applied); the shared `Validate`'s `> max` check pushes ``Violation{path, reason: `must have at most ${max} properties, got ${n}`}``, throw one `ValidationError`. |
-| Python | `from_transfer_type` counts `len(raw)` on the raw wire dict — one number over the wire object, taken before any default is materialized — and appends `Violation(path="", reason=f"must have at most {max} properties, got {n}")` when `n > max`, into the single generated `ValidationError`. |
-| Java | the per-POJO collecting deserializer (PRINCIPLES Java §5) counts distinct keys in the parsed tree (`> max`) — one number over the wire object, **not** populated POJO fields + catch-all map summed post-bind; a violation joins the single `ValidationException`. |
+| Go | `UnmarshalJSON` counts decoded members (wire keys, pre-population) and hands the count to the shared `Validate`, whose `> max` predicate raises `Violation{Path:"", Reason: fmt.Sprintf("must have at most %d properties, got %d", max, n)}`; collected into one `PayloadValidationError` application failure. |
+| TypeScript | count `Object.keys(parsed).length` on the raw parsed wire object (before defaults applied); the shared `Validate`'s `> max` check pushes ``Violation{path, reason: `must have at most ${max} properties, got ${n}`}``, throw one `PayloadValidationError` application failure. |
+| Python | `from_transfer_type` counts `len(raw)` on the raw wire dict — one number over the wire object, taken before any default is materialized — and appends `Violation(path="", reason=f"must have at most {max} properties, got {n}")` when `n > max`, into the single generated `PayloadValidationError` application failure. |
+| Java | the per-POJO collecting deserializer (PRINCIPLES Java §5) counts distinct keys in the parsed tree (`> max`) — one number over the wire object, **not** populated POJO fields + catch-all map summed post-bind; a violation joins the single `PayloadValidationError` application failure. |
 
 ### Serialize-side (P12)
 
@@ -98,7 +98,7 @@ the wire object.
 ### Runtime fixtures (validator)
 
 - Member count `== max` → OK (≤ is inclusive).
-- Member count `max+1` (including via extras) → one `ValidationError`
+- Member count `max+1` (including via extras) → one `PayloadValidationError` application failure
   whose reason names the cap and count (`must have at most 3 properties,
   got 4`).
 - Combined with other failing assertions → all reported in one shot (P11).

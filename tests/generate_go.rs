@@ -374,7 +374,14 @@ fn unique_output_path(label: &str) -> PathBuf {
         .unwrap()
         .as_nanos();
     let counter = OUTPUT_COUNTER.fetch_add(1, Ordering::Relaxed);
-    std::env::temp_dir().join(format!("nexgen-{label}-{unique}-{counter}"))
+    let path = std::env::temp_dir().join(format!("nexgen-{label}-{unique}-{counter}"));
+    if label.starts_with("go-json-") {
+        fs::create_dir_all(&path).unwrap();
+        let sample_root = project_root().join("samples/go");
+        fs::copy(sample_root.join("go.mod"), path.join("go.mod")).unwrap();
+        fs::copy(sample_root.join("go.sum"), path.join("go.sum")).unwrap();
+    }
+    path
 }
 
 #[test]
@@ -1888,6 +1895,8 @@ import (
 	"encoding/json"
 	"errors"
 	"testing"
+
+	"go.temporal.io/sdk/temporal"
 )
 
 func TestNilUnionPositionsReturnValidationErrors(t *testing.T) {
@@ -1898,17 +1907,24 @@ func TestNilUnionPositionsReturnValidationErrors(t *testing.T) {
 		Entries: &Entries{AdditionalProperties: map[string]EntriesValue{"bad": entry}},
 	}
 	_, err := json.Marshal(value)
-	var validation *ValidationError
+	var validation *temporal.ApplicationError
 	if !errors.As(err, &validation) {
-		t.Fatalf("expected ValidationError, got %v", err)
+		t.Fatalf("expected ApplicationError, got %v", err)
+	}
+	if validation.Type() != "PayloadValidationError" || !validation.NonRetryable() {
+		t.Fatalf("unexpected application error: %#v", validation)
+	}
+	var violations []Violation
+	if err := validation.Details(&violations); err != nil {
+		t.Fatalf("decode violations: %v", err)
 	}
 	got := map[string]bool{}
-	for _, violation := range validation.Violations {
+	for _, violation := range violations {
 		got[violation.Path] = true
 	}
 	for _, path := range []string{"segments[0]", "entries.bad"} {
 		if !got[path] {
-			t.Errorf("missing violation path %q in %#v", path, validation.Violations)
+			t.Errorf("missing violation path %q in %#v", path, violations)
 		}
 	}
 }
@@ -1922,7 +1938,7 @@ func TestNilUnionPositionsReturnValidationErrors(t *testing.T) {
     assert!(format_status.success());
     let test_status = Command::new("go")
         .args(["test", "./..."])
-        .env("GO111MODULE", "off")
+        .env("GO111MODULE", "on")
         .current_dir(&output_path)
         .status()
         .unwrap();
@@ -1969,19 +1985,18 @@ fn go_json_recursively_converts_and_validates_element_positions() {
 
 import (
 	"encoding/json"
-	"errors"
 	"math"
 	"testing"
 	"time"
 )
 
 func paths(err error) map[string]bool {
-	var validation *ValidationError
-	if !errors.As(err, &validation) {
+	violations, ok := payloadValidationErrorViolations(err)
+	if !ok {
 		return nil
 	}
 	out := map[string]bool{}
-	for _, violation := range validation.Violations {
+	for _, violation := range violations {
 		out[violation.Path] = true
 	}
 	return out
@@ -2013,12 +2028,12 @@ func TestRecursivePositions(t *testing.T) {
 		Children: []Child{{Value: math.NaN()}},
 	}
 	_, err := json.Marshal(value)
-	var validation *ValidationError
-	if !errors.As(err, &validation) {
-		t.Fatalf("expected ValidationError, got %v", err)
+	violations, ok := payloadValidationErrorViolations(err)
+	if !ok {
+		t.Fatalf("expected PayloadValidationError, got %v", err)
 	}
-	if len(validation.Violations) != 4 {
-		t.Fatalf("expected exactly four validation violations, got %#v", validation.Violations)
+	if len(violations) != 4 {
+		t.Fatalf("expected exactly four validation violations, got %#v", violations)
 	}
 	got := paths(err)
 	for _, path := range []string{"score", "matrix[0][0]", "dates[0]", "children[0].value"} {
@@ -2049,7 +2064,7 @@ func TestRecursivePositions(t *testing.T) {
     assert!(format_status.success());
     let test_status = Command::new("go")
         .args(["test", "./..."])
-        .env("GO111MODULE", "off")
+        .env("GO111MODULE", "on")
         .current_dir(&output_path)
         .status()
         .unwrap();
@@ -2203,7 +2218,7 @@ properties:
     assert!(format_status.success());
     let test_status = Command::new("go")
         .args(["test", "./..."])
-        .env("GO111MODULE", "off")
+        .env("GO111MODULE", "on")
         .current_dir(&output_path)
         .status()
         .unwrap();
@@ -2268,6 +2283,15 @@ import (
     "testing"
 )
 
+func validationText(err error) string {
+    if violations, ok := payloadValidationErrorViolations(err); ok {
+        var text strings.Builder
+        for _, violation := range violations { text.WriteString(violation.String()); text.WriteByte('\n') }
+        return text.String()
+    }
+    return err.Error()
+}
+
 func TestMixedTypedExtras(t *testing.T) {
     var value Mixed
     if err := json.Unmarshal([]byte(`{"id":"x","bonus":{"score":2}}`), &value); err != nil {
@@ -2276,14 +2300,14 @@ func TestMixedTypedExtras(t *testing.T) {
     if value.AdditionalProperties["bonus"].Score != 2 {
         t.Fatalf("typed extra was not materialized: %#v", value.AdditionalProperties)
     }
-    if err := json.Unmarshal([]byte(`{"id":"x","bonus":{"score":0}}`), &value); err == nil || !strings.Contains(err.Error(), "bonus.score") {
+    if err := json.Unmarshal([]byte(`{"id":"x","bonus":{"score":0}}`), &value); err == nil || !strings.Contains(validationText(err), "bonus.score") {
         t.Fatalf("expected indexed nested validation path, got %v", err)
     }
     value = Mixed{Id: "x", AdditionalProperties: map[string]Extra{
         "bonus": {Score: 2},
         "id": {Score: 3},
     }}
-    if _, err := json.Marshal(value); err == nil || !strings.Contains(err.Error(), "id") {
+    if _, err := json.Marshal(value); err == nil || !strings.Contains(validationText(err), "id") {
         t.Fatalf("expected declared/catch-all collision, got %v", err)
     }
 }
@@ -2298,7 +2322,7 @@ func TestMixedTypedExtras(t *testing.T) {
     assert!(format_status.success());
     let test_status = Command::new("go")
         .args(["test", "./..."])
-        .env("GO111MODULE", "off")
+        .env("GO111MODULE", "on")
         .current_dir(&output_path)
         .status()
         .unwrap();
@@ -2366,23 +2390,32 @@ func decode(t *testing.T, wire string) error {
     return json.Unmarshal([]byte(wire), &value)
 }
 
+func validationText(err error) string {
+    if violations, ok := payloadValidationErrorViolations(err); ok {
+        var text strings.Builder
+        for _, violation := range violations { text.WriteString(violation.String()); text.WriteByte('\n') }
+        return text.String()
+    }
+    return err.Error()
+}
+
 func TestScalarMatchers(t *testing.T) {
-    if err := decode(t, `{"integers":[1.5],"decimals":[0.3,2],"names":{"api":"x"}}`); err == nil || !strings.Contains(err.Error(), "integers") {
+    if err := decode(t, `{"integers":[1.5],"decimals":[0.3,2],"names":{"api":"x"}}`); err == nil || !strings.Contains(validationText(err), "integers") {
         t.Fatalf("fractional number matched integer schema: %v", err)
     }
     if err := decode(t, `{"integers":[1.5,2],"decimals":[0.3,2],"names":{"api":"x"}}`); err != nil {
         t.Fatalf("later exact multiple did not satisfy contains: %v", err)
     }
-    if err := decode(t, `{"integers":[2],"decimals":[0.3,2],"names":{"Api":"x"}}`); err == nil || !strings.Contains(err.Error(), "Api") {
+    if err := decode(t, `{"integers":[2],"decimals":[0.3,2],"names":{"Api":"x"}}`); err == nil || !strings.Contains(validationText(err), "Api") {
         t.Fatalf("property name matcher was not applied: %v", err)
     }
     // An `integer` matcher over `number` elements admits [[type]]'s integer
     // domain, cap included -- the same set Number.isSafeInteger / SpecNumbers
     // admit in the other three targets.
-    if err := decode(t, `{"integers":[1e300],"decimals":[0.3,2],"names":{"api":"x"}}`); err == nil || !strings.Contains(err.Error(), "integers") {
+    if err := decode(t, `{"integers":[1e300],"decimals":[0.3,2],"names":{"api":"x"}}`); err == nil || !strings.Contains(validationText(err), "integers") {
         t.Fatalf("an over-cap integral double matched the integer matcher: %v", err)
     }
-    if err := decode(t, `{"integers":[9007199254740993],"decimals":[0.3,2],"names":{"api":"x"}}`); err == nil || !strings.Contains(err.Error(), "integers") {
+    if err := decode(t, `{"integers":[9007199254740993],"decimals":[0.3,2],"names":{"api":"x"}}`); err == nil || !strings.Contains(validationText(err), "integers") {
         t.Fatalf("a past-2^53 double matched the integer matcher: %v", err)
     }
     if err := decode(t, `{"integers":[9007199254740991],"decimals":[0.3,2],"names":{"api":"x"}}`); err != nil {
@@ -2399,7 +2432,7 @@ func TestScalarMatchers(t *testing.T) {
     assert!(format_status.success());
     let test_status = Command::new("go")
         .args(["test", "./..."])
-        .env("GO111MODULE", "off")
+        .env("GO111MODULE", "on")
         .current_dir(&output_path)
         .status()
         .unwrap();
@@ -2506,13 +2539,22 @@ import (
     "time"
 )
 
+func validationText(err error) string {
+    if violations, ok := payloadValidationErrorViolations(err); ok {
+        var text strings.Builder
+        for _, violation := range violations { text.WriteString(violation.String()); text.WriteByte('\n') }
+        return text.String()
+    }
+    return err.Error()
+}
+
 func TestTemporalWireConstraints(t *testing.T) {
     wire := `{"day":"2023-01-01","days":["2023-01-02"],"byName":{"x":"2023-01-03"}}`
     var parsed TemporalWire
     if err := json.Unmarshal([]byte(wire), &parsed); err == nil ||
-        !strings.Contains(err.Error(), "day") ||
-        !strings.Contains(err.Error(), "days[0]") ||
-        !strings.Contains(err.Error(), "byName.x") {
+        !strings.Contains(validationText(err), "day") ||
+        !strings.Contains(validationText(err), "days[0]") ||
+        !strings.Contains(validationText(err), "byName.x") {
         t.Fatalf("original wire constraints were not aggregated: %v", err)
     }
 
@@ -2523,9 +2565,9 @@ func TestTemporalWireConstraints(t *testing.T) {
         ByName: DateMap{AdditionalProperties: map[string]time.Time{"x": old}},
     }
     if _, err := json.Marshal(value); err == nil ||
-        !strings.Contains(err.Error(), "day") ||
-        !strings.Contains(err.Error(), "days[0]") ||
-        !strings.Contains(err.Error(), "byName.x") {
+        !strings.Contains(validationText(err), "day") ||
+        !strings.Contains(validationText(err), "days[0]") ||
+        !strings.Contains(validationText(err), "byName.x") {
         t.Fatalf("canonical wire constraints were not aggregated: %v", err)
     }
 }
@@ -2539,7 +2581,7 @@ func TestTemporalWireConstraints(t *testing.T) {
     assert!(format_status.success());
     let test_status = Command::new("go")
         .args(["test", "./..."])
-        .env("GO111MODULE", "off")
+        .env("GO111MODULE", "on")
         .current_dir(&output_path)
         .status()
         .unwrap();
@@ -2618,7 +2660,7 @@ func TestNativeClosedValuesAndDefaults(t *testing.T) {
     assert!(format_status.success());
     let test_status = Command::new("go")
         .args(["test", "./..."])
-        .env("GO111MODULE", "off")
+        .env("GO111MODULE", "on")
         .current_dir(&output_path)
         .status()
         .unwrap();
@@ -2676,6 +2718,15 @@ func replace(base, old, replacement string) string {
     return strings.Replace(base, old, replacement, 1)
 }
 
+func validationText(err error) string {
+    if violations, ok := payloadValidationErrorViolations(err); ok {
+        var text strings.Builder
+        for _, violation := range violations { text.WriteString(violation.String()); text.WriteByte('\n') }
+        return text.String()
+    }
+    return err.Error()
+}
+
 func TestPresenceClosedScalarsAndNumericBoundaries(t *testing.T) {
     value, err := decode(base)
     if err != nil { t.Fatal(err) }
@@ -2725,11 +2776,11 @@ func TestPresenceClosedScalarsAndNumericBoundaries(t *testing.T) {
         `"enumNumber":1.5`: `"enumNumber":3.5`,
         `"enumBoolean":false`: `"enumBoolean":"no"`,
     } {
-        if _, err := decode(replace(base, field, replacement)); err == nil || !strings.Contains(err.Error(), strings.Trim(strings.Split(field, ":")[0], `"`)) {
+        if _, err := decode(replace(base, field, replacement)); err == nil || !strings.Contains(validationText(err), strings.Trim(strings.Split(field, ":")[0], `"`)) {
             t.Fatalf("closed scalar failure missing for %s: %v", field, err)
         }
     }
-    if _, err := decode(replace(base, `"bounded":-1e1`, `"bounded":10`)); err == nil || !strings.Contains(err.Error(), "must be < 10") {
+    if _, err := decode(replace(base, `"bounded":-1e1`, `"bounded":10`)); err == nil || !strings.Contains(validationText(err), "must be < 10") {
         t.Fatalf("exclusiveMaximum was not enforced: %v", err)
     }
     if _, err := decode(replace(base, `"bounded":-1e1`, `"bounded":-15`)); err != nil {
@@ -2738,12 +2789,12 @@ func TestPresenceClosedScalarsAndNumericBoundaries(t *testing.T) {
 
     invalid := value
     invalid.ConstNumber = AuditConstNumber(2.5)
-    if _, err := json.Marshal(invalid); err == nil || !strings.Contains(err.Error(), "constNumber") {
+    if _, err := json.Marshal(invalid); err == nil || !strings.Contains(validationText(err), "constNumber") {
         t.Fatalf("serialize accepted invalid const: %v", err)
     }
     invalid = value
     invalid.Bounded = 10
-    if _, err := json.Marshal(invalid); err == nil || !strings.Contains(err.Error(), "must be < 10") {
+    if _, err := json.Marshal(invalid); err == nil || !strings.Contains(validationText(err), "must be < 10") {
         t.Fatalf("serialize accepted exclusive maximum: %v", err)
     }
 }
@@ -2754,7 +2805,7 @@ func TestMatchersArraysPropertyNamesAndTypedExtraCounts(t *testing.T) {
         `"matchedText":["dev@example.com"]`: `"matchedText":["bad@example.org"]`,
         `"matchedBoolean":[true]`: `"matchedBoolean":[false]`,
     } {
-        if _, err := decode(replace(base, old, replacement)); err == nil || !strings.Contains(err.Error(), strings.Split(old, `"`)[1]) {
+        if _, err := decode(replace(base, old, replacement)); err == nil || !strings.Contains(validationText(err), strings.Split(old, `"`)[1]) {
             t.Fatalf("contains failure missing for %s: %v", old, err)
         }
     }
@@ -2762,59 +2813,59 @@ func TestMatchersArraysPropertyNamesAndTypedExtraCounts(t *testing.T) {
     if err != nil { t.Fatal(err) }
     invalid := value
     invalid.MatchedNumbers = []float64{1}
-    if _, err := json.Marshal(invalid); err == nil || !strings.Contains(err.Error(), "matchedNumbers") { t.Fatalf("serialize contains: %v", err) }
+    if _, err := json.Marshal(invalid); err == nil || !strings.Contains(validationText(err), "matchedNumbers") { t.Fatalf("serialize contains: %v", err) }
     invalid = value
     invalid.MatchedText = []string{"bad@example.org"}
-    if _, err := json.Marshal(invalid); err == nil || !strings.Contains(err.Error(), "matchedText") { t.Fatalf("serialize contains: %v", err) }
+    if _, err := json.Marshal(invalid); err == nil || !strings.Contains(validationText(err), "matchedText") { t.Fatalf("serialize contains: %v", err) }
     invalid = value
     invalid.MatchedBoolean = []bool{false}
-    if _, err := json.Marshal(invalid); err == nil || !strings.Contains(err.Error(), "matchedBoolean") { t.Fatalf("serialize contains: %v", err) }
+    if _, err := json.Marshal(invalid); err == nil || !strings.Contains(validationText(err), "matchedBoolean") { t.Fatalf("serialize contains: %v", err) }
 
     if _, err := decode(replace(base, `"checkedArray":["ok","x"]`, `"checkedArray":[]`)); err == nil ||
-        !strings.Contains(err.Error(), "at least 2 items") || !strings.Contains(err.Error(), "matching") {
+        !strings.Contains(validationText(err), "at least 2 items") || !strings.Contains(validationText(err), "matching") {
         t.Fatalf("array failures did not aggregate: %v", err)
     }
     crowded := replace(base, `"checkedArray":["ok","x"]`, `"checkedArray":["ok","ok","x","x"]`)
-    if _, err := decode(crowded); err == nil || !strings.Contains(err.Error(), "at most 3 items") ||
-        !strings.Contains(err.Error(), "duplicate") || !strings.Contains(err.Error(), "matching") {
+    if _, err := decode(crowded); err == nil || !strings.Contains(validationText(err), "at most 3 items") ||
+        !strings.Contains(validationText(err), "duplicate") || !strings.Contains(validationText(err), "matching") {
         t.Fatalf("array upper failures did not aggregate: %v", err)
     }
     invalid = value
     invalid.CheckedArray = nil
-    if _, err := json.Marshal(invalid); err == nil || !strings.Contains(err.Error(), "checkedArray") { t.Fatalf("serialize array: %v", err) }
+    if _, err := json.Marshal(invalid); err == nil || !strings.Contains(validationText(err), "checkedArray") { t.Fatalf("serialize array: %v", err) }
 
     for key := range map[string]struct{}{ "x": {}, "bad key@example.com": {}, "c@example.com": {} } {
         names := replace(base, `"names":{"a@example.com":"x"}`, `"names":{"`+key+`":"x"}`)
-        if _, err := decode(names); err == nil || !strings.Contains(err.Error(), key) {
+        if _, err := decode(names); err == nil || !strings.Contains(validationText(err), key) {
             t.Fatalf("propertyNames failure missing for %q: %v", key, err)
         }
     }
     invalid = value
     invalid.Names.AdditionalProperties = map[string]string{"c@example.com": "x"}
-    if _, err := json.Marshal(invalid); err == nil || !strings.Contains(err.Error(), "c@example.com") {
+    if _, err := json.Marshal(invalid); err == nil || !strings.Contains(validationText(err), "c@example.com") {
         t.Fatalf("serialize propertyNames failure missing: %v", err)
     }
 
-    if _, err := decode(replace(base, `"mixed":{"id":"m","schedule":["2024-01-01"]}`, `"mixed":{"id":"m"}`)); err == nil || !strings.Contains(err.Error(), "at least 2 properties") {
+    if _, err := decode(replace(base, `"mixed":{"id":"m","schedule":["2024-01-01"]}`, `"mixed":{"id":"m"}`)); err == nil || !strings.Contains(validationText(err), "at least 2 properties") {
         t.Fatalf("mixed minProperties missing: %v", err)
     }
-    if _, err := decode(replace(base, `"mixed":{"id":"m","schedule":["2024-01-01"]}`, `"mixed":{"id":"m","a":["2024-01-01"],"b":["2024-01-02"],"c":["2024-01-03"]}`)); err == nil || !strings.Contains(err.Error(), "at most 3 properties") {
+    if _, err := decode(replace(base, `"mixed":{"id":"m","schedule":["2024-01-01"]}`, `"mixed":{"id":"m","a":["2024-01-01"],"b":["2024-01-02"],"c":["2024-01-03"]}`)); err == nil || !strings.Contains(validationText(err), "at most 3 properties") {
         t.Fatalf("mixed maxProperties missing: %v", err)
     }
     invalid = value
     invalid.Mixed.AdditionalProperties = map[string][]time.Time{}
-    if _, err := json.Marshal(invalid); err == nil || !strings.Contains(err.Error(), "at least 2 properties") {
+    if _, err := json.Marshal(invalid); err == nil || !strings.Contains(validationText(err), "at least 2 properties") {
         t.Fatalf("serialize mixed minProperties missing: %v", err)
     }
     invalid, _ = decode(base)
     day := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
     invalid.Mixed.AdditionalProperties = map[string][]time.Time{"a": {day}, "b": {day}, "c": {day}}
-    if _, err := json.Marshal(invalid); err == nil || !strings.Contains(err.Error(), "at most 3 properties") {
+    if _, err := json.Marshal(invalid); err == nil || !strings.Contains(validationText(err), "at most 3 properties") {
         t.Fatalf("serialize mixed maxProperties missing: %v", err)
     }
     invalid, _ = decode(base)
     invalid.Mixed.AdditionalProperties = map[string][]time.Time{"id": {day}}
-    if _, err := json.Marshal(invalid); err == nil || !strings.Contains(err.Error(), "id") {
+    if _, err := json.Marshal(invalid); err == nil || !strings.Contains(validationText(err), "id") {
         t.Fatalf("serialize mixed collision missing: %v", err)
     }
 }
@@ -2829,7 +2880,7 @@ func TestMatchersArraysPropertyNamesAndTypedExtraCounts(t *testing.T) {
     assert!(format_status.success());
     let test_status = Command::new("go")
         .args(["test", "./..."])
-        .env("GO111MODULE", "off")
+        .env("GO111MODULE", "on")
         .current_dir(&output_path)
         .status()
         .unwrap();
@@ -3281,7 +3332,7 @@ func TestNumberMultipleOfIsFmod(t *testing.T) {
     assert!(format_status.success());
     let test_status = Command::new("go")
         .args(["test", "./..."])
-        .env("GO111MODULE", "off")
+        .env("GO111MODULE", "on")
         .current_dir(&output_path)
         .status()
         .unwrap();
@@ -3419,7 +3470,7 @@ func TestNullableShapes(t *testing.T) {
     assert!(format_status.success());
     let test_status = Command::new("go")
         .args(["test", "./..."])
-        .env("GO111MODULE", "off")
+        .env("GO111MODULE", "on")
         .current_dir(&output_path)
         .status()
         .unwrap();
@@ -3671,7 +3722,7 @@ func TestMaterializedSerializeChecks(t *testing.T) {
     assert!(format_status.success());
     let test_status = Command::new("go")
         .args(["test", "./..."])
-        .env("GO111MODULE", "off")
+        .env("GO111MODULE", "on")
         .current_dir(&output_path)
         .status()
         .unwrap();
@@ -3742,7 +3793,7 @@ func TestNilSliceEmitsEmptyArray(t *testing.T) {
     assert!(format_status.success());
     let test_status = Command::new("go")
         .args(["test", "./..."])
-        .env("GO111MODULE", "off")
+        .env("GO111MODULE", "on")
         .current_dir(&output_path)
         .status()
         .unwrap();
@@ -3820,6 +3871,15 @@ import (
     "testing"
 )
 
+func validationText(err error) string {
+    if violations, ok := payloadValidationErrorViolations(err); ok {
+        var text strings.Builder
+        for _, violation := range violations { text.WriteString(violation.String()); text.WriteByte('\n') }
+        return text.String()
+    }
+    return err.Error()
+}
+
 func TestObjectShapes(t *testing.T) {
     if got := (Defaulted{}).StatusOrDefault(); got != DefaultedStatusActive {
         t.Errorf("default accessor returned %v", got)
@@ -3829,20 +3889,20 @@ func TestObjectShapes(t *testing.T) {
     // an untyped catch-all is no different from a typed one.
     a := "x"
     collision := Open{A: &a, AdditionalProperties: map[string]json.RawMessage{"a": json.RawMessage(`"y"`)}}
-    if _, err := json.Marshal(collision); err == nil || !strings.Contains(err.Error(), "collides") {
+    if _, err := json.Marshal(collision); err == nil || !strings.Contains(validationText(err), "collides") {
         t.Errorf("catch-all collision was not reported: %v", err)
     }
 
     // The object-level constraints live in the shared Validate, and are
     // reported exactly once through MarshalJSON.
-    if err := (Contact{}).Validate(); err == nil || !strings.Contains(err.Error(), "at least 1 properties") {
+    if err := (Contact{}).Validate(); err == nil || !strings.Contains(validationText(err), "at least 1 properties") {
         t.Errorf("minProperties missing from Validate: %v", err)
     }
     email := "a@b.c"
-    if err := (Contact{Email: &email}).Validate(); err == nil || !strings.Contains(err.Error(), "is required when") {
+    if err := (Contact{Email: &email}).Validate(); err == nil || !strings.Contains(validationText(err), "is required when") {
         t.Errorf("dependentRequired missing from Validate: %v", err)
     }
-    if _, err := json.Marshal(Contact{Email: &email}); err == nil || strings.Count(err.Error(), "is required when") != 1 {
+    if _, err := json.Marshal(Contact{Email: &email}); err == nil || strings.Count(validationText(err), "is required when") != 1 {
         t.Errorf("dependentRequired was not reported exactly once: %v", err)
     }
     name := "n"
@@ -3860,7 +3920,7 @@ func TestObjectShapes(t *testing.T) {
     assert!(format_status.success());
     let test_status = Command::new("go")
         .args(["test", "./..."])
-        .env("GO111MODULE", "off")
+        .env("GO111MODULE", "on")
         .current_dir(&output_path)
         .status()
         .unwrap();
@@ -3931,7 +3991,7 @@ $defs:
     assert!(format_status.success());
     let build_status = Command::new("go")
         .args(["build", "./..."])
-        .env("GO111MODULE", "off")
+        .env("GO111MODULE", "on")
         .current_dir(&output_path)
         .status()
         .unwrap();
@@ -4014,7 +4074,7 @@ func TestQuotedNumericTokenRejected(t *testing.T) {
     assert!(format_status.success());
     let test_status = Command::new("go")
         .args(["test", "./..."])
-        .env("GO111MODULE", "off")
+        .env("GO111MODULE", "on")
         .current_dir(&output_path)
         .status()
         .unwrap();
@@ -4078,6 +4138,15 @@ import (
     "testing"
 )
 
+func validationText(err error) string {
+    if violations, ok := payloadValidationErrorViolations(err); ok {
+        var text strings.Builder
+        for _, violation := range violations { text.WriteString(violation.String()); text.WriteByte('\n') }
+        return text.String()
+    }
+    return err.Error()
+}
+
 func TestNullableElements(t *testing.T) {
     for _, tc := range []struct {
         wire   string
@@ -4101,14 +4170,14 @@ func TestNullableElements(t *testing.T) {
     word := "a"
     two := int64(2)
     if _, err := json.Marshal(Elements{Words: []*string{nil, nil}, Counts: []*int64{&two}}); err == nil ||
-        !strings.Contains(err.Error(), "duplicate") {
+        !strings.Contains(validationText(err), "duplicate") {
         t.Errorf("two nil elements are a duplicate: %v", err)
     }
     if _, err := json.Marshal(Elements{Words: []*string{nil, &word}, Counts: []*int64{&two}}); err != nil {
         t.Errorf("one nil element is not a duplicate: %v", err)
     }
     if _, err := json.Marshal(Elements{Words: []*string{}, Counts: []*int64{nil}}); err == nil ||
-        !strings.Contains(err.Error(), "no element matches") {
+        !strings.Contains(validationText(err), "no element matches") {
         t.Errorf("a nil element must not match the matcher: %v", err)
     }
 }
@@ -4122,7 +4191,7 @@ func TestNullableElements(t *testing.T) {
     assert!(format_status.success());
     let test_status = Command::new("go")
         .args(["test", "./..."])
-        .env("GO111MODULE", "off")
+        .env("GO111MODULE", "on")
         .current_dir(&output_path)
         .status()
         .unwrap();
@@ -4213,7 +4282,7 @@ properties:
     assert!(format_status.success());
     let build_status = Command::new("go")
         .args(["build", "./..."])
-        .env("GO111MODULE", "off")
+        .env("GO111MODULE", "on")
         .current_dir(&output_path)
         .status()
         .unwrap();

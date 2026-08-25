@@ -338,10 +338,10 @@ value — the **shared `Validate`** layer of **P12**).
 
 | Language | Strategy |
 |---|---|
-| Go | A predicate in the shared `Validate`, which `UnmarshalJSON` calls after decoding: `if v != UserEventKindUser { … Violation{Path, Reason: fmt.Sprintf("must equal %q, got %q", UserEventKindUser, v)} }`, collected into one `ValidationError`. The field is the defined type; the typed constant is both the compared value and the idiomatic setter (`UserEvent{Kind: UserEventKindUser}`). |
-| TypeScript | the shared `Validate` predicate compares against the literal: ``if (v !== "user") push(Violation{path, reason: `must equal "user", got ${JSON.stringify(v)}`})``, throwing one `ValidationError`. The field's literal type closes it in-language. |
-| Python | the transfer type converter (PRINCIPLES Python §3) compares against the literal — `v != "user"` → `Violation(path=…, reason='must equal "user", got <json>')`, the same reason string TypeScript emits — aggregated into the single generated `ValidationError`. The field is the closed `Literal` (`float` consts are plain `float`, validated the same way). |
-| Java | the aggregating path is the per-POJO collecting deserializer (PRINCIPLES Java §5), which does a **non-throwing membership lookup** — known value → the constant, otherwise record a `Violation{path, "must equal \"user\", got …"}` — so multiple bad fields all collect into the single `ValidationException`, consistent with every other §5 constraint helper. The value class's `@JsonCreator fromString` *throws* only on the **standalone/interop** path, where fail-fast is expected. Serialize needs no separate check: the value class can only hold a known constant. |
+| Go | A predicate in the shared `Validate`, which `UnmarshalJSON` calls after decoding: `if v != UserEventKindUser { … Violation{Path, Reason: fmt.Sprintf("must equal %q, got %q", UserEventKindUser, v)} }`, collected into one `PayloadValidationError` application failure. The field is the defined type; the typed constant is both the compared value and the idiomatic setter (`UserEvent{Kind: UserEventKindUser}`). |
+| TypeScript | the shared `Validate` predicate compares against the literal: ``if (v !== "user") push(Violation{path, reason: `must equal "user", got ${JSON.stringify(v)}`})``, throwing one `PayloadValidationError` application failure. The field's literal type closes it in-language. |
+| Python | the transfer type converter (PRINCIPLES Python §3) compares against the literal — `v != "user"` → `Violation(path=…, reason='must equal "user", got <json>')`, the same reason string TypeScript emits — aggregated into the single generated `PayloadValidationError` application failure. The field is the closed `Literal` (`float` consts are plain `float`, validated the same way). |
+| Java | the aggregating path is the per-POJO collecting deserializer (PRINCIPLES Java §5), which does a **non-throwing membership lookup** — known value → the constant, otherwise record a `Violation{path, "must equal \"user\", got …"}` — so multiple bad fields all collect into the single `PayloadValidationError` application failure, consistent with every other §5 constraint helper. The value class's `@JsonCreator fromString` *throws* only on the **standalone/interop** path, where fail-fast is expected. Serialize needs no separate check: the value class can only hold a known constant. |
 
 ### Serialize-side (P12)
 
@@ -407,7 +407,7 @@ so the check is effectively a deserialize-direction guard there.
 ### Runtime fixtures (validator)
 
 - Wire value equals const → OK (both directions).
-- Wire value present but `!= const` → one `ValidationError` naming the
+- Wire value present but `!= const` → one `PayloadValidationError` application failure naming the
   expected and actual value (`must equal "user", got "admin"`).
 - required+const **absent on the wire** → required violation (see
   [[required]]), reported as a presence error, not a const error.
@@ -423,7 +423,7 @@ so the check is effectively a deserialize-direction guard there.
   `x-java-const-name:"DASH"`): wire value `"-"` round-trips — validates
   equal in both directions (the override renames the constant, not the
   compared value), and the value constant (Go `Dash`, Java `DASH`) sets it
-  in memory; any other wire value → one `ValidationError`
+  in memory; any other wire value → one `PayloadValidationError` application failure
   (`must equal "-", got …`). Confirms the override affects only the
   synthesized identifier, never the equality check.
 

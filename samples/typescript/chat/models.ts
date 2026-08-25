@@ -68,7 +68,7 @@ export const getRoomInputTransferTypeConverter =
     public fromTransferType(raw: unknown): GetRoomInput {
       const violations: __nexgenDefinitions.Violation[] = [];
       if (!__nexgenDefinitions.isPlainObject(raw)) {
-        throw new __nexgenDefinitions.ValidationError([
+        throw __nexgenDefinitions.payloadValidationError([
           { path: "", reason: "expected object" },
         ]);
       }
@@ -91,7 +91,7 @@ export const getRoomInputTransferTypeConverter =
       }
 
       if (violations.length) {
-        throw new __nexgenDefinitions.ValidationError(violations);
+        throw __nexgenDefinitions.payloadValidationError(violations);
       }
       const out: GetRoomInput = { roomId };
       return out;
@@ -109,7 +109,7 @@ export const labelsTransferTypeConverter =
     public fromTransferType(raw: unknown): Labels {
       const violations: __nexgenDefinitions.Violation[] = [];
       if (!__nexgenDefinitions.isPlainObject(raw)) {
-        throw new __nexgenDefinitions.ValidationError([
+        throw __nexgenDefinitions.payloadValidationError([
           { path: "", reason: "expected object" },
         ]);
       }
@@ -134,7 +134,7 @@ export const labelsTransferTypeConverter =
         }
       }
       if (violations.length) {
-        throw new __nexgenDefinitions.ValidationError(violations);
+        throw __nexgenDefinitions.payloadValidationError(violations);
       }
       return { additionalProperties };
     }
@@ -153,7 +153,7 @@ export const labelsTransferTypeConverter =
         });
       }
       if (violations.length) {
-        throw new __nexgenDefinitions.ValidationError(violations);
+        throw __nexgenDefinitions.payloadValidationError(violations);
       }
       return out;
     }
@@ -164,7 +164,7 @@ export const messageTransferTypeConverter =
     public fromTransferType(raw: unknown): Message {
       const violations: __nexgenDefinitions.Violation[] = [];
       if (!__nexgenDefinitions.isPlainObject(raw)) {
-        throw new __nexgenDefinitions.ValidationError([
+        throw __nexgenDefinitions.payloadValidationError([
           { path: "", reason: "expected object" },
         ]);
       }
@@ -232,7 +232,7 @@ export const messageTransferTypeConverter =
       }
 
       if (violations.length) {
-        throw new __nexgenDefinitions.ValidationError(violations);
+        throw __nexgenDefinitions.payloadValidationError(violations);
       }
       const out: Message = { kind, body };
       if (replyToId !== undefined) {
@@ -265,7 +265,7 @@ export const messageTransferTypeConverter =
         out.priority = value.priority;
       }
       if (violations.length) {
-        throw new __nexgenDefinitions.ValidationError(violations);
+        throw __nexgenDefinitions.payloadValidationError(violations);
       }
       return out;
     }
@@ -278,7 +278,7 @@ export const roomTransferTypeConverter =
     public fromTransferType(raw: unknown): Room {
       const violations: __nexgenDefinitions.Violation[] = [];
       if (!__nexgenDefinitions.isPlainObject(raw)) {
-        throw new __nexgenDefinitions.ValidationError([
+        throw __nexgenDefinitions.payloadValidationError([
           { path: "", reason: "expected object" },
         ]);
       }
@@ -361,7 +361,7 @@ export const roomTransferTypeConverter =
       }
 
       if (violations.length) {
-        throw new __nexgenDefinitions.ValidationError(violations);
+        throw __nexgenDefinitions.payloadValidationError(violations);
       }
       const out: Room = { roomId, displayName, topic, additionalProperties };
       if (members !== undefined) {
@@ -403,7 +403,7 @@ export const roomTransferTypeConverter =
         out[key] = entry;
       }
       if (violations.length) {
-        throw new __nexgenDefinitions.ValidationError(violations);
+        throw __nexgenDefinitions.payloadValidationError(violations);
       }
       return out;
     }
@@ -414,7 +414,7 @@ export const sendMessageInputTransferTypeConverter =
     public fromTransferType(raw: unknown): SendMessageInput {
       const violations: __nexgenDefinitions.Violation[] = [];
       if (!__nexgenDefinitions.isPlainObject(raw)) {
-        throw new __nexgenDefinitions.ValidationError([
+        throw __nexgenDefinitions.payloadValidationError([
           { path: "", reason: "expected object" },
         ]);
       }
@@ -448,7 +448,7 @@ export const sendMessageInputTransferTypeConverter =
       }
 
       if (violations.length) {
-        throw new __nexgenDefinitions.ValidationError(violations);
+        throw __nexgenDefinitions.payloadValidationError(violations);
       }
       const out: SendMessageInput = { roomId, message };
       return out;
@@ -467,7 +467,7 @@ export const sendMessageInputTransferTypeConverter =
         }
       })();
       if (violations.length) {
-        throw new __nexgenDefinitions.ValidationError(violations);
+        throw __nexgenDefinitions.payloadValidationError(violations);
       }
       return out;
     }
@@ -478,7 +478,7 @@ export const sendMessageOutputTransferTypeConverter =
     public fromTransferType(raw: unknown): SendMessageOutput {
       const violations: __nexgenDefinitions.Violation[] = [];
       if (!__nexgenDefinitions.isPlainObject(raw)) {
-        throw new __nexgenDefinitions.ValidationError([
+        throw __nexgenDefinitions.payloadValidationError([
           { path: "", reason: "expected object" },
         ]);
       }
@@ -501,7 +501,7 @@ export const sendMessageOutputTransferTypeConverter =
       }
 
       if (violations.length) {
-        throw new __nexgenDefinitions.ValidationError(violations);
+        throw __nexgenDefinitions.payloadValidationError(violations);
       }
       const out: SendMessageOutput = { messageId };
       return out;

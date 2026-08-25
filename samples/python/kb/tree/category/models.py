@@ -6,9 +6,9 @@ import dataclasses
 import typing
 import typing_extensions
 import temporalio.converter
+import temporalio.exceptions
 
 from ..._definitions import (
-    ValidationError,
     Violation,
     _collect,
     _transfer_type_convertible,
@@ -24,7 +24,9 @@ class _CategoryTransferTypeConverter(
     ) -> "Category":
         violations: list[Violation] = []
         if not isinstance(value, dict):
-            raise ValidationError([Violation(path="", reason="expected object")])
+            raise temporalio.converter.create_payload_validation_error(
+                [Violation(path="", reason="expected object")]
+            )
         raw = typing.cast("dict[str, typing.Any]", value)
 
         id_value: str = typing.cast("typing.Any", None)
@@ -73,7 +75,7 @@ class _CategoryTransferTypeConverter(
                                     children_value_element, Category
                                 )
                             )
-                        except ValidationError as error:
+                        except temporalio.exceptions.ApplicationError as error:
                             _collect(violations, children_value_item_path, error)
                         if len(violations) == children_value_item_violation_count:
                             children_value_list.append(children_value_item)
@@ -83,7 +85,7 @@ class _CategoryTransferTypeConverter(
             if key != "id" and key != "name" and key != "children":
                 violations.append(Violation(path=key, reason="unknown field"))
         if violations:
-            raise ValidationError(violations)
+            raise temporalio.converter.create_payload_validation_error(violations)
         return Category(
             id=id_value,
             name=name_value,
@@ -105,11 +107,11 @@ class _CategoryTransferTypeConverter(
                             children_element
                         )
                     )
-                except ValidationError as error:
+                except temporalio.exceptions.ApplicationError as error:
                     _collect(violations, f"children[{children_index}]", error)
             out["children"] = children_out
         if violations:
-            raise ValidationError(violations)
+            raise temporalio.converter.create_payload_validation_error(violations)
         return out
 
 
@@ -139,7 +141,9 @@ class _PaletteTransferTypeConverter(
     ) -> "Palette":
         violations: list[Violation] = []
         if not isinstance(value, dict):
-            raise ValidationError([Violation(path="", reason="expected object")])
+            raise temporalio.converter.create_payload_validation_error(
+                [Violation(path="", reason="expected object")]
+            )
         raw = typing.cast("dict[str, typing.Any]", value)
 
         swatches_value: list[str] = typing.cast("typing.Any", None)
@@ -173,7 +177,7 @@ class _PaletteTransferTypeConverter(
             if key != "swatches":
                 violations.append(Violation(path=key, reason="unknown field"))
         if violations:
-            raise ValidationError(violations)
+            raise temporalio.converter.create_payload_validation_error(violations)
         return Palette(
             swatches=swatches_value,
         )

@@ -104,30 +104,30 @@ func TestJSONSchemaShowcaseNumericConstraints(t *testing.T) {
 
 	var out showcase.Showcase
 	// An integer above `maximum` is rejected on deserialize.
-	err := dc.FromPayload(jsonPayload([]byte(
+	err := decodeValidation(jsonPayload([]byte(
 		`{"kind":"showcase","name":"w","count":1,"active":true,"category":"tools","priority":99}`)), &out)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "must be <= 10, got 99")
+	require.Contains(t, validationText(err), "must be <= 10, got 99")
 
 	// A non-multiple integer is rejected.
-	err = dc.FromPayload(jsonPayload([]byte(
+	err = decodeValidation(jsonPayload([]byte(
 		`{"kind":"showcase","name":"w","count":1,"active":true,"category":"tools","step":7}`)), &out)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "must be a multiple of 3, got 7")
+	require.Contains(t, validationText(err), "must be a multiple of 3, got 7")
 
 	// A number below `minimum` and off the multipleOf grid is rejected.
-	err = dc.FromPayload(jsonPayload([]byte(
+	err = decodeValidation(jsonPayload([]byte(
 		`{"kind":"showcase","name":"w","count":1,"active":true,"category":"tools","ratio":3}`)), &out)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "must be >= 5, got 3")
+	require.Contains(t, validationText(err), "must be >= 5, got 3")
 
 	// Serialize side (P12): an in-memory value past the bound fails to marshal.
 	bad := metrics
 	badPriority := int64(42)
 	bad.Priority = &badPriority
-	_, serr := dc.ToPayload(bad)
+	_, serr := json.Marshal(bad)
 	require.Error(t, serr)
-	require.Contains(t, serr.Error(), "must be <= 10, got 42")
+	require.Contains(t, validationText(serr), "must be <= 10, got 42")
 }
 
 // TestJSONSchemaShowcaseStringLength round-trips string-length-constrained
@@ -148,31 +148,31 @@ func TestJSONSchemaShowcaseStringLength(t *testing.T) {
 
 	var out showcase.Showcase
 	// A too-short `code` (1 code point, below minLength:2) is rejected.
-	err := dc.FromPayload(jsonPayload([]byte(
+	err := decodeValidation(jsonPayload([]byte(
 		`{"kind":"showcase","name":"w","count":1,"active":true,"category":"tools","code":"a"}`)), &out)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "must have length >= 2, got 1")
+	require.Contains(t, validationText(err), "must have length >= 2, got 1")
 
 	// An over-long `code` (6 code points, above maxLength:5) is rejected.
-	err = dc.FromPayload(jsonPayload([]byte(
+	err = decodeValidation(jsonPayload([]byte(
 		`{"kind":"showcase","name":"w","count":1,"active":true,"category":"tools","code":"abcdef"}`)), &out)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "must have length <= 5, got 6")
+	require.Contains(t, validationText(err), "must have length <= 5, got 6")
 
 	// An over-long astral `code` (6 emoji = 6 code points, 24 bytes) is rejected
 	// by code-point count, not byte count.
-	err = dc.FromPayload(jsonPayload([]byte(
+	err = decodeValidation(jsonPayload([]byte(
 		`{"kind":"showcase","name":"w","count":1,"active":true,"category":"tools","code":"😀😀😀😀😀😀"}`)), &out)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "must have length <= 5, got 6")
+	require.Contains(t, validationText(err), "must have length <= 5, got 6")
 
 	// Serialize side (P12): an in-memory over-long string fails to marshal.
 	bad := strings
 	tooLong := "abcdef"
 	bad.Code = &tooLong
-	_, serr := dc.ToPayload(bad)
+	_, serr := json.Marshal(bad)
 	require.Error(t, serr)
-	require.Contains(t, serr.Error(), "must have length <= 5, got 6")
+	require.Contains(t, validationText(serr), "must have length <= 5, got 6")
 }
 
 // TestJSONSchemaShowcasePattern round-trips the pattern-constrained string
@@ -195,42 +195,42 @@ func TestJSONSchemaShowcasePattern(t *testing.T) {
 	var out showcase.Showcase
 
 	// Lowercase sku (not [A-Z]).
-	err := dc.FromPayload(jsonPayload([]byte(base+`,"sku":"ab"}`)), &out)
+	err := decodeValidation(jsonPayload([]byte(base+`,"sku":"ab"}`)), &out)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "must match pattern")
-	require.Contains(t, err.Error(), `got "ab"`)
+	require.Contains(t, validationText(err), "must match pattern")
+	require.Contains(t, validationText(err), `got "ab"`)
 
 	// Too-long sku (5 letters, above {2,4}).
-	err = dc.FromPayload(jsonPayload([]byte(base+`,"sku":"ABCDE"}`)), &out)
+	err = decodeValidation(jsonPayload([]byte(base+`,"sku":"ABCDE"}`)), &out)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "must match pattern")
+	require.Contains(t, validationText(err), "must match pattern")
 
 	// phrase with no whitespace separator.
-	err = dc.FromPayload(jsonPayload([]byte(base+`,"phrase":"helloworld"}`)), &out)
+	err = decodeValidation(jsonPayload([]byte(base+`,"phrase":"helloworld"}`)), &out)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "must match pattern")
+	require.Contains(t, validationText(err), "must match pattern")
 
 	// `\s` ASCII-class crux: a NBSP (U+00A0) is NOT ASCII whitespace, so the
 	// normalized `[\t\n\x0B\f\r ]` rejects it (JS's native Unicode `\s` would
 	// have accepted it — normalization makes Go/JS agree).
-	err = dc.FromPayload(jsonPayload([]byte(base+`,"phrase":"hello world"}`)), &out)
+	err = decodeValidation(jsonPayload([]byte(base+`,"phrase":"hello world"}`)), &out)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "must match pattern")
+	require.Contains(t, validationText(err), "must match pattern")
 
 	// `$` end-anchor crux: a trailing newline is rejected (Python/Java `$` would
 	// have matched before it — the per-target `\Z`/`\z` rewrite makes all four
 	// agree with Go/JS end-of-input `$`).
-	err = dc.FromPayload(jsonPayload([]byte(base+`,"phrase":"hello world\n"}`)), &out)
+	err = decodeValidation(jsonPayload([]byte(base+`,"phrase":"hello world\n"}`)), &out)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "must match pattern")
+	require.Contains(t, validationText(err), "must match pattern")
 
 	// Serialize side (P12): an in-memory off-pattern value fails to marshal.
 	bad := patterns
 	badSku := "xyz"
 	bad.Sku = &badSku
-	_, serr := dc.ToPayload(bad)
+	_, serr := json.Marshal(bad)
 	require.Error(t, serr)
-	require.Contains(t, serr.Error(), "must match pattern")
+	require.Contains(t, validationText(serr), "must match pattern")
 }
 
 // TestJSONSchemaShowcaseFormat round-trips the asserted string-`format` fields
@@ -258,24 +258,24 @@ func TestJSONSchemaShowcaseFormat(t *testing.T) {
 	var out showcase.Showcase
 
 	// A malformed uuid.
-	err := dc.FromPayload(jsonPayload([]byte(base+`,"requestId":"not-a-uuid"}`)), &out)
+	err := decodeValidation(jsonPayload([]byte(base+`,"requestId":"not-a-uuid"}`)), &out)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), `must be a valid uuid, got "not-a-uuid"`)
+	require.Contains(t, validationText(err), `must be a valid uuid, got "not-a-uuid"`)
 
 	// An email whose domain is a single label (user@localhost is rejected).
-	err = dc.FromPayload(jsonPayload([]byte(base+`,"contactEmail":"user@localhost"}`)), &out)
+	err = decodeValidation(jsonPayload([]byte(base+`,"contactEmail":"user@localhost"}`)), &out)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), `must be a valid email, got "user@localhost"`)
+	require.Contains(t, validationText(err), `must be a valid email, got "user@localhost"`)
 
 	// An ipv4 octet out of range.
-	err = dc.FromPayload(jsonPayload([]byte(base+`,"gateway":"256.0.0.1"}`)), &out)
+	err = decodeValidation(jsonPayload([]byte(base+`,"gateway":"256.0.0.1"}`)), &out)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), `must be a valid ipv4, got "256.0.0.1"`)
+	require.Contains(t, validationText(err), `must be a valid ipv4, got "256.0.0.1"`)
 
 	// A uri with a double-`::` IPv6 IP-literal host (spliced ipv6 grammar rejects).
-	err = dc.FromPayload(jsonPayload([]byte(base+`,"homepage":"http://[1::2::3]"}`)), &out)
+	err = decodeValidation(jsonPayload([]byte(base+`,"homepage":"http://[1::2::3]"}`)), &out)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "must be a valid uri")
+	require.Contains(t, validationText(err), "must be a valid uri")
 
 	// An over-long hostname (> 253 code points) is rejected by the length guard.
 	longHost := ""
@@ -285,17 +285,17 @@ func TestJSONSchemaShowcaseFormat(t *testing.T) {
 		}
 		longHost += "abc"
 	}
-	err = dc.FromPayload(jsonPayload([]byte(base+`,"host":"`+longHost+`"}`)), &out)
+	err = decodeValidation(jsonPayload([]byte(base+`,"host":"`+longHost+`"}`)), &out)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "must be a valid hostname")
+	require.Contains(t, validationText(err), "must be a valid hostname")
 
 	// Serialize side (P12): an in-memory malformed uuid fails to marshal.
 	bad := formats
 	badID := "nope"
 	bad.RequestId = &badID
-	_, serr := dc.ToPayload(bad)
+	_, serr := json.Marshal(bad)
 	require.Error(t, serr)
-	require.Contains(t, serr.Error(), `must be a valid uuid, got "nope"`)
+	require.Contains(t, validationText(serr), `must be a valid uuid, got "nope"`)
 }
 
 // TestJSONSchemaShowcaseContentEncoding round-trips the materialized
@@ -317,24 +317,24 @@ func TestJSONSchemaShowcaseContentEncoding(t *testing.T) {
 	var out showcase.Showcase
 
 	// A base64 value using the URL-safe alphabet is rejected by the pinned regex.
-	err := dc.FromPayload(jsonPayload([]byte(base+`,"blob":"Pj4-"}`)), &out)
+	err := decodeValidation(jsonPayload([]byte(base+`,"blob":"Pj4-"}`)), &out)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), `must be base64-encoded, got "Pj4-"`)
+	require.Contains(t, validationText(err), `must be base64-encoded, got "Pj4-"`)
 
 	// A base64 value missing padding is rejected.
-	err = dc.FromPayload(jsonPayload([]byte(base+`,"blob":"aGk"}`)), &out)
+	err = decodeValidation(jsonPayload([]byte(base+`,"blob":"aGk"}`)), &out)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "must be base64-encoded")
+	require.Contains(t, validationText(err), "must be base64-encoded")
 
 	// A base64url value carrying padding (standard alphabet) is rejected.
-	err = dc.FromPayload(jsonPayload([]byte(base+`,"urlBlob":"aGk="}`)), &out)
+	err = decodeValidation(jsonPayload([]byte(base+`,"urlBlob":"aGk="}`)), &out)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), `must be base64url-encoded, got "aGk="`)
+	require.Contains(t, validationText(err), `must be base64url-encoded, got "aGk="`)
 
 	// Embedded stray character is rejected.
-	err = dc.FromPayload(jsonPayload([]byte(base+`,"blob":"aGk!"}`)), &out)
+	err = decodeValidation(jsonPayload([]byte(base+`,"blob":"aGk!"}`)), &out)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "must be base64-encoded")
+	require.Contains(t, validationText(err), "must be base64-encoded")
 }
 
 // TestJSONSchemaShowcaseArrayConstraints round-trips the array-constrained
@@ -349,54 +349,54 @@ func TestJSONSchemaShowcaseArrayConstraints(t *testing.T) {
 
 	var out showcase.Showcase
 	// Too few tags (minItems:1).
-	err := dc.FromPayload(jsonPayload([]byte(base+`,"tags":[]}`)), &out)
+	err := decodeValidation(jsonPayload([]byte(base+`,"tags":[]}`)), &out)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "must have at least 1 items, got 0")
+	require.Contains(t, validationText(err), "must have at least 1 items, got 0")
 
 	// Too many tags (maxItems:5).
-	err = dc.FromPayload(jsonPayload([]byte(base+`,"tags":["a","b","c","d","e","f"]}`)), &out)
+	err = decodeValidation(jsonPayload([]byte(base+`,"tags":["a","b","c","d","e","f"]}`)), &out)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "must have at most 5 items, got 6")
+	require.Contains(t, validationText(err), "must have at most 5 items, got 6")
 
 	// Duplicate aliases (uniqueItems).
-	err = dc.FromPayload(jsonPayload([]byte(base+`,"aliases":["x","x"]}`)), &out)
+	err = decodeValidation(jsonPayload([]byte(base+`,"aliases":["x","x"]}`)), &out)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "duplicate items: element at index 1 equals index 0")
+	require.Contains(t, validationText(err), "duplicate items: element at index 1 equals index 0")
 
 	// Sibling array keywords inspect the original wire array even when every
 	// element fails `items` conversion.
-	err = dc.FromPayload(jsonPayload([]byte(base+`,"tags":[1]}`)), &out)
+	err = decodeValidation(jsonPayload([]byte(base+`,"tags":[1]}`)), &out)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "tags[0]")
-	require.NotContains(t, err.Error(), "must have at least 1 items")
-	err = dc.FromPayload(jsonPayload([]byte(base+`,"aliases":[1,2]}`)), &out)
+	require.Contains(t, validationText(err), "tags[0]")
+	require.NotContains(t, validationText(err), "must have at least 1 items")
+	err = decodeValidation(jsonPayload([]byte(base+`,"aliases":[1,2]}`)), &out)
 	require.Error(t, err)
-	require.NotContains(t, err.Error(), "duplicate items")
-	err = dc.FromPayload(jsonPayload([]byte(base+`,"aliases":[1,1]}`)), &out)
+	require.NotContains(t, validationText(err), "duplicate items")
+	err = decodeValidation(jsonPayload([]byte(base+`,"aliases":[1,1]}`)), &out)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "duplicate items: element at index 1 equals index 0")
-	err = dc.FromPayload(jsonPayload([]byte(base+`,"roles":[1,"admin"]}`)), &out)
+	require.Contains(t, validationText(err), "duplicate items: element at index 1 equals index 0")
+	err = decodeValidation(jsonPayload([]byte(base+`,"roles":[1,"admin"]}`)), &out)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "roles[0]")
-	require.NotContains(t, err.Error(), "too few matching items")
+	require.Contains(t, validationText(err), "roles[0]")
+	require.NotContains(t, validationText(err), "too few matching items")
 
 	// Missing required contains match (roles has no "admin").
-	err = dc.FromPayload(jsonPayload([]byte(base+`,"roles":["user"]}`)), &out)
+	err = decodeValidation(jsonPayload([]byte(base+`,"roles":["user"]}`)), &out)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "too few matching items: at least 1, got 0")
+	require.Contains(t, validationText(err), "too few matching items: at least 1, got 0")
 
 	// Too many contains matches (maxContains:2).
-	err = dc.FromPayload(jsonPayload([]byte(base+`,"roles":["admin","admin","admin"]}`)), &out)
+	err = decodeValidation(jsonPayload([]byte(base+`,"roles":["admin","admin","admin"]}`)), &out)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "too many matching items: at most 2, got 3")
+	require.Contains(t, validationText(err), "too many matching items: at most 2, got 3")
 
 	// Serialize side (P12): an in-memory duplicate fails to marshal.
 	valid := decodeFixture[showcase.Showcase](t, dc, "showcase", "showcase-full.json")
 	bad := valid
 	bad.Aliases = []string{"dup", "dup"}
-	_, serr := dc.ToPayload(bad)
+	_, serr := json.Marshal(bad)
 	require.Error(t, serr)
-	require.Contains(t, serr.Error(), "duplicate items: element at index 1 equals index 0")
+	require.Contains(t, validationText(serr), "duplicate items: element at index 1 equals index 0")
 }
 
 func TestJSONSchemaShowcaseNumberValueRoundTrip(t *testing.T) {
@@ -426,38 +426,38 @@ func TestJSONSchemaShowcaseObjectConstraints(t *testing.T) {
 
 	var attrs showcase.Attributes
 	// Too few members (minProperties:1) — an empty map.
-	err := dc.FromPayload(jsonPayload([]byte(`{}`)), &attrs)
+	err := decodeValidation(jsonPayload([]byte(`{}`)), &attrs)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "must have at least 1 properties, got 0")
+	require.Contains(t, validationText(err), "must have at least 1 properties, got 0")
 
 	// Too many members (maxProperties:3).
-	err = dc.FromPayload(jsonPayload([]byte(`{"a":"1","b":"2","c":"3","d":"4"}`)), &attrs)
+	err = decodeValidation(jsonPayload([]byte(`{"a":"1","b":"2","c":"3","d":"4"}`)), &attrs)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "must have at most 3 properties, got 4")
+	require.Contains(t, validationText(err), "must have at most 3 properties, got 4")
 
 	// An over-long key (propertyNames maxLength:8).
-	err = dc.FromPayload(jsonPayload([]byte(`{"toolongkey":"1"}`)), &attrs)
+	err = decodeValidation(jsonPayload([]byte(`{"toolongkey":"1"}`)), &attrs)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), `invalid property name "toolongkey": must have length <= 8, got 10`)
+	require.Contains(t, validationText(err), `invalid property name "toolongkey": must have length <= 8, got 10`)
 
 	var out showcase.ContactGo
 	// A shipping street present without a shipping zip (dependentRequired).
-	err = dc.FromPayload(jsonPayload([]byte(`{"shippingStreet":"1 Main St"}`)), &out)
+	err = decodeValidation(jsonPayload([]byte(`{"shippingStreet":"1 Main St"}`)), &out)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), `property "shippingZip" is required when "shippingStreet" is present`)
+	require.Contains(t, validationText(err), `property "shippingZip" is required when "shippingStreet" is present`)
 
 	// An empty contact object is below minProperties:1.
-	err = dc.FromPayload(jsonPayload([]byte(`{}`)), &out)
+	err = decodeValidation(jsonPayload([]byte(`{}`)), &out)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "must have at least 1 properties, got 0")
+	require.Contains(t, validationText(err), "must have at least 1 properties, got 0")
 
 	// Serialize side (P12): an in-memory Contact with a shipping street but no
 	// zip fails to marshal.
 	street := "1 Main St"
 	badContact := showcase.ContactGo{ShippingStreet: &street}
-	_, serr := dc.ToPayload(badContact)
+	_, serr := json.Marshal(badContact)
 	require.Error(t, serr)
-	require.Contains(t, serr.Error(), `property "shippingZip" is required when "shippingStreet" is present`)
+	require.Contains(t, validationText(serr), `property "shippingZip" is required when "shippingStreet" is present`)
 }
 
 // TestJSONSchemaShowcaseAllOfMerge round-trips the Widget type, produced by an
@@ -479,26 +479,26 @@ func TestJSONSchemaShowcaseAllOfMerge(t *testing.T) {
 	base := `{"id":"w-1","name":"Widget One"`
 	var out showcase.Widget
 	// A size below the merged (tightened) minimum 10 is rejected.
-	err := dc.FromPayload(jsonPayload([]byte(base+`,"size":5}`)), &out)
+	err := decodeValidation(jsonPayload([]byte(base+`,"size":5}`)), &out)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "must be >= 10, got 5")
+	require.Contains(t, validationText(err), "must be >= 10, got 5")
 
 	// A size above the merged (tightened) maximum 20 is rejected.
-	err = dc.FromPayload(jsonPayload([]byte(base+`,"size":25}`)), &out)
+	err = decodeValidation(jsonPayload([]byte(base+`,"size":25}`)), &out)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "must be <= 20, got 25")
+	require.Contains(t, validationText(err), "must be <= 20, got 25")
 
 	// A missing required member contributed by the extension branch is rejected.
-	err = dc.FromPayload(jsonPayload([]byte(`{"id":"w-1"}`)), &out)
+	err = decodeValidation(jsonPayload([]byte(`{"id":"w-1"}`)), &out)
 	require.Error(t, err)
 
 	// Serialize side (P12): an in-memory value past the tightened bound fails.
 	bad := widget
 	badSize := int64(25)
 	bad.Size = &badSize
-	_, serr := dc.ToPayload(bad)
+	_, serr := json.Marshal(bad)
 	require.Error(t, serr)
-	require.Contains(t, serr.Error(), "must be <= 20, got 25")
+	require.Contains(t, validationText(serr), "must be <= 20, got 25")
 }
 
 // TestJSONSchemaShowcaseClosedValues round-trips the closed value-set fields
@@ -520,36 +520,36 @@ func TestJSONSchemaShowcaseClosedValues(t *testing.T) {
 	var out showcase.Showcase
 
 	// Wrong integer const value.
-	err := dc.FromPayload(jsonPayload([]byte(base+`,"revision":2}`)), &out)
+	err := decodeValidation(jsonPayload([]byte(base+`,"revision":2}`)), &out)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "must equal 1")
+	require.Contains(t, validationText(err), "must equal 1")
 
 	// Wrong boolean const value.
-	err = dc.FromPayload(jsonPayload([]byte(base+`,"enabled":false}`)), &out)
+	err = decodeValidation(jsonPayload([]byte(base+`,"enabled":false}`)), &out)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "must equal true")
+	require.Contains(t, validationText(err), "must equal true")
 
 	// Out-of-set string enum.
-	err = dc.FromPayload(jsonPayload([]byte(base+`,"status":"archived"}`)), &out)
+	err = decodeValidation(jsonPayload([]byte(base+`,"status":"archived"}`)), &out)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), `must be one of ["active","inactive","pending"], got "archived"`)
+	require.Contains(t, validationText(err), `must be one of ["active","inactive","pending"], got "archived"`)
 
 	// Out-of-set integer enum.
-	err = dc.FromPayload(jsonPayload([]byte(base+`,"tier":9}`)), &out)
+	err = decodeValidation(jsonPayload([]byte(base+`,"tier":9}`)), &out)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "must be one of [1,2,3], got 9")
+	require.Contains(t, validationText(err), "must be one of [1,2,3], got 9")
 
 	// Out-of-set number enum (float exactness).
-	err = dc.FromPayload(jsonPayload([]byte(base+`,"scale":3.5}`)), &out)
+	err = decodeValidation(jsonPayload([]byte(base+`,"scale":3.5}`)), &out)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "must be one of [1.5,2.5], got 3.5")
+	require.Contains(t, validationText(err), "must be one of [1.5,2.5], got 3.5")
 
 	// Serialize side (P12): a zero-value / mutated closed field fails to marshal.
 	bad := full
 	bad.Status = showcase.ShowcaseStatus("archived")
-	_, serr := dc.ToPayload(bad)
+	_, serr := json.Marshal(bad)
 	require.Error(t, serr)
-	require.Contains(t, serr.Error(), `must be one of ["active","inactive","pending"], got "archived"`)
+	require.Contains(t, validationText(serr), `must be one of ["active","inactive","pending"], got "archived"`)
 }
 
 // TestJSONSchemaShowcaseUnions round-trips each branch of the two showcase
@@ -587,24 +587,24 @@ func TestJSONSchemaShowcaseUnions(t *testing.T) {
 
 	// Disjoint-kind union: an unmatchable token (boolean) is rejected naming the
 	// admissible kinds.
-	err := dc.FromPayload(jsonPayload([]byte(base+`,"idOrName":true}`)), &out)
+	err := decodeValidation(jsonPayload([]byte(base+`,"idOrName":true}`)), &out)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "idOrName")
-	require.Contains(t, err.Error(), "string")
-	require.Contains(t, err.Error(), "integer")
+	require.Contains(t, validationText(err), "idOrName")
+	require.Contains(t, validationText(err), "string")
+	require.Contains(t, validationText(err), "integer")
 
 	// Tagged union: an unknown discriminator value is rejected naming the
 	// admissible values (closed value set, P13.1).
-	err = dc.FromPayload(jsonPayload([]byte(base+`,"shape":{"kind":"triangle"}}`)), &out)
+	err = decodeValidation(jsonPayload([]byte(base+`,"shape":{"kind":"triangle"}}`)), &out)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "shape")
-	require.Contains(t, err.Error(), "triangle")
-	require.Contains(t, err.Error(), "circle")
+	require.Contains(t, validationText(err), "shape")
+	require.Contains(t, validationText(err), "triangle")
+	require.Contains(t, validationText(err), "circle")
 
 	// Tagged union: an absent discriminator is rejected (it is required).
-	err = dc.FromPayload(jsonPayload([]byte(base+`,"shape":{"radius":1}}`)), &out)
+	err = decodeValidation(jsonPayload([]byte(base+`,"shape":{"radius":1}}`)), &out)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "shape")
+	require.Contains(t, validationText(err), "shape")
 }
 
 // TestJSONSchemaShowcaseBranchConstraints asserts that once the token selects a
@@ -618,21 +618,21 @@ func TestJSONSchemaShowcaseBranchConstraints(t *testing.T) {
 	var out showcase.Showcase
 
 	// The selected string branch's own `minLength`.
-	err := dc.FromPayload(jsonPayload([]byte(base+`,"idOrName":"ab"}`)), &out)
+	err := decodeValidation(jsonPayload([]byte(base+`,"idOrName":"ab"}`)), &out)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "idOrName: must have length >= 3, got 2")
+	require.Contains(t, validationText(err), "idOrName: must have length >= 3, got 2")
 
 	// The selected integer branch's own `minimum` — the other branch's
 	// constraints are irrelevant to it.
-	err = dc.FromPayload(jsonPayload([]byte(base+`,"idOrName":0}`)), &out)
+	err = decodeValidation(jsonPayload([]byte(base+`,"idOrName":0}`)), &out)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "idOrName: must be >= 1, got 0")
+	require.Contains(t, validationText(err), "idOrName: must be >= 1, got 0")
 
 	// A closed value set on a branch: an unknown string is rejected naming the
 	// admissible values, while the integer branch stays unbounded above.
-	err = dc.FromPayload(jsonPayload([]byte(base+`,"mode":"turbo"}`)), &out)
+	err = decodeValidation(jsonPayload([]byte(base+`,"mode":"turbo"}`)), &out)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), `mode: must be one of ["auto","manual"], got "turbo"`)
+	require.Contains(t, validationText(err), `mode: must be one of ["auto","manual"], got "turbo"`)
 	mode := roundTripJSONEq[showcase.Showcase](t, dc, "showcase", "showcase-full.json")
 	require.Equal(t, showcase.ShowcaseModeString("auto"), mode.Mode)
 
@@ -640,15 +640,15 @@ func TestJSONSchemaShowcaseBranchConstraints(t *testing.T) {
 	// member violating its own branch is rejected before any bytes are written.
 	invalid := mode
 	invalid.IdOrName = showcase.ShowcaseIdOrNameString("ab")
-	_, err = dc.ToPayload(invalid)
+	_, err = json.Marshal(invalid)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "idOrName: must have length >= 3, got 2")
+	require.Contains(t, validationText(err), "idOrName: must have length >= 3, got 2")
 
 	invalid = mode
 	invalid.Mode = showcase.ShowcaseModeInteger(-1)
-	_, err = dc.ToPayload(invalid)
+	_, err = json.Marshal(invalid)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "mode: must be >= 0, got -1")
+	require.Contains(t, validationText(err), "mode: must be >= 0, got -1")
 }
 
 // TestJSONSchemaShowcaseFreeFormObject round-trips the free-form object in both
@@ -678,12 +678,12 @@ func TestJSONSchemaShowcaseFreeFormObject(t *testing.T) {
 
 	// maxProperties over the member set is enforced on parse…
 	var tooMany showcase.Extras
-	err := dc.FromPayload(jsonPayload([]byte(`{"a":1,"b":2,"c":3,"d":4,"e":5}`)), &tooMany)
+	err := decodeValidation(jsonPayload([]byte(`{"a":1,"b":2,"c":3,"d":4,"e":5}`)), &tooMany)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "at most 4 properties")
+	require.Contains(t, validationText(err), "at most 4 properties")
 
 	// …and on serialize (P12).
-	_, err = dc.ToPayload(showcase.Extras{AdditionalProperties: map[string]json.RawMessage{
+	_, err = json.Marshal(showcase.Extras{AdditionalProperties: map[string]json.RawMessage{
 		"a": json.RawMessage("1"),
 		"b": json.RawMessage("2"),
 		"c": json.RawMessage("3"),
@@ -691,15 +691,15 @@ func TestJSONSchemaShowcaseFreeFormObject(t *testing.T) {
 		"e": json.RawMessage("5"),
 	}})
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "at most 4 properties")
+	require.Contains(t, validationText(err), "at most 4 properties")
 
 	// An unmatchable token for the union is rejected naming the admissible kinds.
 	base := `{"kind":"showcase","revision":1,"enabled":true,"status":"active","tier":1,"scale":1.5,"name":"w","count":1,"active":true,"category":"tools"`
 	var out showcase.Showcase
-	err = dc.FromPayload(jsonPayload([]byte(base+`,"payload":true}`)), &out)
+	err = decodeValidation(jsonPayload([]byte(base+`,"payload":true}`)), &out)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "payload")
-	require.Contains(t, err.Error(), "ShowcasePayloadObject")
+	require.Contains(t, validationText(err), "payload")
+	require.Contains(t, validationText(err), "ShowcasePayloadObject")
 }
 
 // TestJSONSchemaShowcaseInlineObjectUnion round-trips the `note` tagged union,
@@ -726,23 +726,23 @@ func TestJSONSchemaShowcaseInlineObjectUnion(t *testing.T) {
 	var out showcase.Showcase
 
 	// The branch's own constraints are enforced once the tag selects it.
-	err := dc.FromPayload(jsonPayload([]byte(base+`,"note":{"kind":"text","body":""}}`)), &out)
+	err := decodeValidation(jsonPayload([]byte(base+`,"note":{"kind":"text","body":""}}`)), &out)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "note.body")
-	require.Contains(t, err.Error(), "length >= 1")
+	require.Contains(t, validationText(err), "note.body")
+	require.Contains(t, validationText(err), "length >= 1")
 
 	// An unknown tag value is rejected naming the admissible values.
-	err = dc.FromPayload(jsonPayload([]byte(base+`,"note":{"kind":"audio"}}`)), &out)
+	err = decodeValidation(jsonPayload([]byte(base+`,"note":{"kind":"audio"}}`)), &out)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "note")
-	require.Contains(t, err.Error(), "audio")
+	require.Contains(t, validationText(err), "note")
+	require.Contains(t, validationText(err), "audio")
 
 	// Serialize re-runs the selected branch's constraints (P12).
 	invalid := link
 	invalid.Note = showcase.LinkNote{Kind: showcase.LinkNoteKindLink, Href: ""}
-	_, err = dc.ToPayload(invalid)
+	_, err = json.Marshal(invalid)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "note.href")
+	require.Contains(t, validationText(err), "note.href")
 }
 
 // TestJSONSchemaShowcasePropertyInlineObjectUnion round-trips `detail`, a union
@@ -767,23 +767,23 @@ func TestJSONSchemaShowcasePropertyInlineObjectUnion(t *testing.T) {
 	var out showcase.Showcase
 
 	// The object branch's own constraints are enforced.
-	err := dc.FromPayload(jsonPayload([]byte(base+`,"detail":{"code":""}}`)), &out)
+	err := decodeValidation(jsonPayload([]byte(base+`,"detail":{"code":""}}`)), &out)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "detail.code")
-	require.Contains(t, err.Error(), "length >= 1")
+	require.Contains(t, validationText(err), "detail.code")
+	require.Contains(t, validationText(err), "length >= 1")
 
 	// A token admitted by no branch names the admissible ones.
-	err = dc.FromPayload(jsonPayload([]byte(base+`,"detail":7}`)), &out)
+	err = decodeValidation(jsonPayload([]byte(base+`,"detail":7}`)), &out)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "detail")
-	require.Contains(t, err.Error(), "ShowcaseDetailObject")
+	require.Contains(t, validationText(err), "detail")
+	require.Contains(t, validationText(err), "ShowcaseDetailObject")
 
 	// Serialize re-runs the selected branch's constraints (P12).
 	invalid := object
 	invalid.Detail = showcase.ShowcaseDetailObject{Code: ""}
-	_, err = dc.ToPayload(invalid)
+	_, err = json.Marshal(invalid)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "detail.code")
+	require.Contains(t, validationText(err), "detail.code")
 }
 
 // TestJSONSchemaShowcaseTaggedUnionWithScalarBranch round-trips `shapeOrName`, a
@@ -808,24 +808,24 @@ func TestJSONSchemaShowcaseTaggedUnionWithScalarBranch(t *testing.T) {
 
 	// The object token routes through the discriminator, so an unknown tag is
 	// rejected rather than falling back to the string branch.
-	err := dc.FromPayload(jsonPayload([]byte(base+`,"shapeOrName":{"kind":"triangle"}}`)), &out)
+	err := decodeValidation(jsonPayload([]byte(base+`,"shapeOrName":{"kind":"triangle"}}`)), &out)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "shapeOrName")
-	require.Contains(t, err.Error(), "triangle")
-	require.Contains(t, err.Error(), "square")
+	require.Contains(t, validationText(err), "shapeOrName")
+	require.Contains(t, validationText(err), "triangle")
+	require.Contains(t, validationText(err), "square")
 
 	// A token admitted by no branch names all admissible ones.
-	err = dc.FromPayload(jsonPayload([]byte(base+`,"shapeOrName":7}`)), &out)
+	err = decodeValidation(jsonPayload([]byte(base+`,"shapeOrName":7}`)), &out)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "shapeOrName")
-	require.Contains(t, err.Error(), "Circle, Square, string")
+	require.Contains(t, validationText(err), "shapeOrName")
+	require.Contains(t, validationText(err), "Circle, Square, string")
 
 	// Serialize re-runs the selected branch's constraints (P12).
 	invalid := square
 	invalid.ShapeOrName = showcase.Square{Kind: showcase.SquareKind("hexagon")}
-	_, err = dc.ToPayload(invalid)
+	_, err = json.Marshal(invalid)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "shapeOrName.kind")
+	require.Contains(t, validationText(err), "shapeOrName.kind")
 }
 
 // TestJSONSchemaShowcaseArrayBranchUnion round-trips `measurements`, a union with
@@ -845,16 +845,16 @@ func TestJSONSchemaShowcaseArrayBranchUnion(t *testing.T) {
 	var out showcase.Showcase
 
 	// A token admitted by neither branch names both admissible kinds.
-	err := dc.FromPayload(jsonPayload([]byte(base+`,"measurements":true}`)), &out)
+	err := decodeValidation(jsonPayload([]byte(base+`,"measurements":true}`)), &out)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "measurements")
-	require.Contains(t, err.Error(), "[]float64, string")
+	require.Contains(t, validationText(err), "measurements")
+	require.Contains(t, validationText(err), "[]float64, string")
 
 	// The array branch's element type is enforced: a string element is not a
 	// number.
-	err = dc.FromPayload(jsonPayload([]byte(base+`,"measurements":["x"]}`)), &out)
+	err = decodeValidation(jsonPayload([]byte(base+`,"measurements":["x"]}`)), &out)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "measurements")
+	require.Contains(t, validationText(err), "measurements")
 }
 
 // TestJSONSchemaShowcaseElementUnions round-trips the union positions that are
@@ -903,34 +903,34 @@ func TestJSONSchemaShowcaseElementUnions(t *testing.T) {
 	var out showcase.Showcase
 
 	// A bad element is reported at its own index, not at the array.
-	err := dc.FromPayload(jsonPayload([]byte(base+`,"shapes":[{"kind":"circle","radius":1},true]}`)), &out)
+	err := decodeValidation(jsonPayload([]byte(base+`,"shapes":[{"kind":"circle","radius":1},true]}`)), &out)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "shapes[1]")
-	require.Contains(t, err.Error(), "Circle, Square")
+	require.Contains(t, validationText(err), "shapes[1]")
+	require.Contains(t, validationText(err), "Circle, Square")
 
 	// An unknown discriminator inside an element is still routed by tag.
-	err = dc.FromPayload(jsonPayload([]byte(base+`,"shapes":[{"kind":"triangle"}]}`)), &out)
+	err = decodeValidation(jsonPayload([]byte(base+`,"shapes":[{"kind":"triangle"}]}`)), &out)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "shapes[0]")
-	require.Contains(t, err.Error(), "triangle")
+	require.Contains(t, validationText(err), "shapes[0]")
+	require.Contains(t, validationText(err), "triangle")
 
 	// The inline element union is a closed sum type like any other.
-	err = dc.FromPayload(jsonPayload([]byte(base+`,"segments":["ok",1.5]}`)), &out)
+	err = decodeValidation(jsonPayload([]byte(base+`,"segments":["ok",1.5]}`)), &out)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "segments[1]")
+	require.Contains(t, validationText(err), "segments[1]")
 
 	// A map member's violation carries its key.
-	err = dc.FromPayload(jsonPayload([]byte(base+`,"choices":{"primary":"circle"}}`)), &out)
+	err = decodeValidation(jsonPayload([]byte(base+`,"choices":{"primary":"circle"}}`)), &out)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "primary")
-	require.Contains(t, err.Error(), "Circle, Square")
+	require.Contains(t, validationText(err), "primary")
+	require.Contains(t, validationText(err), "Circle, Square")
 
 	// Serialize re-runs each element's own branch constraints (P12).
 	invalid := value
 	invalid.Shapes = []showcase.Shape{showcase.Square{Kind: showcase.SquareKind("hexagon")}}
-	_, err = dc.ToPayload(invalid)
+	_, err = json.Marshal(invalid)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "shapes[0].kind")
+	require.Contains(t, validationText(err), "shapes[0].kind")
 }
 
 // TestJSONSchemaShowcaseInlineShapes round-trips the object shapes the schema
@@ -971,48 +971,48 @@ func TestJSONSchemaShowcaseInlineShapes(t *testing.T) {
 
 	// A hoisted shape validates like any other model: its member constraints and
 	// its required members are enforced, at the nested path.
-	err := dc.FromPayload(jsonPayload([]byte(base+`,"location":{"city":""}}`)), &out)
+	err := decodeValidation(jsonPayload([]byte(base+`,"location":{"city":""}}`)), &out)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "location.city")
+	require.Contains(t, validationText(err), "location.city")
 
 	// An element's own model validates too, at its fully indexed member path.
-	err = dc.FromPayload(jsonPayload([]byte(base+`,"rows":[{"cell":"ok"},{}]}`)), &out)
+	err = decodeValidation(jsonPayload([]byte(base+`,"rows":[{"cell":"ok"},{}]}`)), &out)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "rows[1].cell")
+	require.Contains(t, validationText(err), "rows[1].cell")
 
 	// A typed map's member constraints are enforced, keyed by the member.
-	err = dc.FromPayload(jsonPayload([]byte(base+`,"quotas":{"cpu":7}}`)), &out)
+	err = decodeValidation(jsonPayload([]byte(base+`,"quotas":{"cpu":7}}`)), &out)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "cpu")
-	require.Contains(t, err.Error(), "multiple of 5")
+	require.Contains(t, validationText(err), "cpu")
+	require.Contains(t, validationText(err), "multiple of 5")
 
-	err = dc.FromPayload(jsonPayload([]byte(base+`,"tokens":{"primary":"AB"}}`)), &out)
+	err = decodeValidation(jsonPayload([]byte(base+`,"tokens":{"primary":"AB"}}`)), &out)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "primary")
+	require.Contains(t, validationText(err), "primary")
 
 	// A null member of a nullable map is a member, not a violation; a present one
 	// still carries its constraint.
-	err = dc.FromPayload(jsonPayload([]byte(base+`,"nicknames":{"tiny":"a"}}`)), &out)
+	err = decodeValidation(jsonPayload([]byte(base+`,"nicknames":{"tiny":"a"}}`)), &out)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "tiny")
+	require.Contains(t, validationText(err), "tiny")
 
 	// The free-form bag's member-count bound rides with the hoisted type.
-	err = dc.FromPayload(jsonPayload([]byte(base+`,"metadata":{"a":1,"b":2,"c":3,"d":4}}`)), &out)
+	err = decodeValidation(jsonPayload([]byte(base+`,"metadata":{"a":1,"b":2,"c":3,"d":4}}`)), &out)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "at most 3")
+	require.Contains(t, validationText(err), "at most 3")
 
 	// Serialize re-runs every member's own constraints before emitting (P12).
 	invalid := value
 	invalid.Quotas = &showcase.Quotas{AdditionalProperties: map[string]int64{"cpu": 7}}
-	_, err = dc.ToPayload(invalid)
+	_, err = json.Marshal(invalid)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "cpu")
+	require.Contains(t, validationText(err), "cpu")
 
 	invalid = value
 	invalid.Tokens = &showcase.Tokens{AdditionalProperties: map[string]string{"primary": "AB"}}
-	_, err = dc.ToPayload(invalid)
+	_, err = json.Marshal(invalid)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "primary")
+	require.Contains(t, validationText(err), "primary")
 }
 
 // TestJSONSchemaShowcaseRecursiveCollections exercises the same recursive
@@ -1034,22 +1034,22 @@ func TestJSONSchemaShowcaseRecursiveCollections(t *testing.T) {
 
 	base := `{"kind":"showcase","revision":1,"enabled":true,"status":"active","tier":1,"scale":1.5,"name":"w","count":1,"active":true,"category":"tools"`
 	var out showcase.Showcase
-	err := dc.FromPayload(jsonPayload([]byte(base+`,"slots":["x"],"links":["not a uri"]}`)), &out)
+	err := decodeValidation(jsonPayload([]byte(base+`,"slots":["x"],"links":["not a uri"]}`)), &out)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "slots[0]")
-	require.Contains(t, err.Error(), "links[0]")
+	require.Contains(t, validationText(err), "slots[0]")
+	require.Contains(t, validationText(err), "links[0]")
 
 	for literal, want := range map[string]int64{
 		"1": 1, "1.0": 1, "1e2": 100, "1.5e1": 15,
 	} {
-		err = dc.FromPayload(jsonPayload([]byte(base+`,"count":`+literal+`}`)), &out)
+		err = decodeValidation(jsonPayload([]byte(base+`,"count":`+literal+`}`)), &out)
 		require.NoError(t, err, literal)
 		require.Equal(t, want, out.Count, literal)
 	}
 	for _, literal := range []string{"1.5", "9007199254740992"} {
-		err = dc.FromPayload(jsonPayload([]byte(base+`,"count":`+literal+`}`)), &out)
+		err = decodeValidation(jsonPayload([]byte(base+`,"count":`+literal+`}`)), &out)
 		require.Error(t, err, literal)
-		require.Contains(t, err.Error(), "count", literal)
+		require.Contains(t, validationText(err), "count", literal)
 	}
 
 	nonFinite := math.Inf(1)
@@ -1076,10 +1076,10 @@ func TestJSONSchemaShowcaseRecursiveCollections(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			invalid := value
 			tc.edit(&invalid)
-			_, err := dc.ToPayload(invalid)
+			_, err := json.Marshal(invalid)
 			require.Error(t, err)
-			require.Contains(t, err.Error(), tc.path)
-			require.Contains(t, err.Error(), "finite number")
+			require.Contains(t, validationText(err), tc.path)
+			require.Contains(t, validationText(err), "finite number")
 		})
 	}
 }

@@ -2,5 +2,5 @@
 
 export * from "./services";
 export * from "./models";
-export { ValidationError } from "./definitions";
+export { payloadValidationError } from "./definitions";
 export type { Violation } from "./definitions";

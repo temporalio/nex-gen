@@ -1307,16 +1307,21 @@ fn java_json_repaths_nested_violations_on_serialize() {
     .unwrap();
 
     let rendered = read_java_files(&output_path);
+    assert!(!rendered.contains_key(&PathBuf::from("PayloadValidationError.java")));
     let model = &rendered[&PathBuf::from("NestedPath.java")];
     let serializer = model.split("class Serializer").nth(1).unwrap();
     let serializer = serializer.split("class Deserializer").next().unwrap();
     for expected in [
-        "} catch (ValidationException nested0) {",
+        "} catch (ApplicationFailure nested0) {",
+        "if (!\"PayloadValidationError\".equals(nested0.getType()) || nested0.getDetails().getSize() == 0) {",
+        "List<Violation> nestedViolations0 = (List<Violation>) nested0.getDetails().get(0, List.class);",
+        "for (Violation nestedViolation0 : nestedViolations0) {",
         "violations.add(nestedViolation0.withPathPrefix(\"address\"));",
         "violations.add(nestedViolation1.withPathPrefix(\"addresses\" + \"[\" + nestedIndex0 + \"]\"));",
         // The throw moved past the write so a nested failure joins the parent's
         // own violations rather than escaping alone.
-        "throw new ValidationException(violations);",
+        "// TODO: Use PayloadValidationException.newPayloadValidationException once it is available in an SDK release.",
+        "throw ApplicationFailure.newNonRetryableFailure(\"Payload validation failed\", \"PayloadValidationError\", violations);",
     ] {
         assert!(serializer.contains(expected), "{expected}\n{serializer}");
     }

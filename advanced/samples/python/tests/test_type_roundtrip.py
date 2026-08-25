@@ -204,8 +204,12 @@ def test_failure_encoded_attributes_round_trip() -> None:
         type_roundtrip_models.FailureContainer,
         "__temporal_transfer_type_converter",
     )
+    user_converters = temporalio.nexus.system._SystemNexusUserConverters(
+        payload_converter,
+        temporalio.converter.FailureConverter.default,
+    )
 
-    with temporalio.nexus.system._user_payload_converter_context(payload_converter):
+    with temporalio.nexus.system._user_converter_context(user_converters):
         model = converter.from_transfer_type(
             proto,
             type_roundtrip_models.FailureContainer,
@@ -220,7 +224,7 @@ def test_failure_encoded_attributes_round_trip() -> None:
     assert round_tripped.failure.message == "decoded failure"
     assert round_tripped.failure.application_failure_info.type == "EncodedFailure"
 
-    with temporalio.nexus.system._user_payload_converter_context(payload_converter):
+    with temporalio.nexus.system._user_converter_context(user_converters):
         absent = converter.from_transfer_type(
             temporalio.api.command.v1.FailWorkflowExecutionCommandAttributes(),
             type_roundtrip_models.FailureContainer,

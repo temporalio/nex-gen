@@ -2,10 +2,7 @@
 
 from __future__ import annotations
 
-from ._definitions import (
-    ValidationError,
-    Violation,
-)
+from ._definitions import Violation
 from .models import (
     Address,
     AddressBook,
@@ -45,7 +42,6 @@ from .models import (
 from .services import ShowcaseServicePy
 
 __all__ = [
-    "ValidationError",
     "Violation",
     "Address",
     "AddressBook",

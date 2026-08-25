@@ -61,7 +61,6 @@ func TestJSONSchemaTemporalNulls(t *testing.T) {
 // rejects the values the materialized grammar narrows away: leap second :60, a
 // calendar (non-time-only) duration, and an invalid calendar date.
 func TestJSONSchemaTemporalMaterializedNarrowing(t *testing.T) {
-	dc := converter.GetDefaultDataConverter()
 	base := `{"createdAt":%q,"birthday":%q,"alarm":%q,"timeout":%q}`
 	cases := []struct {
 		name                                      string
@@ -78,14 +77,14 @@ func TestJSONSchemaTemporalMaterializedNarrowing(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			body := []byte(fmt.Sprintf(base, tc.createdAt, tc.birthday, tc.alarm, tc.timeout))
 			var out temporal.Temporal
-			err := dc.FromPayload(jsonPayload(body), &out)
+			err := decodeValidation(jsonPayload(body), &out)
 			require.Error(t, err)
-			require.Contains(t, err.Error(), tc.want)
+			require.Contains(t, validationText(err), tc.want)
 		})
 	}
 
 	var firstYear temporal.Temporal
-	err := dc.FromPayload(
+	err := decodeValidation(
 		jsonPayload([]byte(`{"createdAt":"0001-01-01T00:00:00Z","birthday":"0001-01-01","alarm":"00:00:00","timeout":"PT0S"}`)),
 		&firstYear,
 	)

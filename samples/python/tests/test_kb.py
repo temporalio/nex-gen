@@ -3,6 +3,7 @@ from __future__ import annotations
 import typing
 
 import pytest
+import temporalio.exceptions
 
 from kb import Block
 from kb import Category
@@ -10,7 +11,6 @@ from kb import GetCategoryTreeInput
 from kb import GetPageInput
 from kb import Page
 from kb import PutBlockOutput
-from kb import ValidationError
 
 from tests.json_converter_helper import (
     canonical_fixture_bytes,
@@ -106,7 +106,7 @@ def test_nested_violations_carry_the_parent_path() -> None:
     # A nested `$ref` re-paths its violations under the parent member, and the
     # element index rides along for an array of models (P11 aggregation across
     # two different sub-objects of one payload).
-    with pytest.raises(ValidationError) as excinfo:
+    with pytest.raises(temporalio.exceptions.ApplicationError) as excinfo:
         _ = converter_for(Page).from_transfer_type(
             {
                 "pageId": "page-1",
@@ -123,7 +123,7 @@ def test_nested_violations_carry_the_parent_path() -> None:
 
 
 def test_numeric_bound_on_a_nested_member() -> None:
-    with pytest.raises(ValidationError) as excinfo:
+    with pytest.raises(temporalio.exceptions.ApplicationError) as excinfo:
         _ = converter_for(Block).from_transfer_type(
             {"blockId": "block-1", "order": -1}, Block
         )

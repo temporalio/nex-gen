@@ -66,10 +66,10 @@ comparison:
 
 | Language | Strategy |
 |---|---|
-| Go | `if v < min { push(Violation{Reason: fmt.Sprintf("must be >= %v, got %v", min, v)}) }` — a predicate in the shared `Validate`, which `UnmarshalJSON` calls after decoding, collecting into one `ValidationError`. Integer field compares `int64`; number field compares `float64`. |
-| TypeScript | ``if (v < min) push(Violation{path, reason: `must be >= ${min}, got ${v}`})``, throw one `ValidationError`. |
-| Python | `if v < min: violations.append(Violation(path=…, reason=f"must be >= {min}, got {v}"))` in the transfer type converter, run after `_parse_spec_integer` normalizes an integer field's wire value (`0.0`→`0`, see [[type]]); aggregates into the single generated `ValidationError`. |
-| Java | The per-POJO collecting deserializer (PRINCIPLES Java §5) reads the node via the [[type]] `SpecNumbers` helper and checks `v < min` (`long`/`double`), pushing a `Violation{path, "must be >= " + min + ", got " + v}` into the single `ValidationException`. Not bean-validation `@Min`. |
+| Go | `if v < min { push(Violation{Reason: fmt.Sprintf("must be >= %v, got %v", min, v)}) }` — a predicate in the shared `Validate`, which `UnmarshalJSON` calls after decoding, collecting into one `PayloadValidationError` application failure. Integer field compares `int64`; number field compares `float64`. |
+| TypeScript | ``if (v < min) push(Violation{path, reason: `must be >= ${min}, got ${v}`})``, throw one `PayloadValidationError` application failure. |
+| Python | `if v < min: violations.append(Violation(path=…, reason=f"must be >= {min}, got {v}"))` in the transfer type converter, run after `_parse_spec_integer` normalizes an integer field's wire value (`0.0`→`0`, see [[type]]); aggregates into the single generated `PayloadValidationError` application failure. |
+| Java | The per-POJO collecting deserializer (PRINCIPLES Java §5) reads the node via the [[type]] `SpecNumbers` helper and checks `v < min` (`long`/`double`), pushing a `Violation{path, "must be >= " + min + ", got " + v}` into the single `PayloadValidationError` application failure. Not bean-validation `@Min`. |
 
 Reason strings name the concrete bound and offending value
 (`must be >= 0, got -1`), per the [[maximum]] convention.
@@ -107,7 +107,7 @@ than being written. See [[maximum]] serialize note (symmetric).
 
 - `v == min` → OK (`≥` inclusive).
 - `v == min-1` (integer) / just below `min` (number) → one
-  `ValidationError` whose reason names the bound and value
+  `PayloadValidationError` application failure whose reason names the bound and value
   (`must be >= 0, got -1`).
 - Combined with other failing assertions → all reported in one shot (P11).
 - Serialize of an in-memory value below `min` → rejected before emit (P12).

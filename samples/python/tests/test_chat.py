@@ -1,6 +1,7 @@
 import typing
 
 import pytest
+import temporalio.exceptions
 
 from chat import (
     Labels,
@@ -8,7 +9,6 @@ from chat import (
     Room,
     SendMessageInput,
     SendMessageOutput,
-    ValidationError,
 )
 
 from tests.json_converter_helper import (
@@ -49,7 +49,7 @@ def test_optional_non_nullable_members_reject_explicit_null() -> None:
     # `members` and `labels` are optional and NON-nullable, so an explicit null is
     # a violation — and both are reported from the one payload (P11 aggregation),
     # in declared-property order.
-    with pytest.raises(ValidationError) as excinfo:
+    with pytest.raises(temporalio.exceptions.ApplicationError) as excinfo:
         _ = converter.from_transfer_type(
             {
                 "roomId": "room-1",
@@ -68,7 +68,7 @@ def test_optional_non_nullable_members_reject_explicit_null() -> None:
 
 def test_required_members_and_unknown_fields_aggregate() -> None:
     # A closed object reports every structural problem at once.
-    with pytest.raises(ValidationError) as excinfo:
+    with pytest.raises(temporalio.exceptions.ApplicationError) as excinfo:
         _ = converter_for(SendMessageInput).from_transfer_type(
             {"extra": True}, SendMessageInput
         )
@@ -78,7 +78,7 @@ def test_required_members_and_unknown_fields_aggregate() -> None:
         ("extra", "unknown field"),
     ]
 
-    with pytest.raises(ValidationError) as excinfo:
+    with pytest.raises(temporalio.exceptions.ApplicationError) as excinfo:
         _ = converter_for(SendMessageOutput).from_transfer_type({}, SendMessageOutput)
     assert violation_pairs(excinfo.value) == [("messageId", "required")]
 
@@ -158,12 +158,12 @@ def test_labels_validates_and_serializes_as_typed_map() -> None:
         "a": "b"
     }
 
-    with pytest.raises(ValidationError) as excinfo:
+    with pytest.raises(temporalio.exceptions.ApplicationError) as excinfo:
         _ = converter.from_transfer_type({"channel": 42}, Labels)
     assert violation_pairs(excinfo.value) == [("channel", "expected string")]
 
     too_many = {f"key-{index}": "value" for index in range(51)}
-    with pytest.raises(ValidationError) as excinfo:
+    with pytest.raises(temporalio.exceptions.ApplicationError) as excinfo:
         _ = converter.from_transfer_type(too_many, Labels)
     assert violation_pairs(excinfo.value) == [
         ("", "must have at most 50 properties, got 51")
@@ -184,7 +184,7 @@ def test_integer_members_follow_json_schema_number_semantics() -> None:
     # A boolean, a fractional number, and a value past the +/-(2**53-1) cap are
     # all "expected integer" — the single reason TypeScript uses for all three.
     for bad in (True, 1.5, 2**53):
-        with pytest.raises(ValidationError) as excinfo:
+        with pytest.raises(temporalio.exceptions.ApplicationError) as excinfo:
             _ = converter.from_transfer_type(
                 {"kind": "text", "body": "hi", "priority": bad}, Message
             )
@@ -192,7 +192,7 @@ def test_integer_members_follow_json_schema_number_semantics() -> None:
 
 
 def test_const_member_rejects_a_wrong_wire_value() -> None:
-    with pytest.raises(ValidationError) as excinfo:
+    with pytest.raises(temporalio.exceptions.ApplicationError) as excinfo:
         _ = converter_for(Message).from_transfer_type(
             {"kind": "image", "body": "hi"}, Message
         )

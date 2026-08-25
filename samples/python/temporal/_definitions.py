@@ -10,10 +10,10 @@ import json
 import re
 import typing
 import temporalio.converter
+import temporalio.exceptions
 
 
 __all__ = [
-    "ValidationError",
     "Violation",
     "_binary64",
     "_check_contains",
@@ -49,17 +49,6 @@ class Violation:
     reason: str
 
 
-class ValidationError(Exception):
-    """Every constraint failure found in one (de)serialization pass."""
-
-    violations: list[Violation]
-
-    def __init__(self, violations: list[Violation]) -> None:
-        self.violations = violations
-        detail = "; ".join(f"{item.path}: {item.reason}" for item in violations)
-        super().__init__(f"{len(violations)} validation error(s): {detail}")
-
-
 def _quote(value: object) -> str:
     """Renders a value in the JSON form every target quotes offending values in."""
 
@@ -69,10 +58,19 @@ def _quote(value: object) -> str:
         return repr(value)
 
 
-def _collect(violations: list[Violation], path: str, error: ValidationError) -> None:
+def _collect(
+    violations: list[Violation],
+    path: str,
+    error: temporalio.exceptions.ApplicationError,
+) -> None:
     """Re-paths a nested model's violations under `path` and appends them."""
 
-    for inner in error.violations:
+    if error.type != "PayloadValidationError" or not error.details:
+        raise error
+    # Generated failures retain the original list as their first detail. The
+    # cast is type-checker-only and performs no serialization.
+    nested_violations = typing.cast(list[Violation], error.details[0])
+    for inner in nested_violations:
         # A nested violation about the value *itself* carries no path of its own
         # (a union branch's own constraint, an element-level check), so the
         # prefix is the whole path -- never a dangling separator (P11).

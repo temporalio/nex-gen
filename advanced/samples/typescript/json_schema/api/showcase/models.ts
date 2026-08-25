@@ -706,7 +706,7 @@ function serializeShowcaseDetail(value: ShowcaseDetailObject | string): unknown 
   if (typeof value === "string") {
     return value;
   }
-  throw new __nexgenDefinitions.ValidationError([
+  throw __nexgenDefinitions.payloadValidationError([
     { path: "", reason: "expected one of: ShowcaseDetailObject, string" },
   ]);
 }
@@ -722,7 +722,7 @@ function serializeShowcaseShapeOrName(value: Circle | Square | string): unknown 
   if (typeof value === "string") {
     return value;
   }
-  throw new __nexgenDefinitions.ValidationError([
+  throw __nexgenDefinitions.payloadValidationError([
     { path: "", reason: "expected one of: Circle, Square, string" },
   ]);
 }
@@ -741,14 +741,14 @@ function serializeShowcaseAddressListOrLabel(value: Address[] | string): unknown
       })(),
     );
     if (violations.length) {
-      throw new __nexgenDefinitions.ValidationError(violations);
+      throw __nexgenDefinitions.payloadValidationError(violations);
     }
     return out;
   }
   if (typeof value === "string") {
     return value;
   }
-  throw new __nexgenDefinitions.ValidationError([
+  throw __nexgenDefinitions.payloadValidationError([
     { path: "", reason: "expected one of: Address[], string" },
   ]);
 }
@@ -760,7 +760,7 @@ export const addressTransferTypeConverter =
     public fromTransferType(raw: unknown): Address {
       const violations: __nexgenDefinitions.Violation[] = [];
       if (!__nexgenDefinitions.isPlainObject(raw)) {
-        throw new __nexgenDefinitions.ValidationError([
+        throw __nexgenDefinitions.payloadValidationError([
           { path: "", reason: "expected object" },
         ]);
       }
@@ -806,7 +806,7 @@ export const addressTransferTypeConverter =
       }
 
       if (violations.length) {
-        throw new __nexgenDefinitions.ValidationError(violations);
+        throw __nexgenDefinitions.payloadValidationError(violations);
       }
       const out: Address = { street, additionalProperties };
       if (city !== undefined) {
@@ -842,7 +842,7 @@ export const addressTransferTypeConverter =
         out[key] = entry;
       }
       if (violations.length) {
-        throw new __nexgenDefinitions.ValidationError(violations);
+        throw __nexgenDefinitions.payloadValidationError(violations);
       }
       return out;
     }
@@ -853,7 +853,7 @@ export const addressBookTransferTypeConverter =
     public fromTransferType(raw: unknown): AddressBook {
       const violations: __nexgenDefinitions.Violation[] = [];
       if (!__nexgenDefinitions.isPlainObject(raw)) {
-        throw new __nexgenDefinitions.ValidationError([
+        throw __nexgenDefinitions.payloadValidationError([
           { path: "", reason: "expected object" },
         ]);
       }
@@ -872,7 +872,7 @@ export const addressBookTransferTypeConverter =
         }
       }
       if (violations.length) {
-        throw new __nexgenDefinitions.ValidationError(violations);
+        throw __nexgenDefinitions.payloadValidationError(violations);
       }
       return { additionalProperties };
     }
@@ -891,7 +891,7 @@ export const addressBookTransferTypeConverter =
         })();
       }
       if (violations.length) {
-        throw new __nexgenDefinitions.ValidationError(violations);
+        throw __nexgenDefinitions.payloadValidationError(violations);
       }
       return out;
     }
@@ -902,7 +902,7 @@ export const attributesTransferTypeConverter =
     public fromTransferType(raw: unknown): Attributes {
       const violations: __nexgenDefinitions.Violation[] = [];
       if (!__nexgenDefinitions.isPlainObject(raw)) {
-        throw new __nexgenDefinitions.ValidationError([
+        throw __nexgenDefinitions.payloadValidationError([
           { path: "", reason: "expected object" },
         ]);
       }
@@ -941,7 +941,7 @@ export const attributesTransferTypeConverter =
         }
       }
       if (violations.length) {
-        throw new __nexgenDefinitions.ValidationError(violations);
+        throw __nexgenDefinitions.payloadValidationError(violations);
       }
       return { additionalProperties };
     }
@@ -974,7 +974,7 @@ export const attributesTransferTypeConverter =
         }
       }
       if (violations.length) {
-        throw new __nexgenDefinitions.ValidationError(violations);
+        throw __nexgenDefinitions.payloadValidationError(violations);
       }
       return out;
     }
@@ -985,7 +985,7 @@ export const blobIndexTransferTypeConverter =
     public fromTransferType(raw: unknown): BlobIndex {
       const violations: __nexgenDefinitions.Violation[] = [];
       if (!__nexgenDefinitions.isPlainObject(raw)) {
-        throw new __nexgenDefinitions.ValidationError([
+        throw __nexgenDefinitions.payloadValidationError([
           { path: "", reason: "expected object" },
         ]);
       }
@@ -1007,7 +1007,7 @@ export const blobIndexTransferTypeConverter =
         }
       }
       if (violations.length) {
-        throw new __nexgenDefinitions.ValidationError(violations);
+        throw __nexgenDefinitions.payloadValidationError(violations);
       }
       return { additionalProperties };
     }
@@ -1026,7 +1026,7 @@ export const choicesTransferTypeConverter =
     public fromTransferType(raw: unknown): Choices {
       const violations: __nexgenDefinitions.Violation[] = [];
       if (!__nexgenDefinitions.isPlainObject(raw)) {
-        throw new __nexgenDefinitions.ValidationError([
+        throw __nexgenDefinitions.payloadValidationError([
           { path: "", reason: "expected object" },
         ]);
       }
@@ -1045,7 +1045,7 @@ export const choicesTransferTypeConverter =
         }
       }
       if (violations.length) {
-        throw new __nexgenDefinitions.ValidationError(violations);
+        throw __nexgenDefinitions.payloadValidationError(violations);
       }
       return { additionalProperties };
     }
@@ -1064,7 +1064,7 @@ export const choicesTransferTypeConverter =
         })();
       }
       if (violations.length) {
-        throw new __nexgenDefinitions.ValidationError(violations);
+        throw __nexgenDefinitions.payloadValidationError(violations);
       }
       return out;
     }
@@ -1101,7 +1101,7 @@ export const choicesValueTransferTypeConverter =
         violations.push({ path: "", reason: "expected one of: Circle, Square" });
       }
       if (violations.length) {
-        throw new __nexgenDefinitions.ValidationError(violations);
+        throw __nexgenDefinitions.payloadValidationError(violations);
       }
       return out;
     }
@@ -1114,7 +1114,7 @@ export const choicesValueTransferTypeConverter =
       if ((value as unknown as Record<string, unknown>)["kind"] === "square") {
         return squareTransferTypeConverter.toTransferType(value as Square);
       }
-      throw new __nexgenDefinitions.ValidationError([
+      throw __nexgenDefinitions.payloadValidationError([
         { path: "", reason: "expected one of: Circle, Square" },
       ]);
     }
@@ -1127,7 +1127,7 @@ export const circleTransferTypeConverter =
     public fromTransferType(raw: unknown): Circle {
       const violations: __nexgenDefinitions.Violation[] = [];
       if (!__nexgenDefinitions.isPlainObject(raw)) {
-        throw new __nexgenDefinitions.ValidationError([
+        throw __nexgenDefinitions.payloadValidationError([
           { path: "", reason: "expected object" },
         ]);
       }
@@ -1170,7 +1170,7 @@ export const circleTransferTypeConverter =
       }
 
       if (violations.length) {
-        throw new __nexgenDefinitions.ValidationError(violations);
+        throw __nexgenDefinitions.payloadValidationError(violations);
       }
       const out: Circle = { kind, radius, additionalProperties };
       return out;
@@ -1201,7 +1201,7 @@ export const circleTransferTypeConverter =
         out[key] = entry;
       }
       if (violations.length) {
-        throw new __nexgenDefinitions.ValidationError(violations);
+        throw __nexgenDefinitions.payloadValidationError(violations);
       }
       return out;
     }
@@ -1214,7 +1214,7 @@ export const contactTsTransferTypeConverter =
     public fromTransferType(raw: unknown): ContactTs {
       const violations: __nexgenDefinitions.Violation[] = [];
       if (!__nexgenDefinitions.isPlainObject(raw)) {
-        throw new __nexgenDefinitions.ValidationError([
+        throw __nexgenDefinitions.payloadValidationError([
           { path: "", reason: "expected object" },
         ]);
       }
@@ -1285,7 +1285,7 @@ export const contactTsTransferTypeConverter =
         }
       }
       if (violations.length) {
-        throw new __nexgenDefinitions.ValidationError(violations);
+        throw __nexgenDefinitions.payloadValidationError(violations);
       }
       const out: ContactTs = { additionalProperties };
       if (email !== undefined) {
@@ -1343,7 +1343,7 @@ export const contactTsTransferTypeConverter =
         }
       }
       if (violations.length) {
-        throw new __nexgenDefinitions.ValidationError(violations);
+        throw __nexgenDefinitions.payloadValidationError(violations);
       }
       return out;
     }
@@ -1354,7 +1354,7 @@ export const dateIndexTransferTypeConverter =
     public fromTransferType(raw: unknown): DateIndex {
       const violations: __nexgenDefinitions.Violation[] = [];
       if (!__nexgenDefinitions.isPlainObject(raw)) {
-        throw new __nexgenDefinitions.ValidationError([
+        throw __nexgenDefinitions.payloadValidationError([
           { path: "", reason: "expected object" },
         ]);
       }
@@ -1380,7 +1380,7 @@ export const dateIndexTransferTypeConverter =
         }
       }
       if (violations.length) {
-        throw new __nexgenDefinitions.ValidationError(violations);
+        throw __nexgenDefinitions.payloadValidationError(violations);
       }
       return { additionalProperties };
     }
@@ -1393,7 +1393,7 @@ export const dateIndexTransferTypeConverter =
         out[key] = entry;
       }
       if (violations.length) {
-        throw new __nexgenDefinitions.ValidationError(violations);
+        throw __nexgenDefinitions.payloadValidationError(violations);
       }
       return out;
     }
@@ -1404,7 +1404,7 @@ export const extrasTransferTypeConverter =
     public fromTransferType(raw: unknown): Extras {
       const violations: __nexgenDefinitions.Violation[] = [];
       if (!__nexgenDefinitions.isPlainObject(raw)) {
-        throw new __nexgenDefinitions.ValidationError([
+        throw __nexgenDefinitions.payloadValidationError([
           { path: "", reason: "expected object" },
         ]);
       }
@@ -1421,7 +1421,7 @@ export const extrasTransferTypeConverter =
         additionalProperties[key] = raw[key];
       }
       if (violations.length) {
-        throw new __nexgenDefinitions.ValidationError(violations);
+        throw __nexgenDefinitions.payloadValidationError(violations);
       }
       return { additionalProperties };
     }
@@ -1440,7 +1440,7 @@ export const extrasTransferTypeConverter =
         });
       }
       if (violations.length) {
-        throw new __nexgenDefinitions.ValidationError(violations);
+        throw __nexgenDefinitions.payloadValidationError(violations);
       }
       return out;
     }
@@ -1451,7 +1451,7 @@ export const labelsTransferTypeConverter =
     public fromTransferType(raw: unknown): Labels {
       const violations: __nexgenDefinitions.Violation[] = [];
       if (!__nexgenDefinitions.isPlainObject(raw)) {
-        throw new __nexgenDefinitions.ValidationError([
+        throw __nexgenDefinitions.payloadValidationError([
           { path: "", reason: "expected object" },
         ]);
       }
@@ -1476,7 +1476,7 @@ export const labelsTransferTypeConverter =
         }
       }
       if (violations.length) {
-        throw new __nexgenDefinitions.ValidationError(violations);
+        throw __nexgenDefinitions.payloadValidationError(violations);
       }
       return { additionalProperties };
     }
@@ -1495,7 +1495,7 @@ export const labelsTransferTypeConverter =
         });
       }
       if (violations.length) {
-        throw new __nexgenDefinitions.ValidationError(violations);
+        throw __nexgenDefinitions.payloadValidationError(violations);
       }
       return out;
     }
@@ -1508,7 +1508,7 @@ export const linkNoteTransferTypeConverter =
     public fromTransferType(raw: unknown): LinkNote {
       const violations: __nexgenDefinitions.Violation[] = [];
       if (!__nexgenDefinitions.isPlainObject(raw)) {
-        throw new __nexgenDefinitions.ValidationError([
+        throw __nexgenDefinitions.payloadValidationError([
           { path: "", reason: "expected object" },
         ]);
       }
@@ -1554,7 +1554,7 @@ export const linkNoteTransferTypeConverter =
       }
 
       if (violations.length) {
-        throw new __nexgenDefinitions.ValidationError(violations);
+        throw __nexgenDefinitions.payloadValidationError(violations);
       }
       const out: LinkNote = { kind, href, additionalProperties };
       return out;
@@ -1588,7 +1588,7 @@ export const linkNoteTransferTypeConverter =
         out[key] = entry;
       }
       if (violations.length) {
-        throw new __nexgenDefinitions.ValidationError(violations);
+        throw __nexgenDefinitions.payloadValidationError(violations);
       }
       return out;
     }
@@ -1599,7 +1599,7 @@ export const metricsTransferTypeConverter =
     public fromTransferType(raw: unknown): Metrics {
       const violations: __nexgenDefinitions.Violation[] = [];
       if (!__nexgenDefinitions.isPlainObject(raw)) {
-        throw new __nexgenDefinitions.ValidationError([
+        throw __nexgenDefinitions.payloadValidationError([
           { path: "", reason: "expected object" },
         ]);
       }
@@ -1624,7 +1624,7 @@ export const metricsTransferTypeConverter =
         }
       }
       if (violations.length) {
-        throw new __nexgenDefinitions.ValidationError(violations);
+        throw __nexgenDefinitions.payloadValidationError(violations);
       }
       return { additionalProperties };
     }
@@ -1642,7 +1642,7 @@ export const metricsTransferTypeConverter =
         out[key] = entry;
       }
       if (violations.length) {
-        throw new __nexgenDefinitions.ValidationError(violations);
+        throw __nexgenDefinitions.payloadValidationError(violations);
       }
       return out;
     }
@@ -1653,7 +1653,7 @@ export const nicknamesTransferTypeConverter =
     public fromTransferType(raw: unknown): Nicknames {
       const violations: __nexgenDefinitions.Violation[] = [];
       if (!__nexgenDefinitions.isPlainObject(raw)) {
-        throw new __nexgenDefinitions.ValidationError([
+        throw __nexgenDefinitions.payloadValidationError([
           { path: "", reason: "expected object" },
         ]);
       }
@@ -1685,7 +1685,7 @@ export const nicknamesTransferTypeConverter =
         }
       }
       if (violations.length) {
-        throw new __nexgenDefinitions.ValidationError(violations);
+        throw __nexgenDefinitions.payloadValidationError(violations);
       }
       return { additionalProperties };
     }
@@ -1708,7 +1708,7 @@ export const nicknamesTransferTypeConverter =
         out[key] = entry;
       }
       if (violations.length) {
-        throw new __nexgenDefinitions.ValidationError(violations);
+        throw __nexgenDefinitions.payloadValidationError(violations);
       }
       return out;
     }
@@ -1745,7 +1745,7 @@ export const noteTransferTypeConverter =
         violations.push({ path: "", reason: "expected one of: TextNote, LinkNote" });
       }
       if (violations.length) {
-        throw new __nexgenDefinitions.ValidationError(violations);
+        throw __nexgenDefinitions.payloadValidationError(violations);
       }
       return out;
     }
@@ -1758,7 +1758,7 @@ export const noteTransferTypeConverter =
       if ((value as unknown as Record<string, unknown>)["kind"] === "link") {
         return linkNoteTransferTypeConverter.toTransferType(value as LinkNote);
       }
-      throw new __nexgenDefinitions.ValidationError([
+      throw __nexgenDefinitions.payloadValidationError([
         { path: "", reason: "expected one of: TextNote, LinkNote" },
       ]);
     }
@@ -1769,7 +1769,7 @@ export const quotasTransferTypeConverter =
     public fromTransferType(raw: unknown): Quotas {
       const violations: __nexgenDefinitions.Violation[] = [];
       if (!__nexgenDefinitions.isPlainObject(raw)) {
-        throw new __nexgenDefinitions.ValidationError([
+        throw __nexgenDefinitions.payloadValidationError([
           { path: "", reason: "expected object" },
         ]);
       }
@@ -1800,7 +1800,7 @@ export const quotasTransferTypeConverter =
         }
       }
       if (violations.length) {
-        throw new __nexgenDefinitions.ValidationError(violations);
+        throw __nexgenDefinitions.payloadValidationError(violations);
       }
       return { additionalProperties };
     }
@@ -1828,7 +1828,7 @@ export const quotasTransferTypeConverter =
         out[key] = entry;
       }
       if (violations.length) {
-        throw new __nexgenDefinitions.ValidationError(violations);
+        throw __nexgenDefinitions.payloadValidationError(violations);
       }
       return out;
     }
@@ -1839,7 +1839,7 @@ export const settingsTransferTypeConverter =
     public fromTransferType(raw: unknown): Settings {
       const violations: __nexgenDefinitions.Violation[] = [];
       if (!__nexgenDefinitions.isPlainObject(raw)) {
-        throw new __nexgenDefinitions.ValidationError([
+        throw __nexgenDefinitions.payloadValidationError([
           { path: "", reason: "expected object" },
         ]);
       }
@@ -1873,7 +1873,7 @@ export const settingsTransferTypeConverter =
       }
 
       if (violations.length) {
-        throw new __nexgenDefinitions.ValidationError(violations);
+        throw __nexgenDefinitions.payloadValidationError(violations);
       }
       const out: Settings = {};
       if (theme !== undefined) {
@@ -1901,7 +1901,7 @@ export const settingsTransferTypeConverter =
         out.fontSize = value.fontSize;
       }
       if (violations.length) {
-        throw new __nexgenDefinitions.ValidationError(violations);
+        throw __nexgenDefinitions.payloadValidationError(violations);
       }
       return out;
     }
@@ -1938,7 +1938,7 @@ export const shapeTransferTypeConverter =
         violations.push({ path: "", reason: "expected one of: Circle, Square" });
       }
       if (violations.length) {
-        throw new __nexgenDefinitions.ValidationError(violations);
+        throw __nexgenDefinitions.payloadValidationError(violations);
       }
       return out;
     }
@@ -1951,7 +1951,7 @@ export const shapeTransferTypeConverter =
       if ((value as unknown as Record<string, unknown>)["kind"] === "square") {
         return squareTransferTypeConverter.toTransferType(value as Square);
       }
-      throw new __nexgenDefinitions.ValidationError([
+      throw __nexgenDefinitions.payloadValidationError([
         { path: "", reason: "expected one of: Circle, Square" },
       ]);
     }
@@ -1962,7 +1962,7 @@ export const showcaseTransferTypeConverter =
     public fromTransferType(raw: unknown): Showcase {
       const violations: __nexgenDefinitions.Violation[] = [];
       if (!__nexgenDefinitions.isPlainObject(raw)) {
-        throw new __nexgenDefinitions.ValidationError([
+        throw __nexgenDefinitions.payloadValidationError([
           { path: "", reason: "expected object" },
         ]);
       }
@@ -3847,7 +3847,7 @@ export const showcaseTransferTypeConverter =
       }
 
       if (violations.length) {
-        throw new __nexgenDefinitions.ValidationError(violations);
+        throw __nexgenDefinitions.payloadValidationError(violations);
       }
       const out: Showcase = {
         kind,
@@ -5041,7 +5041,7 @@ export const showcaseTransferTypeConverter =
         out.quoted = value.quoted;
       }
       if (violations.length) {
-        throw new __nexgenDefinitions.ValidationError(violations);
+        throw __nexgenDefinitions.payloadValidationError(violations);
       }
       return out;
     }
@@ -5054,7 +5054,7 @@ export const showcaseAuditTransferTypeConverter =
     public fromTransferType(raw: unknown): ShowcaseAudit {
       const violations: __nexgenDefinitions.Violation[] = [];
       if (!__nexgenDefinitions.isPlainObject(raw)) {
-        throw new __nexgenDefinitions.ValidationError([
+        throw __nexgenDefinitions.payloadValidationError([
           { path: "", reason: "expected object" },
         ]);
       }
@@ -5087,7 +5087,7 @@ export const showcaseAuditTransferTypeConverter =
       }
 
       if (violations.length) {
-        throw new __nexgenDefinitions.ValidationError(violations);
+        throw __nexgenDefinitions.payloadValidationError(violations);
       }
       const out: ShowcaseAudit = { by, additionalProperties };
       return out;
@@ -5117,7 +5117,7 @@ export const showcaseAuditTransferTypeConverter =
         out[key] = entry;
       }
       if (violations.length) {
-        throw new __nexgenDefinitions.ValidationError(violations);
+        throw __nexgenDefinitions.payloadValidationError(violations);
       }
       return out;
     }
@@ -5130,7 +5130,7 @@ export const showcaseDetailObjectTransferTypeConverter =
     public fromTransferType(raw: unknown): ShowcaseDetailObject {
       const violations: __nexgenDefinitions.Violation[] = [];
       if (!__nexgenDefinitions.isPlainObject(raw)) {
-        throw new __nexgenDefinitions.ValidationError([
+        throw __nexgenDefinitions.payloadValidationError([
           { path: "", reason: "expected object" },
         ]);
       }
@@ -5174,7 +5174,7 @@ export const showcaseDetailObjectTransferTypeConverter =
       }
 
       if (violations.length) {
-        throw new __nexgenDefinitions.ValidationError(violations);
+        throw __nexgenDefinitions.payloadValidationError(violations);
       }
       const out: ShowcaseDetailObject = { code, additionalProperties };
       if (hint !== undefined) {
@@ -5210,7 +5210,7 @@ export const showcaseDetailObjectTransferTypeConverter =
         out[key] = entry;
       }
       if (violations.length) {
-        throw new __nexgenDefinitions.ValidationError(violations);
+        throw __nexgenDefinitions.payloadValidationError(violations);
       }
       return out;
     }
@@ -5221,7 +5221,7 @@ export const showcaseLedgerTransferTypeConverter =
     public fromTransferType(raw: unknown): ShowcaseLedger {
       const violations: __nexgenDefinitions.Violation[] = [];
       if (!__nexgenDefinitions.isPlainObject(raw)) {
-        throw new __nexgenDefinitions.ValidationError([
+        throw __nexgenDefinitions.payloadValidationError([
           { path: "", reason: "expected object" },
         ]);
       }
@@ -5240,7 +5240,7 @@ export const showcaseLedgerTransferTypeConverter =
         }
       }
       if (violations.length) {
-        throw new __nexgenDefinitions.ValidationError(violations);
+        throw __nexgenDefinitions.payloadValidationError(violations);
       }
       return { additionalProperties };
     }
@@ -5259,7 +5259,7 @@ export const showcaseLedgerTransferTypeConverter =
         })();
       }
       if (violations.length) {
-        throw new __nexgenDefinitions.ValidationError(violations);
+        throw __nexgenDefinitions.payloadValidationError(violations);
       }
       return out;
     }
@@ -5272,7 +5272,7 @@ export const showcaseLedgerValueTransferTypeConverter =
     public fromTransferType(raw: unknown): ShowcaseLedgerValue {
       const violations: __nexgenDefinitions.Violation[] = [];
       if (!__nexgenDefinitions.isPlainObject(raw)) {
-        throw new __nexgenDefinitions.ValidationError([
+        throw __nexgenDefinitions.payloadValidationError([
           { path: "", reason: "expected object" },
         ]);
       }
@@ -5302,7 +5302,7 @@ export const showcaseLedgerValueTransferTypeConverter =
       }
 
       if (violations.length) {
-        throw new __nexgenDefinitions.ValidationError(violations);
+        throw __nexgenDefinitions.payloadValidationError(violations);
       }
       const out: ShowcaseLedgerValue = { amount, additionalProperties };
       return out;
@@ -5333,7 +5333,7 @@ export const showcaseLedgerValueTransferTypeConverter =
         out[key] = entry;
       }
       if (violations.length) {
-        throw new __nexgenDefinitions.ValidationError(violations);
+        throw __nexgenDefinitions.payloadValidationError(violations);
       }
       return out;
     }
@@ -5346,7 +5346,7 @@ export const showcaseLocationTransferTypeConverter =
     public fromTransferType(raw: unknown): ShowcaseLocation {
       const violations: __nexgenDefinitions.Violation[] = [];
       if (!__nexgenDefinitions.isPlainObject(raw)) {
-        throw new __nexgenDefinitions.ValidationError([
+        throw __nexgenDefinitions.payloadValidationError([
           { path: "", reason: "expected object" },
         ]);
       }
@@ -5392,7 +5392,7 @@ export const showcaseLocationTransferTypeConverter =
       }
 
       if (violations.length) {
-        throw new __nexgenDefinitions.ValidationError(violations);
+        throw __nexgenDefinitions.payloadValidationError(violations);
       }
       const out: ShowcaseLocation = { city, additionalProperties };
       if (geo !== undefined) {
@@ -5435,7 +5435,7 @@ export const showcaseLocationTransferTypeConverter =
         out[key] = entry;
       }
       if (violations.length) {
-        throw new __nexgenDefinitions.ValidationError(violations);
+        throw __nexgenDefinitions.payloadValidationError(violations);
       }
       return out;
     }
@@ -5448,7 +5448,7 @@ export const showcaseLocationGeoTransferTypeConverter =
     public fromTransferType(raw: unknown): ShowcaseLocationGeo {
       const violations: __nexgenDefinitions.Violation[] = [];
       if (!__nexgenDefinitions.isPlainObject(raw)) {
-        throw new __nexgenDefinitions.ValidationError([
+        throw __nexgenDefinitions.payloadValidationError([
           { path: "", reason: "expected object" },
         ]);
       }
@@ -5495,7 +5495,7 @@ export const showcaseLocationGeoTransferTypeConverter =
       }
 
       if (violations.length) {
-        throw new __nexgenDefinitions.ValidationError(violations);
+        throw __nexgenDefinitions.payloadValidationError(violations);
       }
       const out: ShowcaseLocationGeo = { additionalProperties };
       if (lat !== undefined) {
@@ -5539,7 +5539,7 @@ export const showcaseLocationGeoTransferTypeConverter =
         out[key] = entry;
       }
       if (violations.length) {
-        throw new __nexgenDefinitions.ValidationError(violations);
+        throw __nexgenDefinitions.payloadValidationError(violations);
       }
       return out;
     }
@@ -5550,7 +5550,7 @@ export const showcaseMetadataTransferTypeConverter =
     public fromTransferType(raw: unknown): ShowcaseMetadata {
       const violations: __nexgenDefinitions.Violation[] = [];
       if (!__nexgenDefinitions.isPlainObject(raw)) {
-        throw new __nexgenDefinitions.ValidationError([
+        throw __nexgenDefinitions.payloadValidationError([
           { path: "", reason: "expected object" },
         ]);
       }
@@ -5567,7 +5567,7 @@ export const showcaseMetadataTransferTypeConverter =
         additionalProperties[key] = raw[key];
       }
       if (violations.length) {
-        throw new __nexgenDefinitions.ValidationError(violations);
+        throw __nexgenDefinitions.payloadValidationError(violations);
       }
       return { additionalProperties };
     }
@@ -5586,7 +5586,7 @@ export const showcaseMetadataTransferTypeConverter =
         });
       }
       if (violations.length) {
-        throw new __nexgenDefinitions.ValidationError(violations);
+        throw __nexgenDefinitions.payloadValidationError(violations);
       }
       return out;
     }
@@ -5599,7 +5599,7 @@ export const showcaseRowsItemTransferTypeConverter =
     public fromTransferType(raw: unknown): ShowcaseRowsItem {
       const violations: __nexgenDefinitions.Violation[] = [];
       if (!__nexgenDefinitions.isPlainObject(raw)) {
-        throw new __nexgenDefinitions.ValidationError([
+        throw __nexgenDefinitions.payloadValidationError([
           { path: "", reason: "expected object" },
         ]);
       }
@@ -5632,7 +5632,7 @@ export const showcaseRowsItemTransferTypeConverter =
       }
 
       if (violations.length) {
-        throw new __nexgenDefinitions.ValidationError(violations);
+        throw __nexgenDefinitions.payloadValidationError(violations);
       }
       const out: ShowcaseRowsItem = { cell, additionalProperties };
       return out;
@@ -5662,7 +5662,7 @@ export const showcaseRowsItemTransferTypeConverter =
         out[key] = entry;
       }
       if (violations.length) {
-        throw new __nexgenDefinitions.ValidationError(violations);
+        throw __nexgenDefinitions.payloadValidationError(violations);
       }
       return out;
     }
@@ -5697,7 +5697,7 @@ export const showcaseSegmentsItemTransferTypeConverter =
         violations.push({ path: "", reason: "expected one of: string, integer" });
       }
       if (violations.length) {
-        throw new __nexgenDefinitions.ValidationError(violations);
+        throw __nexgenDefinitions.payloadValidationError(violations);
       }
       return out;
     }
@@ -5728,7 +5728,7 @@ export const showcaseSegmentsItemTransferTypeConverter =
         }
       }
       if (violations.length) {
-        throw new __nexgenDefinitions.ValidationError(violations);
+        throw __nexgenDefinitions.payloadValidationError(violations);
       }
       if (typeof value === "string") {
         return value;
@@ -5736,7 +5736,7 @@ export const showcaseSegmentsItemTransferTypeConverter =
       if (typeof value === "number" && Number.isSafeInteger(value)) {
         return value;
       }
-      throw new __nexgenDefinitions.ValidationError([
+      throw __nexgenDefinitions.payloadValidationError([
         { path: "", reason: "expected one of: string, integer" },
       ]);
     }
@@ -5747,7 +5747,7 @@ export const getShowcaseInputTransferTypeConverter =
     public fromTransferType(raw: unknown): GetShowcaseInput {
       const violations: __nexgenDefinitions.Violation[] = [];
       if (!__nexgenDefinitions.isPlainObject(raw)) {
-        throw new __nexgenDefinitions.ValidationError([
+        throw __nexgenDefinitions.payloadValidationError([
           { path: "", reason: "expected object" },
         ]);
       }
@@ -5770,7 +5770,7 @@ export const getShowcaseInputTransferTypeConverter =
       }
 
       if (violations.length) {
-        throw new __nexgenDefinitions.ValidationError(violations);
+        throw __nexgenDefinitions.payloadValidationError(violations);
       }
       const out: GetShowcaseInput = { id };
       return out;
@@ -5790,7 +5790,7 @@ export const squareTransferTypeConverter =
     public fromTransferType(raw: unknown): Square {
       const violations: __nexgenDefinitions.Violation[] = [];
       if (!__nexgenDefinitions.isPlainObject(raw)) {
-        throw new __nexgenDefinitions.ValidationError([
+        throw __nexgenDefinitions.payloadValidationError([
           { path: "", reason: "expected object" },
         ]);
       }
@@ -5833,7 +5833,7 @@ export const squareTransferTypeConverter =
       }
 
       if (violations.length) {
-        throw new __nexgenDefinitions.ValidationError(violations);
+        throw __nexgenDefinitions.payloadValidationError(violations);
       }
       const out: Square = { kind, side, additionalProperties };
       return out;
@@ -5864,7 +5864,7 @@ export const squareTransferTypeConverter =
         out[key] = entry;
       }
       if (violations.length) {
-        throw new __nexgenDefinitions.ValidationError(violations);
+        throw __nexgenDefinitions.payloadValidationError(violations);
       }
       return out;
     }
@@ -5877,7 +5877,7 @@ export const textNoteTransferTypeConverter =
     public fromTransferType(raw: unknown): TextNote {
       const violations: __nexgenDefinitions.Violation[] = [];
       if (!__nexgenDefinitions.isPlainObject(raw)) {
-        throw new __nexgenDefinitions.ValidationError([
+        throw __nexgenDefinitions.payloadValidationError([
           { path: "", reason: "expected object" },
         ]);
       }
@@ -5923,7 +5923,7 @@ export const textNoteTransferTypeConverter =
       }
 
       if (violations.length) {
-        throw new __nexgenDefinitions.ValidationError(violations);
+        throw __nexgenDefinitions.payloadValidationError(violations);
       }
       const out: TextNote = { kind, body, additionalProperties };
       return out;
@@ -5957,7 +5957,7 @@ export const textNoteTransferTypeConverter =
         out[key] = entry;
       }
       if (violations.length) {
-        throw new __nexgenDefinitions.ValidationError(violations);
+        throw __nexgenDefinitions.payloadValidationError(violations);
       }
       return out;
     }
@@ -5968,7 +5968,7 @@ export const tokensTransferTypeConverter =
     public fromTransferType(raw: unknown): Tokens {
       const violations: __nexgenDefinitions.Violation[] = [];
       if (!__nexgenDefinitions.isPlainObject(raw)) {
-        throw new __nexgenDefinitions.ValidationError([
+        throw __nexgenDefinitions.payloadValidationError([
           { path: "", reason: "expected object" },
         ]);
       }
@@ -6008,7 +6008,7 @@ export const tokensTransferTypeConverter =
         }
       }
       if (violations.length) {
-        throw new __nexgenDefinitions.ValidationError(violations);
+        throw __nexgenDefinitions.payloadValidationError(violations);
       }
       return { additionalProperties };
     }
@@ -6041,7 +6041,7 @@ export const tokensTransferTypeConverter =
         out[key] = entry;
       }
       if (violations.length) {
-        throw new __nexgenDefinitions.ValidationError(violations);
+        throw __nexgenDefinitions.payloadValidationError(violations);
       }
       return out;
     }
@@ -6054,7 +6054,7 @@ export const widgetTransferTypeConverter =
     public fromTransferType(raw: unknown): Widget {
       const violations: __nexgenDefinitions.Violation[] = [];
       if (!__nexgenDefinitions.isPlainObject(raw)) {
-        throw new __nexgenDefinitions.ValidationError([
+        throw __nexgenDefinitions.payloadValidationError([
           { path: "", reason: "expected object" },
         ]);
       }
@@ -6117,7 +6117,7 @@ export const widgetTransferTypeConverter =
       }
 
       if (violations.length) {
-        throw new __nexgenDefinitions.ValidationError(violations);
+        throw __nexgenDefinitions.payloadValidationError(violations);
       }
       const out: Widget = { id, name, additionalProperties };
       if (kind !== undefined) {
@@ -6167,7 +6167,7 @@ export const widgetTransferTypeConverter =
         out[key] = entry;
       }
       if (violations.length) {
-        throw new __nexgenDefinitions.ValidationError(violations);
+        throw __nexgenDefinitions.payloadValidationError(violations);
       }
       return out;
     }
@@ -6180,7 +6180,7 @@ export const widgetBaseTransferTypeConverter =
     public fromTransferType(raw: unknown): WidgetBase {
       const violations: __nexgenDefinitions.Violation[] = [];
       if (!__nexgenDefinitions.isPlainObject(raw)) {
-        throw new __nexgenDefinitions.ValidationError([
+        throw __nexgenDefinitions.payloadValidationError([
           { path: "", reason: "expected object" },
         ]);
       }
@@ -6215,7 +6215,7 @@ export const widgetBaseTransferTypeConverter =
       }
 
       if (violations.length) {
-        throw new __nexgenDefinitions.ValidationError(violations);
+        throw __nexgenDefinitions.payloadValidationError(violations);
       }
       const out: WidgetBase = { id, additionalProperties };
       if (kind !== undefined) {
@@ -6242,7 +6242,7 @@ export const widgetBaseTransferTypeConverter =
         out[key] = entry;
       }
       if (violations.length) {
-        throw new __nexgenDefinitions.ValidationError(violations);
+        throw __nexgenDefinitions.payloadValidationError(violations);
       }
       return out;
     }

@@ -8,7 +8,6 @@ import typing_extensions
 import temporalio.converter
 
 from .._definitions import (
-    ValidationError,
     Violation,
     _parse_spec_integer,
     _transfer_type_convertible,
@@ -24,7 +23,9 @@ class _GetCategoryTreeInputTransferTypeConverter(
     ) -> "GetCategoryTreeInput":
         violations: list[Violation] = []
         if not isinstance(value, dict):
-            raise ValidationError([Violation(path="", reason="expected object")])
+            raise temporalio.converter.create_payload_validation_error(
+                [Violation(path="", reason="expected object")]
+            )
         raw = typing.cast("dict[str, typing.Any]", value)
 
         root_id_value: str = typing.cast("typing.Any", None)
@@ -41,7 +42,7 @@ class _GetCategoryTreeInputTransferTypeConverter(
             if key != "rootId":
                 violations.append(Violation(path=key, reason="unknown field"))
         if violations:
-            raise ValidationError(violations)
+            raise temporalio.converter.create_payload_validation_error(violations)
         return GetCategoryTreeInput(
             root_id=root_id_value,
         )
@@ -68,7 +69,9 @@ class _GetPageInputTransferTypeConverter(
     ) -> "GetPageInput":
         violations: list[Violation] = []
         if not isinstance(value, dict):
-            raise ValidationError([Violation(path="", reason="expected object")])
+            raise temporalio.converter.create_payload_validation_error(
+                [Violation(path="", reason="expected object")]
+            )
         raw = typing.cast("dict[str, typing.Any]", value)
 
         page_id_value: str = typing.cast("typing.Any", None)
@@ -85,7 +88,7 @@ class _GetPageInputTransferTypeConverter(
             if key != "pageId":
                 violations.append(Violation(path=key, reason="unknown field"))
         if violations:
-            raise ValidationError(violations)
+            raise temporalio.converter.create_payload_validation_error(violations)
         return GetPageInput(
             page_id=page_id_value,
         )
@@ -112,7 +115,9 @@ class _PutBlockOutputTransferTypeConverter(
     ) -> "PutBlockOutput":
         violations: list[Violation] = []
         if not isinstance(value, dict):
-            raise ValidationError([Violation(path="", reason="expected object")])
+            raise temporalio.converter.create_payload_validation_error(
+                [Violation(path="", reason="expected object")]
+            )
         raw = typing.cast("dict[str, typing.Any]", value)
 
         block_id_value: str = typing.cast("typing.Any", None)
@@ -140,7 +145,7 @@ class _PutBlockOutputTransferTypeConverter(
             if key != "blockId" and key != "revision":
                 violations.append(Violation(path=key, reason="unknown field"))
         if violations:
-            raise ValidationError(violations)
+            raise temporalio.converter.create_payload_validation_error(violations)
         return PutBlockOutput(
             block_id=block_id_value,
             revision=revision_value,
@@ -157,7 +162,7 @@ class _PutBlockOutputTransferTypeConverter(
             )
         out["revision"] = value.revision
         if violations:
-            raise ValidationError(violations)
+            raise temporalio.converter.create_payload_validation_error(violations)
         return out
 
 

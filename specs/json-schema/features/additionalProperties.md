@@ -250,10 +250,10 @@ violation aggregates.
 
 | Language | Open, untyped (preserve) | Open, typed `{type:T}` | Closed (reject extras) |
 |---|---|---|---|
-| Go | `UnmarshalJSON` routes unmatched keys into `AdditionalProperties`; `MarshalJSON` re-emits them | same routing, but each value goes through `T`'s runtime helper; failures → `Violation{Path:key}` | `UnmarshalJSON` emits `Violation{Path:key, Reason: fmt.Sprintf("unknown property %q", key)}` per unmatched key, collected into one `ValidationError` |
-| TypeScript | deser lifts non-declared keys into the `additionalProperties` Record; reser spreads them back to top-level | same, but each value validated as `T` before going into `additionalProperties` (member stays fully typed `Record<string,T>`) | check parsed keys against the known set; push `Violation{path:key}` per extra, throw one `ValidationError` |
-| Python | `from_transfer_type` lifts non-declared keys into the `additional_properties` dict verbatim; `to_transfer_type` spreads them back to top-level | same, but each value is validated and materialized as `T` before going into `additional_properties` (member stays fully typed `dict[str, T]`) | check parsed keys against `_<MODEL>_DECLARED`; append `Violation(path=key, reason="unknown field")` per extra, raise one `ValidationError` |
-| Java | the per-POJO collecting deserializer (Java §5) routes parsed-tree keys not in the declared set into the `additionalProperties` map; the matching serializer spreads them back | same routing, but each extra value is validated as `T` (bad keys → `Violation{path:key}`) | the collecting deserializer pushes a `Violation{path:key, "unknown property \"" + key + "\""}` per undeclared tree key into the single `ValidationException` — no fail-fast `ignoreUnknown=false`/`UnrecognizedPropertyException` |
+| Go | `UnmarshalJSON` routes unmatched keys into `AdditionalProperties`; `MarshalJSON` re-emits them | same routing, but each value goes through `T`'s runtime helper; failures → `Violation{Path:key}` | `UnmarshalJSON` emits `Violation{Path:key, Reason: fmt.Sprintf("unknown property %q", key)}` per unmatched key, collected into one `PayloadValidationError` application failure |
+| TypeScript | deser lifts non-declared keys into the `additionalProperties` Record; reser spreads them back to top-level | same, but each value validated as `T` before going into `additionalProperties` (member stays fully typed `Record<string,T>`) | check parsed keys against the known set; push `Violation{path:key}` per extra, throw one `PayloadValidationError` application failure |
+| Python | `from_transfer_type` lifts non-declared keys into the `additional_properties` dict verbatim; `to_transfer_type` spreads them back to top-level | same, but each value is validated and materialized as `T` before going into `additional_properties` (member stays fully typed `dict[str, T]`) | check parsed keys against `_<MODEL>_DECLARED`; append `Violation(path=key, reason="unknown field")` per extra, raise one `PayloadValidationError` application failure |
+| Java | the per-POJO collecting deserializer (Java §5) routes parsed-tree keys not in the declared set into the `additionalProperties` map; the matching serializer spreads them back | same routing, but each extra value is validated as `T` (bad keys → `Violation{path:key}`) | the collecting deserializer pushes a `Violation{path:key, "unknown property \"" + key + "\""}` per undeclared tree key into the single `PayloadValidationError` application failure — no fail-fast `ignoreUnknown=false`/`UnrecognizedPropertyException` |
 
 ### Per-member `T` validation
 
@@ -341,7 +341,7 @@ unambiguous in both directions.
 ### Runtime fixtures (validator)
 
 - Open struct + extra key → preserved, present on re-serialize.
-- Closed struct + extra key → one `ValidationError` per extra,
+- Closed struct + extra key → one `PayloadValidationError` application failure per extra,
   aggregated with declared-field errors.
 - Typed map / typed extras + value of wrong type → rejected with
   `path = key`; multiple bad extras reported in one shot (P11).

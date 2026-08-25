@@ -19,8 +19,8 @@ flattened**. Inside each per-input directory:
 - `services.<lang>` — the Nexus service bindings declared in that file,
   emitted **only if it declares any** (see [[services]]).
 
-Schema-independent runtime — `ValidationError`/`Violation`, the
-spec-number helpers, the (de)serialize scaffolding — is defined **once**
+Schema-independent runtime — `Violation`, any target-owned payload-validation
+compatibility helper, the spec-number helpers, and the (de)serialize scaffolding — is defined **once**
 at the package root (the shared `definitions` file, below), never
 duplicated per module.
 
@@ -81,7 +81,7 @@ Per input file `<subpath>/<name>`:
 | **Python** | `<subpath>/<name>/models.py` (+ `services.py` if it declares services) | `_definitions.py` (package root) | `_recursive.py` (package root) | `__init__.py` per directory — the per-input directory, every intermediate directory, and the package root |
 | **TypeScript** | `<subpath>/<name>/models.ts` (+ `services.ts`) | `definitions.ts` (package root) | — | `index.ts` per directory (barrels chain upward) |
 | **Go** | `<module>.go` in the one flat package (`<module>` = flattened path) | `definitions.go` (same package) | — | — (capitalized = exported) |
-| **Java** | one `<ClassName>.java` per exported class, in a package mirroring `<subpath>/<name>/` | each runtime class its own file in the root package (`ValidationException.java`, `Violation.java`, `SpecNumbers.java`, …) | — | — (`public` = exported) |
+| **Java** | one `<ClassName>.java` per exported class, in a package mirroring `<subpath>/<name>/` | each runtime class its own file in the root package (`Violation.java`, `SpecNumbers.java`, …) | — | — (`public` = exported) |
 
 **A module emits only the types its own input file declares.** A type reached by
 `$ref` into another file belongs to the module that declares it, and is imported
@@ -120,18 +120,18 @@ file regardless of how many input files that package aggregates. Python's
 file is underscore-prefixed, the language's own marking for a module that is
 generator-internal rather than part of the package's surface.
 
-- Error types — a **single aggregating error holding a list of
-  `Violation { path, reason }`**, identical in spirit across all four
-  targets: Python a `ValidationError(Exception)` over `list[Violation]`
-  (its `str()` enumerates every violation), with `Violation` a frozen
-  dataclass; Go a `ValidationError` struct implementing `error` over
-  `[]Violation` (its `Error()` surfaces every violation — *not*
-  `errors.Join`); TS a
-  `ValidationError` class extending `Error` over `Violation[]` (*not* a
-  built-in `AggregateError`); Java `ValidationException extends
-  JsonMappingException` holding `List<Violation>`. One error type, every
-  violation surfaced in one shot, and the same structured `{path, reason}`
-  in every target (P11).
+- Payload-validation failure construction — each target raises the SDK's
+  non-retryable application failure (`ApplicationFailure` in TypeScript/Java,
+  `ApplicationError` in Python/Go) with message `Payload validation failed`,
+  type `PayloadValidationError`, and the language's `Violation` list as its
+  first detail. Python calls
+  `temporalio.converter.create_payload_validation_error` directly and requires
+  Temporal SDK 1.32.0 or newer. The generated TypeScript and Go helpers carry
+  TODOs to use their corresponding SDK factories once those factories are
+  available in supported releases. Java inlines the application-failure call
+  with the equivalent TODO at each throw site. Nested aggregation casts the
+  locally retained first detail back to the generated violation-list type; the
+  cast is cheap and performs no serialization (P11).
 - Spec-number helpers — `parseSpecInteger` (Go), `_parse_spec_integer`
   (Python), `SpecNumbers.specLong` (Java), TS's safe-integer check.
 - Shared (de)serialize scaffolding — the **P12** three-layer base: the
@@ -143,8 +143,8 @@ generator-internal rather than part of the package's surface.
   through is written once rather than per model. The per-model conversion
   machinery stays with its type —
   Python's transfer-type converter, Java's collecting (de)serializer —
-  but the shared `Violation` / `ValidationException` / `SpecNumbers`
-  classes live here.
+  but the shared `Violation`, payload-validation helper, and `SpecNumbers`
+  runtime live here.
 
 ## Module paths
 
@@ -336,14 +336,13 @@ bindings:
   intermediate directory's `__init__.py` re-exports its children; the
   package-root `__init__.py` re-exports the whole tree, and is the **only**
   place the hoisted types surface, pulled from `_recursive`. The
-  package root also exports the shared `ValidationError` and `Violation`, so
-  callers catch or inspect validation failures without importing the private
-  `_definitions` module.
+  package root also exports the shared `Violation`; generated model modules
+  call the SDK's payload-validation factory directly.
 - **TypeScript** — `index.ts` per directory: per-input barrels
   `export … from './models'` (and `./services`), intermediate barrels
   `export * from './<child>'`, and the root barrel re-exports the tree plus
-  the runtime's `ValidationError` and the `Violation` type from
-  `./definitions`.
+  the runtime's `payloadValidationError` compatibility helper and the
+  `Violation` type from `./definitions`.
 - **Go** — no aggregator; capitalized identifiers are exported from the one
   flat package.
 - **Java** — `public` class per file; runtime classes public too.

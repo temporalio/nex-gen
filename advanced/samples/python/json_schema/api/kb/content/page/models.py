@@ -8,7 +8,6 @@ import typing_extensions
 import temporalio.converter
 
 from ..._definitions import (
-    ValidationError,
     Violation,
     _parse_spec_integer,
     _transfer_type_convertible,
@@ -24,7 +23,9 @@ class _PageMetaTransferTypeConverter(
     ) -> "PageMeta":
         violations: list[Violation] = []
         if not isinstance(value, dict):
-            raise ValidationError([Violation(path="", reason="expected object")])
+            raise temporalio.converter.create_payload_validation_error(
+                [Violation(path="", reason="expected object")]
+            )
         raw = typing.cast("dict[str, typing.Any]", value)
 
         author_value: str = typing.cast("typing.Any", None)
@@ -55,7 +56,7 @@ class _PageMetaTransferTypeConverter(
             if key != "author" and key != "wordCount":
                 violations.append(Violation(path=key, reason="unknown field"))
         if violations:
-            raise ValidationError(violations)
+            raise temporalio.converter.create_payload_validation_error(violations)
         return PageMeta(
             author=author_value,
             word_count=word_count_value,
@@ -73,7 +74,7 @@ class _PageMetaTransferTypeConverter(
                 )
             out["wordCount"] = value.word_count
         if violations:
-            raise ValidationError(violations)
+            raise temporalio.converter.create_payload_validation_error(violations)
         return out
 
 

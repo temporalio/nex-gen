@@ -9,7 +9,6 @@ import datetime
 import temporalio.converter
 
 from ._definitions import (
-    ValidationError,
     Violation,
     _check_date_time,
     _check_duration,
@@ -35,7 +34,9 @@ class _TemporalTransferTypeConverter(
     ) -> "Temporal":
         violations: list[Violation] = []
         if not isinstance(value, dict):
-            raise ValidationError([Violation(path="", reason="expected object")])
+            raise temporalio.converter.create_payload_validation_error(
+                [Violation(path="", reason="expected object")]
+            )
         raw = typing.cast("dict[str, typing.Any]", value)
 
         created_at_value: datetime.datetime = typing.cast("typing.Any", None)
@@ -217,7 +218,7 @@ class _TemporalTransferTypeConverter(
             ):
                 violations.append(Violation(path=key, reason="unknown field"))
         if violations:
-            raise ValidationError(violations)
+            raise temporalio.converter.create_payload_validation_error(violations)
         return Temporal(
             created_at=created_at_value,
             birthday=birthday_value,
@@ -259,7 +260,7 @@ class _TemporalTransferTypeConverter(
         if value.archived_on is not None:
             out["archivedOn"] = _format_date(value.archived_on)
         if violations:
-            raise ValidationError(violations)
+            raise temporalio.converter.create_payload_validation_error(violations)
         return out
 
 

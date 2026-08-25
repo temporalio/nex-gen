@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.SerializerProvider;
 import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
 import com.fasterxml.jackson.databind.annotation.JsonSerialize;
+import io.temporal.failure.ApplicationFailure;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Iterator;
@@ -36,8 +37,15 @@ public interface Note {
             if (disc.isTextual() && "text".equals(disc.textValue())) {
                 try {
                     return context.readTreeAsValue(node, TextNote.class);
-                } catch (ValidationException nested) {
-                    for (Violation violation : nested.getViolations()) {
+                } catch (ApplicationFailure nested) {
+                    if (!"PayloadValidationError".equals(nested.getType()) || nested.getDetails().getSize() == 0) {
+                        throw nested;
+                    }
+                    // The locally-created failure retains the original list as its first detail.
+                    // This unchecked cast is cheap and performs no serialization.
+                    @SuppressWarnings("unchecked")
+                    List<Violation> nestedViolations = (List<Violation>) nested.getDetails().get(0, List.class);
+                    for (Violation violation : nestedViolations) {
                         violations.add(violation.withPathPrefix(path));
                     }
                     return null;
@@ -49,8 +57,15 @@ public interface Note {
             if (disc.isTextual() && "link".equals(disc.textValue())) {
                 try {
                     return context.readTreeAsValue(node, LinkNote.class);
-                } catch (ValidationException nested) {
-                    for (Violation violation : nested.getViolations()) {
+                } catch (ApplicationFailure nested) {
+                    if (!"PayloadValidationError".equals(nested.getType()) || nested.getDetails().getSize() == 0) {
+                        throw nested;
+                    }
+                    // The locally-created failure retains the original list as its first detail.
+                    // This unchecked cast is cheap and performs no serialization.
+                    @SuppressWarnings("unchecked")
+                    List<Violation> nestedViolations = (List<Violation>) nested.getDetails().get(0, List.class);
+                    for (Violation violation : nestedViolations) {
                         violations.add(violation.withPathPrefix(path));
                     }
                     return null;

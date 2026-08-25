@@ -21,7 +21,7 @@ export const getCategoryTreeInputTransferTypeConverter =
     public fromTransferType(raw: unknown): GetCategoryTreeInput {
       const violations: __nexgenDefinitions.Violation[] = [];
       if (!__nexgenDefinitions.isPlainObject(raw)) {
-        throw new __nexgenDefinitions.ValidationError([
+        throw __nexgenDefinitions.payloadValidationError([
           { path: "", reason: "expected object" },
         ]);
       }
@@ -44,7 +44,7 @@ export const getCategoryTreeInputTransferTypeConverter =
       }
 
       if (violations.length) {
-        throw new __nexgenDefinitions.ValidationError(violations);
+        throw __nexgenDefinitions.payloadValidationError(violations);
       }
       const out: GetCategoryTreeInput = { rootId };
       return out;
@@ -62,7 +62,7 @@ export const getPageInputTransferTypeConverter =
     public fromTransferType(raw: unknown): GetPageInput {
       const violations: __nexgenDefinitions.Violation[] = [];
       if (!__nexgenDefinitions.isPlainObject(raw)) {
-        throw new __nexgenDefinitions.ValidationError([
+        throw __nexgenDefinitions.payloadValidationError([
           { path: "", reason: "expected object" },
         ]);
       }
@@ -85,7 +85,7 @@ export const getPageInputTransferTypeConverter =
       }
 
       if (violations.length) {
-        throw new __nexgenDefinitions.ValidationError(violations);
+        throw __nexgenDefinitions.payloadValidationError(violations);
       }
       const out: GetPageInput = { pageId };
       return out;
@@ -103,7 +103,7 @@ export const putBlockOutputTransferTypeConverter =
     public fromTransferType(raw: unknown): PutBlockOutput {
       const violations: __nexgenDefinitions.Violation[] = [];
       if (!__nexgenDefinitions.isPlainObject(raw)) {
-        throw new __nexgenDefinitions.ValidationError([
+        throw __nexgenDefinitions.payloadValidationError([
           { path: "", reason: "expected object" },
         ]);
       }
@@ -137,7 +137,7 @@ export const putBlockOutputTransferTypeConverter =
       }
 
       if (violations.length) {
-        throw new __nexgenDefinitions.ValidationError(violations);
+        throw __nexgenDefinitions.payloadValidationError(violations);
       }
       const out: PutBlockOutput = { blockId, revision };
       return out;
@@ -152,7 +152,7 @@ export const putBlockOutputTransferTypeConverter =
       }
       out.revision = value.revision;
       if (violations.length) {
-        throw new __nexgenDefinitions.ValidationError(violations);
+        throw __nexgenDefinitions.payloadValidationError(violations);
       }
       return out;
     }

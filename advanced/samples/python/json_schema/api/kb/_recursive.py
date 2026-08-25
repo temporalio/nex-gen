@@ -6,9 +6,9 @@ import dataclasses
 import typing
 import typing_extensions
 import temporalio.converter
+import temporalio.exceptions
 
 from ._definitions import (
-    ValidationError,
     Violation,
     _collect,
     _parse_spec_integer,
@@ -29,7 +29,9 @@ class _BlockTransferTypeConverter(
     ) -> "Block":
         violations: list[Violation] = []
         if not isinstance(value, dict):
-            raise ValidationError([Violation(path="", reason="expected object")])
+            raise temporalio.converter.create_payload_validation_error(
+                [Violation(path="", reason="expected object")]
+            )
         raw = typing.cast("dict[str, typing.Any]", value)
 
         block_id_value: str = typing.cast("typing.Any", None)
@@ -84,7 +86,7 @@ class _BlockTransferTypeConverter(
                     style_value = getattr(
                         BlockStyle, "__temporal_transfer_type_converter"
                     ).from_transfer_type(style_value_raw, BlockStyle)
-                except ValidationError as error:
+                except temporalio.exceptions.ApplicationError as error:
                     _collect(violations, "style", error)
 
         page_value: Page | None = None
@@ -97,7 +99,7 @@ class _BlockTransferTypeConverter(
                     page_value = _PageTransferTypeConverter().from_transfer_type(
                         page_value_raw, Page
                     )
-                except ValidationError as error:
+                except temporalio.exceptions.ApplicationError as error:
                     _collect(violations, "page", error)
 
         for key in raw:
@@ -110,7 +112,7 @@ class _BlockTransferTypeConverter(
             ):
                 violations.append(Violation(path=key, reason="unknown field"))
         if violations:
-            raise ValidationError(violations)
+            raise temporalio.converter.create_payload_validation_error(violations)
         return Block(
             block_id=block_id_value,
             order=order_value,
@@ -140,15 +142,15 @@ class _BlockTransferTypeConverter(
                 out["style"] = getattr(
                     BlockStyle, "__temporal_transfer_type_converter"
                 ).to_transfer_type(value.style)
-            except ValidationError as error:
+            except temporalio.exceptions.ApplicationError as error:
                 _collect(violations, "style", error)
         if value.page is not None:
             try:
                 out["page"] = _PageTransferTypeConverter().to_transfer_type(value.page)
-            except ValidationError as error:
+            except temporalio.exceptions.ApplicationError as error:
                 _collect(violations, "page", error)
         if violations:
-            raise ValidationError(violations)
+            raise temporalio.converter.create_payload_validation_error(violations)
         return out
 
 
@@ -184,7 +186,9 @@ class _PageTransferTypeConverter(
     def from_transfer_type(self, value: typing.Any, type_hint: type["Page"]) -> "Page":
         violations: list[Violation] = []
         if not isinstance(value, dict):
-            raise ValidationError([Violation(path="", reason="expected object")])
+            raise temporalio.converter.create_payload_validation_error(
+                [Violation(path="", reason="expected object")]
+            )
         raw = typing.cast("dict[str, typing.Any]", value)
 
         page_id_value: str = typing.cast("typing.Any", None)
@@ -216,7 +220,7 @@ class _PageTransferTypeConverter(
                 meta_value = getattr(
                     PageMeta, "__temporal_transfer_type_converter"
                 ).from_transfer_type(meta_value_raw, PageMeta)
-            except ValidationError as error:
+            except temporalio.exceptions.ApplicationError as error:
                 _collect(violations, "meta", error)
 
         blocks_value: list[Block] | None = None
@@ -243,7 +247,7 @@ class _PageTransferTypeConverter(
                                     blocks_value_element, Block
                                 )
                             )
-                        except ValidationError as error:
+                        except temporalio.exceptions.ApplicationError as error:
                             _collect(violations, blocks_value_item_path, error)
                         if len(violations) == blocks_value_item_violation_count:
                             blocks_value_list.append(blocks_value_item)
@@ -253,7 +257,7 @@ class _PageTransferTypeConverter(
             if key != "pageId" and key != "title" and key != "meta" and key != "blocks":
                 violations.append(Violation(path=key, reason="unknown field"))
         if violations:
-            raise ValidationError(violations)
+            raise temporalio.converter.create_payload_validation_error(violations)
         return Page(
             page_id=page_id_value,
             title=title_value,
@@ -271,7 +275,7 @@ class _PageTransferTypeConverter(
             out["meta"] = getattr(
                 PageMeta, "__temporal_transfer_type_converter"
             ).to_transfer_type(value.meta)
-        except ValidationError as error:
+        except temporalio.exceptions.ApplicationError as error:
             _collect(violations, "meta", error)
         if value.blocks is not None:
             blocks_out: list[typing.Any] = []
@@ -280,11 +284,11 @@ class _PageTransferTypeConverter(
                     blocks_out.append(
                         _BlockTransferTypeConverter().to_transfer_type(blocks_element)
                     )
-                except ValidationError as error:
+                except temporalio.exceptions.ApplicationError as error:
                     _collect(violations, f"blocks[{blocks_index}]", error)
             out["blocks"] = blocks_out
         if violations:
-            raise ValidationError(violations)
+            raise temporalio.converter.create_payload_validation_error(violations)
         return out
 
 

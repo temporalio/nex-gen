@@ -6,9 +6,9 @@ import dataclasses
 import typing
 import typing_extensions
 import temporalio.converter
+import temporalio.exceptions
 
 from ._definitions import (
-    ValidationError,
     Violation,
     _collect,
     _parse_spec_integer,
@@ -30,7 +30,9 @@ class _GetRoomInputTransferTypeConverter(
     ) -> "GetRoomInput":
         violations: list[Violation] = []
         if not isinstance(value, dict):
-            raise ValidationError([Violation(path="", reason="expected object")])
+            raise temporalio.converter.create_payload_validation_error(
+                [Violation(path="", reason="expected object")]
+            )
         raw = typing.cast("dict[str, typing.Any]", value)
 
         room_id_value: str = typing.cast("typing.Any", None)
@@ -47,7 +49,7 @@ class _GetRoomInputTransferTypeConverter(
             if key != "roomId":
                 violations.append(Violation(path=key, reason="unknown field"))
         if violations:
-            raise ValidationError(violations)
+            raise temporalio.converter.create_payload_validation_error(violations)
         return GetRoomInput(
             room_id=room_id_value,
         )
@@ -74,7 +76,9 @@ class _LabelsTransferTypeConverter(
     ) -> "Labels":
         violations: list[Violation] = []
         if not isinstance(value, dict):
-            raise ValidationError([Violation(path="", reason="expected object")])
+            raise temporalio.converter.create_payload_validation_error(
+                [Violation(path="", reason="expected object")]
+            )
         raw = typing.cast("dict[str, typing.Any]", value)
         if len(raw) > 50:
             violations.append(
@@ -92,7 +96,7 @@ class _LabelsTransferTypeConverter(
                 member = member_raw
             additional_properties[key] = member
         if violations:
-            raise ValidationError(violations)
+            raise temporalio.converter.create_payload_validation_error(violations)
         return Labels(additional_properties=additional_properties)
 
     @typing_extensions.override
@@ -108,7 +112,7 @@ class _LabelsTransferTypeConverter(
                 )
             )
         if violations:
-            raise ValidationError(violations)
+            raise temporalio.converter.create_payload_validation_error(violations)
         return out
 
 
@@ -129,7 +133,9 @@ class _MessageTransferTypeConverter(
     ) -> "Message":
         violations: list[Violation] = []
         if not isinstance(value, dict):
-            raise ValidationError([Violation(path="", reason="expected object")])
+            raise temporalio.converter.create_payload_validation_error(
+                [Violation(path="", reason="expected object")]
+            )
         raw = typing.cast("dict[str, typing.Any]", value)
 
         kind_value: typing.Literal["text"] = typing.cast("typing.Any", None)
@@ -190,7 +196,7 @@ class _MessageTransferTypeConverter(
             ):
                 violations.append(Violation(path=key, reason="unknown field"))
         if violations:
-            raise ValidationError(violations)
+            raise temporalio.converter.create_payload_validation_error(violations)
         return Message(
             kind=kind_value,
             body=body_value,
@@ -215,7 +221,7 @@ class _MessageTransferTypeConverter(
                 )
             out["priority"] = value._priority
         if violations:
-            raise ValidationError(violations)
+            raise temporalio.converter.create_payload_validation_error(violations)
         return out
 
 
@@ -270,7 +276,9 @@ class _RoomTransferTypeConverter(
     def from_transfer_type(self, value: typing.Any, type_hint: type["Room"]) -> "Room":
         violations: list[Violation] = []
         if not isinstance(value, dict):
-            raise ValidationError([Violation(path="", reason="expected object")])
+            raise temporalio.converter.create_payload_validation_error(
+                [Violation(path="", reason="expected object")]
+            )
         raw = typing.cast("dict[str, typing.Any]", value)
 
         room_id_value: str = typing.cast("typing.Any", None)
@@ -353,7 +361,7 @@ class _RoomTransferTypeConverter(
                     labels_value = _LabelsTransferTypeConverter().from_transfer_type(
                         labels_value_raw, Labels
                     )
-                except ValidationError as error:
+                except temporalio.exceptions.ApplicationError as error:
                     _collect(violations, "labels", error)
 
         additional_properties: dict[str, typing.Any] = {}
@@ -361,7 +369,7 @@ class _RoomTransferTypeConverter(
             if key not in _ROOM_DECLARED:
                 additional_properties[key] = raw[key]
         if violations:
-            raise ValidationError(violations)
+            raise temporalio.converter.create_payload_validation_error(violations)
         return Room(
             room_id=room_id_value,
             display_name=display_name_value,
@@ -385,7 +393,7 @@ class _RoomTransferTypeConverter(
                 out["labels"] = _LabelsTransferTypeConverter().to_transfer_type(
                     value.labels
                 )
-            except ValidationError as error:
+            except temporalio.exceptions.ApplicationError as error:
                 _collect(violations, "labels", error)
         for key, entry in value.additional_properties.items():
             if key in _ROOM_DECLARED:
@@ -398,7 +406,7 @@ class _RoomTransferTypeConverter(
             else:
                 out[key] = entry
         if violations:
-            raise ValidationError(violations)
+            raise temporalio.converter.create_payload_validation_error(violations)
         return out
 
 
@@ -432,7 +440,9 @@ class _SendMessageInputTransferTypeConverter(
     ) -> "SendMessageInput":
         violations: list[Violation] = []
         if not isinstance(value, dict):
-            raise ValidationError([Violation(path="", reason="expected object")])
+            raise temporalio.converter.create_payload_validation_error(
+                [Violation(path="", reason="expected object")]
+            )
         raw = typing.cast("dict[str, typing.Any]", value)
 
         room_id_value: str = typing.cast("typing.Any", None)
@@ -454,14 +464,14 @@ class _SendMessageInputTransferTypeConverter(
                 message_value = _MessageTransferTypeConverter().from_transfer_type(
                     message_value_raw, Message
                 )
-            except ValidationError as error:
+            except temporalio.exceptions.ApplicationError as error:
                 _collect(violations, "message", error)
 
         for key in raw:
             if key != "roomId" and key != "message":
                 violations.append(Violation(path=key, reason="unknown field"))
         if violations:
-            raise ValidationError(violations)
+            raise temporalio.converter.create_payload_validation_error(violations)
         return SendMessageInput(
             room_id=room_id_value,
             message=message_value,
@@ -476,10 +486,10 @@ class _SendMessageInputTransferTypeConverter(
             out["message"] = _MessageTransferTypeConverter().to_transfer_type(
                 value.message
             )
-        except ValidationError as error:
+        except temporalio.exceptions.ApplicationError as error:
             _collect(violations, "message", error)
         if violations:
-            raise ValidationError(violations)
+            raise temporalio.converter.create_payload_validation_error(violations)
         return out
 
 
@@ -502,7 +512,9 @@ class _SendMessageOutputTransferTypeConverter(
     ) -> "SendMessageOutput":
         violations: list[Violation] = []
         if not isinstance(value, dict):
-            raise ValidationError([Violation(path="", reason="expected object")])
+            raise temporalio.converter.create_payload_validation_error(
+                [Violation(path="", reason="expected object")]
+            )
         raw = typing.cast("dict[str, typing.Any]", value)
 
         message_id_value: str = typing.cast("typing.Any", None)
@@ -519,7 +531,7 @@ class _SendMessageOutputTransferTypeConverter(
             if key != "messageId":
                 violations.append(Violation(path=key, reason="unknown field"))
         if violations:
-            raise ValidationError(violations)
+            raise temporalio.converter.create_payload_validation_error(violations)
         return SendMessageOutput(
             message_id=message_id_value,
         )

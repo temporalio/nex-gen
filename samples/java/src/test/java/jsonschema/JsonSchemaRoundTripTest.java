@@ -13,6 +13,7 @@ import com.google.protobuf.ByteString;
 import io.temporal.api.common.v1.Payload;
 import io.temporal.common.converter.DataConverter;
 import io.temporal.common.converter.DefaultDataConverter;
+import io.temporal.failure.ApplicationFailure;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -199,6 +200,13 @@ final class JsonSchemaRoundTripTest {
     private static String messageChain(Throwable error) {
         StringBuilder builder = new StringBuilder();
         for (Throwable current = error; current != null; current = current.getCause()) {
+            if (current instanceof ApplicationFailure) {
+                ApplicationFailure failure = (ApplicationFailure) current;
+                if ("PayloadValidationError".equals(failure.getType())
+                        && failure.getDetails().getSize() > 0) {
+                    builder.append(failure.getDetails().get(0, java.util.List.class)).append('\n');
+                }
+            }
             if (current.getMessage() != null) {
                 builder.append(current.getMessage()).append('\n');
             }

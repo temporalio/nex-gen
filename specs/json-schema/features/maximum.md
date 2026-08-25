@@ -80,10 +80,10 @@ the **shared `Validate`** layer of **P12**).
 
 | Language | Strategy |
 |---|---|
-| Go | The comparison is a predicate in the shared `Validate(model)` (`if v > max { push(Violation{Path, Reason: fmt.Sprintf("must be <= %v, got %v", max, v)}) }`), which the generated `UnmarshalJSON` calls after decoding; violations collect into one `ValidationError`. Integer field: compare the decoded `int64` to the integer bound directly (exact). Number field: compare `float64` to the `float64` bound. |
-| TypeScript | ``if (v > max) push(Violation{path, reason: `must be <= ${max}, got ${v}`})``, throw one `ValidationError`. `number` covers both `integer` and `number` fields; `max` is an emitted numeric constant. |
-| Python | An explicit comparison in the transfer type converter (PRINCIPLES Python §3): `if v > max: violations.append(Violation(path=…, reason=f"must be <= {max}, got {v}"))`, aggregated into the single generated `ValidationError`. On an `integer` field it runs **after** `_parse_spec_integer` has normalized the wire value (`5.0`→`5`, see [[type]]), so the comparison is against a Python `int`. `max` is an inlined numeric literal. |
-| Java | The per-POJO collecting deserializer (PRINCIPLES Java §5) reads the field node via the [[type]] `SpecNumbers` helper, then checks `v > max` (integer field: `long` vs `long`; number field: `double` vs `double`), pushing a `Violation{path, "must be <= " + max + ", got " + v}` into the single `ValidationException`. **Not** bean-validation `@Max` — the check is hand-written in the collecting deserializer like every other constraint. |
+| Go | The comparison is a predicate in the shared `Validate(model)` (`if v > max { push(Violation{Path, Reason: fmt.Sprintf("must be <= %v, got %v", max, v)}) }`), which the generated `UnmarshalJSON` calls after decoding; violations collect into one `PayloadValidationError` application failure. Integer field: compare the decoded `int64` to the integer bound directly (exact). Number field: compare `float64` to the `float64` bound. |
+| TypeScript | ``if (v > max) push(Violation{path, reason: `must be <= ${max}, got ${v}`})``, throw one `PayloadValidationError` application failure. `number` covers both `integer` and `number` fields; `max` is an emitted numeric constant. |
+| Python | An explicit comparison in the transfer type converter (PRINCIPLES Python §3): `if v > max: violations.append(Violation(path=…, reason=f"must be <= {max}, got {v}"))`, aggregated into the single generated `PayloadValidationError` application failure. On an `integer` field it runs **after** `_parse_spec_integer` has normalized the wire value (`5.0`→`5`, see [[type]]), so the comparison is against a Python `int`. `max` is an inlined numeric literal. |
+| Java | The per-POJO collecting deserializer (PRINCIPLES Java §5) reads the field node via the [[type]] `SpecNumbers` helper, then checks `v > max` (integer field: `long` vs `long`; number field: `double` vs `double`), pushing a `Violation{path, "must be <= " + max + ", got " + v}` into the single `PayloadValidationError` application failure. **Not** bean-validation `@Max` — the check is hand-written in the collecting deserializer like every other constraint. |
 
 **Informative `reason` strings.** The `Violation` `reason` is *not* a bare
 keyword tag (`"maximum"`); it states the **concrete bound and the offending
@@ -149,7 +149,7 @@ not here.
 
 - `v == max` → OK (`≤` is inclusive).
 - `v == max+1` (integer) / `v` just above `max` (number) → one
-  `ValidationError` whose reason names the bound and value
+  `PayloadValidationError` application failure whose reason names the bound and value
   (`must be <= 10, got 11`).
 - `v < max` → OK.
 - Combined with other failing assertions (`minimum`, `multipleOf`, a

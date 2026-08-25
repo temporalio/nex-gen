@@ -29,9 +29,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   generated output requires `Temporalio` 1.18.0 or newer; generic proto-backed
   .NET models report an explicit unsupported-conversion error until the SDK
   supports generic converter registration.
-- Python JSON Schema packages now export `ValidationError` and `Violation`
-  from their root `__init__.py`; callers no longer need to import the private
-  `_definitions` module.
+- JSON Schema validation now raises a non-retryable Temporal application
+  failure with type `PayloadValidationError` and the aggregated `Violation`
+  list as its first detail in Go, TypeScript, Python, and Java. Python output
+  now requires Temporal SDK 1.32.0 or newer and calls
+  `temporalio.converter.create_payload_validation_error`; generated
+  compatibility helpers remain for Go and TypeScript until their factories are
+  available in supported releases, while Java inlines the SDK call with the
+  corresponding TODO. Python packages continue to export
+  `Violation` from their root `__init__.py`.
 - Added grouped protobuf `oneof` authoring and bidirectional Python conversion,
   including required and optional oneofs, scaffolding through `add-rpc` and
   `add-message`, and explicit diagnostics for unsupported target backends.

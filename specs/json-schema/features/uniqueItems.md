@@ -96,10 +96,10 @@ therefore unhashable (see the Python row).
 
 | Language | Strategy |
 |---|---|
-| Go | Deserialize normalizes each original `json.RawMessage` to a JSON value key and tracks the first raw index; serialize performs the equivalent typed-slice walk in shared `Validate`. Both collect duplicate-index violations into one `ValidationError`. |
+| Go | Deserialize normalizes each original `json.RawMessage` to a JSON value key and tracks the first raw index; serialize performs the equivalent typed-slice walk in shared `Validate`. Both collect duplicate-index violations into one `PayloadValidationError` application failure. |
 | TypeScript | After the `Array.isArray` guard ([[items]]), deserialize walks the raw array with a `Map` before returning the typed result; serialize walks the typed array. `Map` uses value equality for the supported scalar elements. |
 | Python | The runtime's `_check_unique_items(value, path, violations)` is called with the raw list on deserialize and the typed list on serialize. It uses a JSON-aware equality walk, **not** a `set`/`dict`, so booleans stay distinct from numbers and composite raw values compare structurally. Arrays are small and correctness beats the O(n²) (**P2**). |
-| Java | The per-POJO collecting deserializer walks the original `JsonNode` array using `SpecNumbers.valueKey` for JSON numeric equality; serialize walks the typed `List<T>`. Both report the colliding indexes in the single `ValidationException`. Not bean-validation. |
+| Java | The per-POJO collecting deserializer walks the original `JsonNode` array using `SpecNumbers.valueKey` for JSON numeric equality; serialize walks the typed `List<T>`. Both report the colliding indexes in the single `PayloadValidationError` application failure. Not bean-validation. |
 
 Reason strings name the **colliding positions** (`duplicate items: element
 at index 3 equals index 1`) per the count-family convention — the
@@ -151,7 +151,7 @@ wire, so the check is the identical all-distinct walk in both directions.
 ### Runtime fixtures (validator)
 
 - All elements distinct → OK (both directions).
-- A repeated element → one `ValidationError` naming the colliding indexes
+- A repeated element → one `PayloadValidationError` application failure naming the colliding indexes
   (`duplicate items: element at index 3 equals index 1`).
 - Empty array `[]` and single-element array → OK (vacuously unique).
 - `number` array with `[1, 1.0]` → duplicate (both the same value); with

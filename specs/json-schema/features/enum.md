@@ -290,10 +290,10 @@ identical in both directions (a pure predicate over the decoded value — the
 
 | Language | Strategy |
 |---|---|
-| Go | A predicate in the shared `Validate`, called by `UnmarshalJSON` after decoding: `switch v { case ColorRed, ColorGreen, ColorBlue: default: … Violation{Path, Reason: fmt.Sprintf("must be one of [%s], got %q", set, v)} }`, collected into one `ValidationError`. The field is the defined type; the typed constants are both the compared set and the idiomatic setters. |
-| TypeScript | the shared `Validate` predicate tests set membership: ``if (!SET.has(v)) push(Violation{path, reason: `must be one of [...], got ${JSON.stringify(v)}`})``, throwing one `ValidationError`. The field's union type closes it in-language. |
-| Python | the transfer type converter (PRINCIPLES Python §3) tests `v not in SET` — a module-level `frozenset` — and appends `Violation(path=…, reason='must be one of [...], got <json>')` into the single generated `ValidationError`. The field is the closed `Literal` (`float` enums are plain `float`, validated the same way). |
-| Java | the aggregating path is the per-POJO collecting deserializer (PRINCIPLES Java §5): a **non-throwing membership lookup** — known value → the constant, otherwise record a `Violation{path, "must be one of [...], got …"}` — so multiple bad fields collect into the single `ValidationException`. The value class's `@JsonCreator fromString` *throws* only on the **standalone/interop** path, where fail-fast is expected. Serialize needs no separate check: the value class can only hold a known constant. |
+| Go | A predicate in the shared `Validate`, called by `UnmarshalJSON` after decoding: `switch v { case ColorRed, ColorGreen, ColorBlue: default: … Violation{Path, Reason: fmt.Sprintf("must be one of [%s], got %q", set, v)} }`, collected into one `PayloadValidationError` application failure. The field is the defined type; the typed constants are both the compared set and the idiomatic setters. |
+| TypeScript | the shared `Validate` predicate tests set membership: ``if (!SET.has(v)) push(Violation{path, reason: `must be one of [...], got ${JSON.stringify(v)}`})``, throwing one `PayloadValidationError` application failure. The field's union type closes it in-language. |
+| Python | the transfer type converter (PRINCIPLES Python §3) tests `v not in SET` — a module-level `frozenset` — and appends `Violation(path=…, reason='must be one of [...], got <json>')` into the single generated `PayloadValidationError` application failure. The field is the closed `Literal` (`float` enums are plain `float`, validated the same way). |
+| Java | the aggregating path is the per-POJO collecting deserializer (PRINCIPLES Java §5): a **non-throwing membership lookup** — known value → the constant, otherwise record a `Violation{path, "must be one of [...], got …"}` — so multiple bad fields collect into the single `PayloadValidationError` application failure. The value class's `@JsonCreator fromString` *throws* only on the **standalone/interop** path, where fail-fast is expected. Serialize needs no separate check: the value class can only hold a known constant. |
 
 The reason string names the **expected set and the offending value**
 (`must be one of ["red","green","blue"], got "purple"`), never a bare
@@ -362,7 +362,7 @@ deserialize-direction guard there.
 ### Runtime fixtures (validator)
 
 - Wire value in the set → OK (both directions).
-- Wire value present but **out of set** → one `ValidationError` naming the
+- Wire value present but **out of set** → one `PayloadValidationError` application failure naming the
   set and the actual value (`must be one of ["red","green","blue"], got
   "purple"`).
 - required+enum **absent on the wire** → required violation (see
