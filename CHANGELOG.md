@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+### Changed
+
+### Deprecated
+
+### Breaking Changes
+
+### Fixed
+
+### Security
+
+## [0.2.2] - 2026-08-25
+
+### Added
+
 - WIT signal-with-start request models now carry Temporal headers while keeping
   them out of generated convenience operation APIs.
 - .NET proto-backed models now use Temporal SDK transfer-type converters. The
@@ -112,8 +126,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `hostname`, `uri`, `ipv4`, `ipv6`) are unaffected, and the nullability
   `oneOf:[{T},{null}]` is not a sum type, so a materialized nullable field keeps
   working.
-
-### Deprecated
 
 ### Breaking Changes
 
@@ -301,8 +313,6 @@ array"` at runtime, though `items.md` accepts them. Both now decode elementwise,
 - JSON Schema: TypeScript's serializer for a mixed-kind union returned the lone
   object branch unconditionally, making the scalar/array branches unreachable;
   the object branch is now guarded by the object token, matching the parse side.
-
-### Security
 
 ## [0.2.1] - 2026-07-31
 

@@ -30,6 +30,10 @@ _RELEASE_FILES = (
     "Cargo.lock",
 )
 _RELEASE_FILE_SET = frozenset(_RELEASE_FILES)
+_GENERATED_SAMPLE_DIRECTORIES = (
+    "advanced/samples/",
+    "samples/",
+)
 
 
 def validate_version(version: str) -> str:
@@ -130,7 +134,12 @@ def ensure_clean_worktree(repo_root: pathlib.Path) -> None:
 
 
 def ensure_only_release_changes(repo_root: pathlib.Path) -> None:
-    unexpected_files = changed_files(repo_root) - _RELEASE_FILE_SET
+    unexpected_files = {
+        path
+        for path in changed_files(repo_root)
+        if path not in _RELEASE_FILE_SET
+        and not path.startswith(_GENERATED_SAMPLE_DIRECTORIES)
+    }
     if unexpected_files:
         raise RuntimeError(
             "Release preparation changed unexpected files: "
@@ -147,9 +156,26 @@ def verify_lockfile(repo_root: pathlib.Path) -> None:
     )
 
 
+def regenerate_samples(repo_root: pathlib.Path) -> None:
+    subprocess.run(["cargo", "build-examples"], cwd=repo_root, check=True)
+    subprocess.run(["cargo", "build-json-examples"], cwd=repo_root, check=True)
+
+
 def commit_release_changes(repo_root: pathlib.Path, version: str) -> None:
     subprocess.run(
-        ["git", "commit", "-m", f"Prepare release {version}", "--", *_RELEASE_FILES],
+        [
+            "git",
+            "add",
+            "--all",
+            "--",
+            *_RELEASE_FILES,
+            *_GENERATED_SAMPLE_DIRECTORIES,
+        ],
+        cwd=repo_root,
+        check=True,
+    )
+    subprocess.run(
+        ["git", "commit", "-m", f"Prepare release {version}"],
         cwd=repo_root,
         check=True,
     )
@@ -268,7 +294,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     parser = argparse.ArgumentParser(
         description=(
             "Bump the crate version, roll CHANGELOG.md's Unreleased section "
-            "into a dated release section, seed a fresh Unreleased section, "
+            "into a dated release section, regenerate checked-in samples, "
             "and verify Cargo.lock."
         )
     )
@@ -322,6 +348,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     if not args.skip_lock:
         verify_lockfile(repo_root)
 
+    regenerate_samples(repo_root)
     ensure_only_release_changes(repo_root)
     commit_release_changes(repo_root, version)
     push_release_branch(repo_root, version)
