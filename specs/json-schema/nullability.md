@@ -28,7 +28,7 @@ reference fields carry `@Nullable` and required ones need no annotation
 (see PRINCIPLES Java §3):
 
 ```java
-@NullMarked
+// package-info.java: @NullMarked applies to the generated package.
 public final class User {
     private final long      id;        // required: integer
     private final @Nullable Long   nickname;  // optional: integer — null if absent
@@ -55,8 +55,9 @@ post-construction nullness (required → non-null; optional → may be
 null when the key is absent) and propagate it into the consumer's
 static null-analysis. Because generated source imports them,
 `org.jspecify:jspecify:1.0.0` must be on the compile classpath (normally
-`compileOnly` in Gradle or `provided` in Maven). They have CLASS retention and
-therefore require no runtime dependency (**P4**). They do **not** encode the
+`compileOnly` in Gradle or `provided` in Maven). JSpecify's annotations have
+runtime retention but enforce nothing at runtime; consumers that reflect over
+them must provide JSpecify themselves. They do **not** encode the
 wire-level nullable distinction — every optional reference field is `@Nullable`
 regardless of whether it is optional-non-nullable or optional+nullable.
 
@@ -93,18 +94,17 @@ as the motivating use case.
 tmp := int64(42)
 u := User{Nickname: &tmp}
 
-// 1.26+ (the convention we emit at call sites):
+// 1.26+ (a concise consumer call-site convention):
 u := User{Nickname: new(int64(42))}
 u := User{Nickname: new(req.Count)}        // arbitrary expressions work
 u := User{Nickname: new(yearsSince(t))}    // including function calls
 ```
 
-Generator constructors and builders prefer `new(expr)` for
-ergonomics. Go 1.26+ is **not** a hard requirement — on older
+The generator emits no Go model constructors or builders; this is consumer
+call-site guidance only. Go 1.26+ is **not** a hard requirement — on older
 toolchains the equivalent verbose form (`tmp := 42; u.Nickname = &tmp`)
 compiles correctly. The generated *user-facing* API surface is
-identical either way; only the call-site idiom shown in examples and
-emitted constructors differs.
+identical either way; only the consumer's call-site idiom differs.
 
 `[]T` for optional arrays: a `nil` slice and an empty slice are
 distinguishable in Go (`s == nil` vs `len(s) == 0`), so a pointer
@@ -128,7 +128,7 @@ interface User {
 |---|---|---|
 | any                 | `T`       | `T` with `?` on the field |
 
-Validator emits `if (parsed.x === undefined) ...` for required-presence
+Validator emits `if (raw.x === undefined) ...` for required-presence
 checks. We never use `T | null` for the optional-only case — `?`/
 `undefined` is the absence channel; `null` is a value reserved for the
 nullability convention (`x?: T | null` is the optional+nullable form).
@@ -308,17 +308,17 @@ Wire form → required generator output:
 
 ## Validator implications
 
-Four schema states × four languages → twelve cells. The two axes are
+Four schema states × four languages → sixteen cells. The two axes are
 orthogonal: **presence** (required = reject absent; optional = accept
 absent) and **null acceptance** (non-nullable = reject `null`; nullable
 = accept `null`).
 
 | State | Java | Go | TS | Python |
 |---|---|---|---|---|
-| **Required, non-nullable** — must be present, must be T | type is `long`/`String`/etc.; emit `field == null` reject + type binding | type is `int64`/`string`/etc.; shadow `*T` field, reject on `nil` | type is `x: T`; emit `parsed.x === undefined \|\| parsed.x === null` reject | type is `x: T` with no default; converter rejects an absent key **and** a `null` token with `required` |
-| **Optional, non-nullable** — absent OK, T OK, explicit `null` rejected | strict-variant custom deserializer (see strategy below) | shadow `*json.RawMessage` with explicit `bytes.Equal(*raw, []byte("null"))` reject | `parsed.x === null` rejected; `=== undefined` OK | type is `x: T \| None = None`; converter branch over the raw dict rejects a key present with `None` (see strategy below) |
+| **Required, non-nullable** — must be present, must be T | type is `long`/`String`/etc.; collecting deserializer rejects an absent or null tree node | type is `int64`/`string`/etc.; raw-map lookup distinguishes absent from null | type is `x: T`; emit `raw.x === undefined \|\| raw.x === null` reject | type is `x: T` with no default; converter rejects an absent key **and** a `null` token with `required` |
+| **Optional, non-nullable** — absent OK, T OK, explicit `null` rejected | collecting deserializer's three-way tree-node branch (see strategy below) | raw-map `*json.RawMessage` lookup plus `isNull` | `raw.x === null` rejected; `=== undefined` OK | type is `x: T \| None = None`; converter branch over the raw dict rejects a key present with `None` (see strategy below) |
 | **Optional + nullable** — absent OK, `null` OK, T OK | type is `@Nullable Long`/`String`/etc.; no extra check beyond type binding | type is `*int64`/`*string`/etc.; no extra check beyond type binding | type is `x?: T \| null`; both `undefined` and `null` accepted | type is `x: T \| None = None`; both absent and `null` accepted, no extra check |
-| **Required + nullable** — must be present, `null` OK, T OK, absent rejected | base (non-strict) deserializer accepts `null`; presence enforced (`field`-present check / required-field machinery) | shadow `*json.RawMessage`; reject on absent (`nil` shadow), accept `null` token | type is `x: T \| null`; emit `parsed.x === undefined` reject; `null` accepted | type is `x: T \| None` with **no** default; converter rejects an absent key, accepts the `null` token as `None` |
+| **Required + nullable** — must be present, `null` OK, T OK, absent rejected | collecting deserializer accepts a null node and rejects an absent one | raw-map lookup rejects absence and accepts a null token | type is `x: T \| null`; emit `raw.x === undefined` reject; `null` accepted | type is `x: T \| None` with **no** default; converter rejects an absent key, accepts the `null` token as `None` |
 
 ## Serialize-side behavior
 
@@ -341,10 +341,11 @@ optional-non-nullable.
 Per-language mechanism (all are *encode-adapter* concerns; the shared
 `Validate` runs first and is identical to the deserialize side):
 
-- **Go** — struct tags. Optional → `*T` with `,omitempty` (nil
-  omitted); required+nullable → `*T` **without** `omitempty` (nil →
-  `null`); required-non-nullable → bare value type. The type-alias
-  `MarshalJSON` lets the tags do the work.
+- **Go** — the generated `MarshalJSON` builds a
+  `map[string]json.RawMessage` key by key. Optional pointers are omitted when
+  nil; required+nullable pointers always write their key and encode nil as
+  `null`. Struct tags remain useful to readers and reflection-based tools but
+  are not consulted by the generated codec.
 - **TypeScript** — `toTransferType` omits `undefined`, emits `null`; the
   three-state gives faithful optional+nullable for free.
 - **Python** — the model's `to_transfer_type` builds the outgoing dict
@@ -391,12 +392,12 @@ collapses into the same three-way Go uses in `UnmarshalJSON`.
 
 ### Go
 
-The shadow struct uses `*json.RawMessage` for every field (not just
-numeric). Per field, the generated `UnmarshalJSON`:
+The generated `UnmarshalJSON` first reads a `map[string]json.RawMessage` and
+uses a per-key accessor returning `*json.RawMessage`. Per field:
 
-1. `shadow.Foo == nil`              → key absent
+1. `raw == nil`                     → key absent
    (required → emit error; optional → leave field zero)
-2. `bytes.Equal(*shadow.Foo, []byte("null"))` → explicit `null`
+2. `isNull(*raw)`                   → explicit `null`
    (optional-non-nullable → emit error; nullable → accept)
 3. otherwise                        → delegate to the type-specific
    runtime helper (e.g., `parseSpecInteger`)
@@ -406,9 +407,9 @@ numeric). Per field, the generated `UnmarshalJSON`:
 Natural three-way via `=== undefined` vs `=== null`:
 
 ```typescript
-if (parsed.x === null) {
+if (raw.x === null) {
     violations.push({ path: "x", reason: "explicit null not allowed" });
-} else if (parsed.x !== undefined) {
+} else if (raw.x !== undefined) {
     // validate value
 }
 ```
@@ -434,12 +435,13 @@ Go's and Java's:
 
 ```python
 if "nickname" in raw:                        # optional, non-nullable
-    if raw["nickname"] is None:
+    nickname_value_raw = raw["nickname"]
+    if nickname_value_raw is None:
         violations.append(
             Violation(path="nickname", reason="explicit null not allowed")
         )
     else:
-        nickname = _parse_spec_integer(raw["nickname"], "nickname", violations)
+        nickname = _parse_spec_integer(nickname_value_raw, "nickname", violations)
 ```
 
 The absent-vs-`None` distinction is available here because the converter

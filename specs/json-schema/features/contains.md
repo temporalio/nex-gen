@@ -116,14 +116,9 @@ serialize scans decoded elements. Each element is tested against the
 scalar matcher predicate — the same shared predicate the matcher's own
 keywords define ([[const]]/[[enum]] equality, [[minimum]]/[[maximum]]
 range, [[pattern]] regex, [[minLength]]/[[maxLength]], [[multipleOf]]) —
-and the scan **short-circuits on the first match** — *unless a
-[[maxContains]] or a [[minContains]] ≥ 2 is present*: a plain `contains`
-(or the equivalent `minContains:1`) needs only one hit, and no
-[[unevaluatedItems]] annotation consumes the full index set, so there is
-nothing to collect past the first. When a bound needs the exact tally (a
-[[maxContains]], or [[minContains]] ≥ 2) the scan instead counts **all**
-matches (see [[maxContains]]). If no element matches, one `Violation` is
-pushed.
+and the scan tallies **all** matches. A plain `contains` uses only whether that
+tally is nonzero; [[minContains]] and [[maxContains]] apply their bounds to the
+same tally. If no element matches, one `Violation` is pushed.
 
 | Language | Strategy |
 |---|---|

@@ -111,12 +111,12 @@ generation.
 | JSON Schema 2020-12 | Reject (P6). |
 | OpenAPI 3.1 | `dependentSchemas` present (3.1 adopts 2020-12) → reject. |
 | OpenAPI 3.0 / Swagger 2.0 | No `dependentSchemas` keyword — nothing to reject. |
-| draft-4..7 | The schema form of the merged `dependencies` keyword ≡ this → reject; the array form maps to [[dependentRequired]] and is supported there. |
+| draft-4..7 | The merged `dependencies` keyword is rejected in both forms. Rewrite an array form as [[dependentRequired]]; the schema form has no supported lowering. |
 
 ## See also
 
-- [[dependentRequired]] — the supported subset (name-presence dependency);
-  owns the `dependencies` array-form acceptance.
+- [[dependentRequired]] — the supported name-presence dependency and the
+  migration target for a legacy `dependencies` array form.
 - [[required]], [[properties]] — the unconditional lowering for dependent
   fields that are always part of the shape.
 - [[unevaluatedProperties]] — another rejected annotation-driven object

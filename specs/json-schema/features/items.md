@@ -75,8 +75,9 @@ Loader behavior:
 - [[prefixItems]] present (tuple form) → reject per **P6**. Heterogeneous
   positional tuples have no single coherent lowering — Go and Java have
   no tuple type, and a mixed `[]any`/`Object[]` would forfeit the typing
-  the subset exists to provide. Deferred; diagnostic suggests an object
-  with named [[properties]] instead.
+  the subset exists to provide. This is a categorical P6 exclusion, not a
+  deferral; the diagnostic suggests an object with named [[properties]]
+  instead.
 
 ## Type mapping
 

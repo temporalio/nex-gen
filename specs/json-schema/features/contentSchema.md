@@ -62,8 +62,9 @@ Loader behavior:
   really carries an embedded JSON document, model it as a **nested typed
   field** directly (a property of the decoded type) rather than a string
   with `contentSchema`; the subset has no embedded-document string type.
-- The value is still recursed for **validity** (it MUST be a valid JSON
-  Schema) but never lowered.
+- The raw value is traversed for schema grammar (object/boolean shape, known
+  keywords, and nested grammar) before the keyword-level rejection, but it is
+  not run through full subset semantic validation and is never lowered.
 - Present without [[contentMediaType]] → reject as inert (the spec would
   ignore it; a dead keyword signals author confusion, P7.1).
 
@@ -84,7 +85,7 @@ no serialize-side behavior (**P12**).
 |---|---|
 | Embedded document (non-lowerable, P6) | `{type:"string", contentMediaType:"application/json", contentSchema:{type:"object", properties:{…}}}` |
 | Inert without media type (P7.1) | `{type:"string", contentSchema:{type:"object"}}` |
-| Invalid subschema value | `{…, contentSchema:42}` (MUST be a valid JSON Schema) |
+| Invalid subschema grammar | `{…, contentSchema:42}` (must be an object or boolean schema) |
 
 There are no accepted or runtime fixtures: the keyword never reaches code
 generation.

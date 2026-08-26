@@ -136,8 +136,8 @@ only by an omitted default does **not** count as present.
 |---|---|
 | JSON Schema 2020-12 | Native. |
 | OpenAPI 3.1 | Aligns with 2020-12. Native. |
-| OpenAPI 3.0 / Swagger 2.0 | No `dependentRequired`; draft-4..7 used `dependencies` (array form ≡ this). A `dependencies` array form → accept as `dependentRequired`; the schema form → reject (maps to [[dependentSchemas]]). |
-| draft-4..7 | `dependencies` (merged keyword) — split: array form supported here, schema form rejected. |
+| OpenAPI 3.0 / Swagger 2.0 | No `dependentRequired`; draft-4..7 used `dependencies`. The legacy keyword is outside this loader's 2020-12 vocabulary and rejects in both array and schema forms; migrate the array form to `dependentRequired`. |
+| draft-4..7 | `dependencies` is rejected as a legacy keyword. Rewrite its array form as `dependentRequired`; its schema form has no supported lowering (see [[dependentSchemas]]). |
 
 ## See also
 

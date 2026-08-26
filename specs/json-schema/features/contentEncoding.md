@@ -179,14 +179,17 @@ anchors):
 
 | Encoding | Pinned pattern |
 |---|---|
-| `base64` | `^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==\|[A-Za-z0-9+/]{3}=)?$` |
-| `base64url` | `^(?:[A-Za-z0-9_-]{4})*(?:[A-Za-z0-9_-]{2,3})?$` |
+| `base64` | `^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/][AQgw]==\|[A-Za-z0-9+/]{2}[AEIMQUYcgkosw048]=)?$` |
+| `base64url` | `^(?:[A-Za-z0-9_-]{4})*(?:[A-Za-z0-9_-][AQgw]\|[A-Za-z0-9_-]{2}[AEIMQUYcgkosw048])?$` |
 
 `base64` accepts canonical **padded** standard base64; `base64url`
 accepts canonical **unpadded** URL-safe base64. Both accept the empty
 string (→ zero bytes) and reject the *other* encoding's alphabet, wrong
 padding, embedded whitespace/newlines, and stray characters — so the
 wire is unambiguous and the stdlib decoder below agrees.
+The final-character classes constrain unused low bits in the last quantum;
+without that constraint, multiple accepted strings could decode to the same
+bytes and re-encode differently.
 
 | Language | Strategy |
 |---|---|
@@ -271,6 +274,9 @@ emit** (**P12**), as those specs describe.
 - **[[pattern]]**: reuses its RE2-safe gate, compile-once mechanism,
   ASCII-class rule, and end-anchor normalization. Both may appear — the
   **wire string** must satisfy both.
+- **[[format]]**: a materializing temporal format cannot share a node with
+  `contentEncoding`; both need to own the same in-memory slot. Reject the
+  combination at load time rather than silently discarding either adapter.
 - **[[minLength]] / [[maxLength]]**: independent string assertions over
   the **encoded wire string** (not the decoded byte length); not
   cross-checked against the base64 shape.
@@ -292,8 +298,8 @@ emit** (**P12**), as those specs describe.
 |---|---|
 | JSON Schema 2020-12 | Annotation by default; we opt into assertion + materialization for `base64` / `base64url`, reject the rest. Native keyword, no rewrite. |
 | OpenAPI 3.1 | Adopts 2020-12 — `contentEncoding` native, same names. The OAS 3.0 `type:"string", format:"byte"` (base64) / `format:"binary"` idioms are **not** JSON Schema formats — rejected as unknown [[format]]s; author should use `contentEncoding:"base64"`. |
-| OpenAPI 3.0 | No `contentEncoding`; base64 is spelled `format:"byte"` — rejected by [[format]], with a fix-it pointing at `contentEncoding:"base64"`. |
-| draft-07 | `contentEncoding` present since draft-07 with the same encoding names; draft-07 leaned toward assertion, 2020-12 toward annotation — either way we assert `base64` / `base64url` and reject the rest. |
+| OpenAPI 3.0 | Human porting note: no `contentEncoding`; base64 is spelled `format:"byte"`. OpenAPI 3.0 is not an accepted input dialect; after conversion, use `contentEncoding:"base64"`. |
+| draft-07 | Human porting note: the keyword existed there with the same names, but a document that declares draft-07 rejects on the dialect pin before this keyword is inspected. |
 
 ## Open questions
 

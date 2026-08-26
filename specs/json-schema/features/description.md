@@ -97,9 +97,9 @@ the **body of the doc comment**, which carries no type information:
 |---|---|
 | `$defs` type | doc comment on the generated **type** (Go `type` / TS `interface` / Python class / Java class) |
 | property subschema | doc comment on the generated **field/member** |
-| service (envelope) | doc comment on the generated **service interface**; see [[services]] |
-| operation (envelope) | doc comment on the generated **operation method**; see [[services]] |
-| `items` / other inline subschema | doc comment on the nearest generated declaration, if any; otherwise dropped (nowhere to attach) |
+| service (envelope) | doc comment on the language-specific service binding defined by [[services]] |
+| operation (envelope) | doc comment on the language-specific operation entry defined by [[services]] |
+| `items` / other inline subschema | doc comment on the declaration synthesized from that subschema, if any; otherwise dropped (nowhere to attach) |
 
 Per-language block and placement:
 
@@ -110,8 +110,10 @@ Per-language block and placement:
 | Python | class **docstring** for a type/service; for a **field**, an **attribute docstring** — a bare string literal on the line(s) immediately after the field declaration, which every Python documentation tool and editor picks up. |
 | Java | `/** … */` Javadoc above the class/getter/method. |
 
-No new identifier is ever synthesized, so `description` has **no P15
-collision surface**.
+On an ordinary declaration `description` synthesizes no identifier and has no
+P15 surface. Beside a `$ref`, the implicit merge may create a standalone
+use-site type whose ordinary synthesized name participates in P15; that name
+comes from the position, not from the description text.
 
 ## Doc-comment assembly (shared machinery)
 

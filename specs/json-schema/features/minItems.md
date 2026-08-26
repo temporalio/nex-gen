@@ -33,14 +33,16 @@ Distilled:
 ## Support decision
 
 **Support:** yes — runtime element-count comparison, [[maxItems]] with
-`≥`. Same grounding: **P10** (enforced), **P11** (aggregated), **P12**
-(shared `Validate` predicate, identical both directions). No effect on
-emitted types.
+`≥`. The parse adapter counts the original wire array and the
+serialize/shared-validation path counts the decoded collection, using the same
+comparison and reason in both directions (**P10** / **P11** / **P12**). No
+effect on emitted types.
 
 Loader behavior (mirror of [[maxItems]] with `≥`):
 - Value not a non-negative integer → reject: non-number, **negative**
   (`minItems:-1`), or **fractional** (`minItems:0.5`). `minItems:2.0`
   accepted (≡ `2`).
+- The portable count ceiling from [[maxItems]] applies.
 - `minItems` on a non-array [[type]] → reject (**P7.1**).
 - `minItems` present without `type:"array"` → reject per [[type]]; a
   `type:"array"` still requires [[items]].

@@ -59,6 +59,11 @@ type is the same value comparison [[enum]] already specifies value-for-value
 across all four targets, whereas a portable composite deep-equal is extra
 surface we don't yet commit to.
 
+A scalar element that materializes to a native value ([[format]] temporals or
+[[contentEncoding]] bytes) is also deferred. Distinct JSON strings can collapse
+to one canonical native value, so comparing raw elements inbound and canonical
+elements outbound would make a successfully parsed model unserializable.
+
 Loader behavior:
 - Value not a boolean (`uniqueItems:"true"`, `uniqueItems:1`,
   `uniqueItems:null`) → reject.
@@ -76,6 +81,8 @@ Loader behavior:
   with a "not yet supported" diagnostic (deferred; see Support decision).
   A `uniqueItems: false` over the same composite `items` is still a no-op
   and accepted — nothing is asserted, so no equality is needed.
+- **`uniqueItems: true` with a materializing scalar `items`** → reject until
+  one canonical equality projection can be applied in both directions.
 
 ## Type mapping
 
@@ -91,8 +98,8 @@ repeats an earlier one is reported, naming both indexes; equality is the
 same value comparison [[enum]] uses (exact `==` for numbers — see below).
 Because the element [[type]] is scalar, Go, TypeScript and Java track seen
 values in their native hash/set primitive; Python uses a JSON-aware equality
-walk over a list (so `true` is distinct from `1`) because a generated model is a non-frozen dataclass and
-therefore unhashable (see the Python row).
+walk over a list so `true` remains distinct from `1`, and so raw composite
+values from elements that fail `items` conversion remain comparable.
 
 | Language | Strategy |
 |---|---|
@@ -147,6 +154,7 @@ wire, so the check is the identical all-distinct walk in both directions.
 | Value not a boolean | `uniqueItems:"true"`, `uniqueItems:1`, `uniqueItems:null` |
 | Type mismatch (P7.1) | `{type:"string", uniqueItems:true}` |
 | Composite element, deferred | `{type:"array", items:{type:object, …}, uniqueItems:true}`, `{type:"array", items:{type:array, …}, uniqueItems:true}` |
+| Materializing scalar element, deferred | `{type:"array", items:{type:"string", format:"date-time"}, uniqueItems:true}` |
 
 ### Runtime fixtures (validator)
 

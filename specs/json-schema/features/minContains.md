@@ -61,6 +61,7 @@ Loader behavior (mirror of [[maxContains]] with `≥`, plus the `0` case):
 - Value not a non-negative integer → reject: non-number
   (`minContains:"1"`, `minContains:true`), **negative** (`minContains:-1`),
   or **fractional** (`minContains:1.5`). `minContains:2.0` accepted (≡ `2`).
+- The portable count ceiling from [[maxItems]] applies.
 - **`minContains` without [[contains]]** on the same node → **reject**
   (**P7.1**, statically meaningless — the spec's "no effect" tightened to a
   loud error). Diagnostic: add a `contains` matcher or remove `minContains`.
@@ -93,17 +94,16 @@ None. Constraint lives only in the validator.
 ## Validator mapping
 
 Per **P10**/**P11**. A single `≥` comparison of the **match count** against
-the fixed bound, identical in both directions (shared `Validate`, **P12**).
-Same per-language tally as [[maxContains]] with `< min` as the failing
-comparison; a `minContains ≥ 2` (like any [[maxContains]]) **cancels the
-[[contains]] short-circuit**, since the exact count is what the bound needs.
+the fixed bound. Deserialize tallies the original wire elements and serialize
+tallies the decoded collection, using the same matcher, comparison, and reason
+in both directions (**P12**).
 
 | Language | Strategy |
 |---|---|
-| Go | `n := 0; for _, e := range v { if matchesContains(e) { n++ } }; if n < min { push(Violation{Path, Reason: fmt.Sprintf("too few matching items: at least %d, got %d", min, n)}) }` — a predicate in the shared `Validate`, called by `UnmarshalJSON` after decoding, collected into one `PayloadValidationError` application failure. |
-| TypeScript | After the `Array.isArray` guard ([[items]]), ``const n = v.filter(matchesContains).length; if (n < min) push(Violation{path, reason: `too few matching items: at least ${min}, got ${n}`})``, throw one `PayloadValidationError` application failure. |
-| Python | `_check_contains` in the transfer type converter tallies `n = sum(1 for e in v if _matches_contains(e))` and on `n < min` appends `Violation(path=…, reason=f"too few matching items: at least {min}, got {n}")` into the single generated `PayloadValidationError` application failure. |
-| Java | The per-POJO collecting deserializer (PRINCIPLES Java §5) tallies matches over the `List<T>` and on `n < min` pushes a `Violation{path, "too few matching items: at least " + min + ", got " + n}` into the single `PayloadValidationError` application failure. Not bean-validation. |
+| Go | `UnmarshalJSON` tallies the original `json.RawMessage` elements; shared `Validate` tallies the typed slice before serialize. Both push the same bound/count violation. |
+| TypeScript | The transfer converters tally the raw array inbound and the typed array outbound after the `Array.isArray` guard. |
+| Python | `_check_contains` receives the raw list inbound and the typed list outbound, appending the same bound/count violation. |
+| Java | The collecting deserializer tallies the original Jackson array node; serialize tallies the typed `List<T>`. Not bean-validation. |
 
 Reason strings name the concrete bound and offending match count
 (`too few matching items: at least 2, got 1`), per the [[maxContains]]

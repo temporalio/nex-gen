@@ -228,15 +228,15 @@ signature, validation, or dispatch behavior. A non-boolean value rejects.
 
 | Aspect | Go | TypeScript | Python | Java |
 |---|---|---|---|---|
-| Service binding | pkg-level `var <Name> = struct{…}{…}` | `export const <name> = nexus.service(fqn, {…})` | `@nexusrpc.service(name=fqn)` class | `@Service(name=fqn)` interface |
-| Operation entry | field `nexus.OperationReference[In, Out]` set via `nexus.NewOperationReference[In,Out](wire)` | `nexus.operation<In, Out>({ name: wire, inputType, outputType })` | attr `nexusrpc.Operation[In, Out] = nexusrpc.Operation(name=wire)` | method `Out m(In input)` + `@Operation(name=wire)` |
+| Service binding | pkg-level `var <Name> = struct{…}{…}` | `export const <name> = nexus.service(fqn, {…})` | `@service(name=fqn)` class | `@Service(name=fqn)` interface |
+| Operation entry | field `nexus.OperationReference[In, Out]` set via `nexus.NewOperationReference[In,Out](wire)` | `nexus.operation<In, Out>({ name: wire, inputType, outputType })` | attr `Operation[In, Out] = Operation(name=wire)` | method `Out m(In input)` + `@Operation(name=wire)` |
 | Operation type info | — | `inputType`/`outputType` carry the I/O type's transfer type converter (below) | — | — |
 | Service wire name | `ServiceName` struct field | first arg to `nexus.service` | `service(name=…)` | `@Service(name=…)` |
 | Void output | `nexus.NoValue` | `void` | `None` | `void` return |
 | Void input | `nexus.NoValue` | `void` | `None` | **no-arg method** `Out m()` |
 | Deprecated | godoc `Deprecated:` paragraph | JSDoc `@deprecated` | PEP 702 `typing_extensions.deprecated(..., category=None)` | `@Deprecated` + Javadoc `@deprecated` |
-| Import | `github.com/nexus-rpc/sdk-go/nexus` | `nexus-rpc` | `nexusrpc` | `io.nexusrpc.{Service,Operation}` |
-| File | declaring module's `<module>.go` | `<module>.ts` | `<module>.py` | **own `<Service>.java`** |
+| Import | `github.com/nexus-rpc/sdk-go/nexus` | `nexus-rpc` | `from nexusrpc import Operation, service` | `io.nexusrpc.{Service,Operation}` |
+| File | declaring module's `<module>.go` | `services.ts` | `services.py` | **own `<Service>.java`** |
 
 ### Verified SDK signatures
 
@@ -252,8 +252,8 @@ signature, validation, or dispatch behavior. A non-boolean value rejects.
   `interface TransferTypeConverter<T, D = unknown> { fromTransferType(value:
   D): T; toTransferType(value: T): D }` — confirmed by the existing
   generator's compiling output.
-- **Python** (`nexusrpc`): `@nexusrpc.service` /
-  `@nexusrpc.service(name=…)` (name defaults to the class name);
+- **Python** (`nexusrpc`): `@service` /
+  `@service(name=…)` (name defaults to the class name);
   `Operation[InputT, OutputT]` dataclass, `Operation(name=…)`. **No
   `NoValue`** — void is `None` / `type(None)`.
 - **Java** (`io.nexusrpc`): `@Service` on an **interface**, `String
@@ -320,21 +320,21 @@ export const chatService = nexus.service("example.v1.ChatService", {
 ### Python
 
 ```python
-import nexusrpc
+from nexusrpc import Operation, service
 
 
-@nexusrpc.service(name="example.v1.ChatService")
+@service(name="example.v1.ChatService")
 class ChatService:
     """
     A service for sending chat messages.
     """
 
-    poll_messages: nexusrpc.Operation[PollMessagesInput, PollMessagesOutput] = nexusrpc.Operation(name="poll-messages")
+    poll_messages: Operation[PollMessagesInput, PollMessagesOutput] = Operation(name="poll-messages")
     """
     Poll for new messages.
     """
 
-    send_message: nexusrpc.Operation[SendMessageInput, None] = nexusrpc.Operation(name="SendMessage")
+    send_message: Operation[SendMessageInput, None] = Operation(name="SendMessage")
     """
     Send a message.
     """
@@ -395,9 +395,8 @@ type position.
   hatch is renaming the `$defs` type or switching the operation to a
   `$ref`.
 - The **TS service const is `camelCase`** (`chatService`) — a value
-  binding, recased like an operation/member. (The existing WIT generator
-  emits PascalCase `UserService`; that is **wrong** and must be fixed to
-  match this spec.) Go `var`, Python `class`, and Java `interface` keep
+  binding, recased like an operation/member. The shared WIT and JSON Schema
+  emitter uses this form. Go `var`, Python `class`, and Java `interface` keep
   the PascalCase service identifier (the key), which their regex already
   guarantees.
 - `description` → doc comment per target (Go `//`, TS/Java JSDoc/JavaDoc
@@ -407,21 +406,20 @@ type position.
 
 Per [[generated-file-layout]]:
 
-- A service binding emits into the **same per-input module** as the
-  models declared in that file (Go `<module>.go`, Python `<module>.py`,
-  TS `<module>.ts`). Synthesized `<Op>Input`/`<Op>Output` types are
-  ordinary types in that module.
+- A service binding emits into the **same per-input module directory** as the
+  models declared in that file: Go places both in `<module>.go`, while Python
+  and TypeScript use sibling `services.py` / `services.ts` files beside
+  `models.py` / `models.ts`. Synthesized `<Op>Input`/`<Op>Output` types are
+  ordinary model types in that module.
 - **Java** is the exception: each service is its **own `<Service>.java`**
   (one-public-class-per-file), exactly as each model is its own file.
-- Aggregators re-export services: `index.ts` (`export … from
-  './<module>'`), `__init__.py` (`__all__`). Go/Java rely on exported
+- Aggregators re-export services: `index.ts` re-exports `./services` and
+  `__init__.py` includes them in `__all__`. Go/Java rely on exported
   visibility (capitalized / `public`).
-- Service identifiers, operation field identifiers, and synthesized I/O
-  type names all live in the identifier namespace of the **declaring
-  module** (P15) — package-wide in Go, where every module flattens into one
-  package — and are checked **per emitted target** (normalization differs
-  per language, like [[properties]] / [[ref]]). A service declared in a
-  non-root input file is checked in that file's module, not the root's.
+- Service identifiers, operation field identifiers, and synthesized I/O type
+  names are checked **per emitted target**. The scope is run-wide for Go,
+  TypeScript, and Python (flat package or root barrel), and per declaring Java
+  package; see [[generated-file-layout]] and P15.
 
 > **A generated service and a generated model that resolve to the same
 > identifier collide, and the generator fails the build (P7.1/P15).** A
@@ -501,13 +499,11 @@ existing, tested output so the **future separate crate** can share the
 emission code rather than duplicate it:
 
 - Python `@service` + `Operation[...]` class attrs
-  (`examples/python/user_service/service.py`) and TS `nexus.service(...,
+  (`advanced/samples/python/wit/user_service/services.py`) and TS `nexus.service(...,
   { op: nexus.operation<…>({ name }) })`
-  (`examples/typescript/user-service/service.ts`) already match this
-  spec's shapes — the emitters are the reuse target. **One fix is owed in
-  the WIT generator:** its TS service const is PascalCase
-  (`UserService`); this spec mandates `camelCase` (`userService`), so the
-  shared emitter must recase it.
+  (`advanced/samples/typescript/wit/user-service/services.ts`) already match
+  this spec's shapes through the shared emitters, including the camelCase TS
+  service const.
 - Only the **input model** differs (JSON Schema here vs WIT there); none
   of WIT's input-side concepts (directives, proto backing, resources)
   cross into this spec. The TS transfer type converter wiring (below) is
@@ -542,6 +538,8 @@ emission code rather than duplicate it:
 | Service name regex | `chatService` / `Chat_Service` / `9Service` |
 | Service with no operations (P7.1) | `operations:` omitted, or an empty `operations: {}` |
 | Operation name regex | `PollMessages` / `poll_messages` / `2fa` |
+| Operation identifiers collide after target recasing | two operation keys that map to the same emitted method/field identifier |
+| Duplicate operation wire name | two operations in one service whose `fqn` values are equal |
 | Inline I/O without shape (P7.1) | `input: {}` / `input: {type: object}` (no `properties`/`additionalProperties`) |
 | Non-object I/O (inline) | `input: {type: string}` / `input: {type: array, …}` |
 | Non-object I/O (`$ref`) | `input: {$ref: '#/$defs/Y'}` where `Y` is not `type: object` |
