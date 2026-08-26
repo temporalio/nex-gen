@@ -14,7 +14,7 @@ snapshot-only native-api form of the JSON-Schema inputs.
   generated-api compile check, and proto-wire compatibility checks against the
   fixtures in [`../wire/proto/`](../wire/proto/).
 
-Regenerate WIT output with `cargo build-examples --lang dotnet` from the repo
+Regenerate WIT output with `cargo build-examples --format wit --lang dotnet` from the repo
 root.
 
 ```bash

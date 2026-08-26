@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `cargo build-examples` now rebuilds both WIT and JSON Schema samples by
+  default. Use `--format wit` or `--format json-schema` for focused generation;
+  the separate `cargo build-json-examples` command has been removed.
+
 ### Deprecated
 
 ### Breaking Changes

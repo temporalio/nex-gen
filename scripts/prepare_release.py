@@ -158,7 +158,6 @@ def verify_lockfile(repo_root: pathlib.Path) -> None:
 
 def regenerate_samples(repo_root: pathlib.Path) -> None:
     subprocess.run(["cargo", "build-examples"], cwd=repo_root, check=True)
-    subprocess.run(["cargo", "build-json-examples"], cwd=repo_root, check=True)
 
 
 def commit_release_changes(repo_root: pathlib.Path, version: str) -> None:

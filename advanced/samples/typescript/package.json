@@ -3,7 +3,6 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build-outputs": "node build_outputs.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },

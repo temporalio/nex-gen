@@ -13,26 +13,21 @@ snapshot-only JSON-Schema **native-api** outputs.
 - Proto wire-compatibility fixtures live in `advanced/samples/wire/proto/`
 - Pytest files (WIT round-trips + proto wire compatibility) live in
   `advanced/samples/python/tests/`
-- `build_outputs.py` is a thin wrapper around `cargo build-examples --lang python`
 - `cargo test` validates the checked-in generated packages and does not rebuild them
 
-Top-level rebuild commands:
+Top-level rebuild command:
 
 ```bash
-cargo build-examples --lang python        # WIT outputs
-cargo build-json-examples --lang python   # JSON-Schema api + definitions outputs
+cargo build-examples --lang python
 ```
 
 Current workflow:
 
 ```bash
+cargo build-examples --lang python
 cd advanced/samples/python
-uv run build_outputs.py
 uv run pytest
 uv run basedpyright
 ```
-
-Set `NEXGEN_BIN=/path/to/nexgen` to make `build_outputs.py` use an
-already-built binary instead of the cargo alias.
 
 The beginner-facing JSON-Schema definitions samples live under `samples/python/`.

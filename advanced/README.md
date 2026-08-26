@@ -24,7 +24,7 @@ The generator picks its input format from the file extension, so the same
 > gated behind the `advanced` Cargo feature, which is off by default. Build or
 > run with `--features advanced` (as every command below does), or produce a
 > binary that includes it with `cargo build --release --features advanced`.
-> The `cargo build-examples` / `cargo build-json-examples` aliases instead run
+> The `cargo build-examples` alias instead runs
 > the repository-local `xtask` binary; they are not `nexgen` subcommands.
 
 ## Contents
@@ -61,16 +61,16 @@ cargo build-examples
 Rebuild one language or one example only:
 
 ```bash
-cargo build-examples --lang python
-cargo build-examples --lang dotnet
-cargo build-examples user-service
-cargo build-examples --lang typescript user-service
+cargo build-examples --format wit --lang python
+cargo build-examples --format wit --lang dotnet
+cargo build-examples --format wit user-service
+cargo build-examples --format wit --lang typescript user-service
 ```
 
 Run the same validations as the CI pipeline:
 
 ```bash
-./scripts/validate.sh
+cargo validate
 ```
 
 Write the prepared WIT workspace the loader actually parses:
@@ -368,7 +368,7 @@ cargo run --features advanced -- add-rpc \
 Validate the Python examples:
 
 ```bash
-cargo build-examples --lang python
+cargo build-examples --format wit --lang python
 cd advanced/samples/python
 uv run pytest
 uv run basedpyright
@@ -377,7 +377,7 @@ uv run basedpyright
 Validate the TypeScript examples:
 
 ```bash
-cargo build-examples --lang typescript
+cargo build-examples --format wit --lang typescript
 cd advanced/samples/typescript
 npm install
 npm run test

@@ -11,27 +11,22 @@ service scaffolding).
 - Vitest round-trip tests live in `samples/typescript/tests/`, driving the
   generated transfer type converters through the Temporal data converter against
   the canonical wire fixtures in [`samples/wire/json_schema`](../wire/json_schema)
-- `build_outputs.mjs` is a thin wrapper around
-  `cargo build-json-examples --lang typescript`
 
 Top-level rebuild command:
 
 ```bash
-cargo build-json-examples --lang typescript
+cargo build-examples --format json-schema --lang typescript
 ```
 
 Current workflow:
 
 ```bash
+cargo build-examples --format json-schema --lang typescript
 cd samples/typescript
 npm install
-npm run build-outputs
 npm run typecheck
 npm run test
 ```
-
-Set `NEXGEN_BIN=/path/to/nexgen` to make `build_outputs.mjs` use an
-already-built binary instead of the cargo alias.
 
 The native-api (Nexus service/client) variant of these same schemas is
 snapshot-only and lives under

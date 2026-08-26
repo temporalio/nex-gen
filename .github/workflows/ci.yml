@@ -75,19 +75,19 @@ jobs:
             9.0.x
 
       - name: Validate Rust
-        run: ./scripts/validate.sh rust
+        run: cargo validate rust
 
       - name: Validate Python samples
-        run: ./scripts/validate.sh python
+        run: cargo validate python
 
       - name: Validate TypeScript samples
-        run: ./scripts/validate.sh typescript
+        run: cargo validate typescript
 
       - name: Validate Go samples
-        run: ./scripts/validate.sh go
+        run: cargo validate go
 
       - name: Validate Java samples
-        run: ./scripts/validate.sh java
+        run: cargo validate java
 
       - name: Validate .NET samples
-        run: ./scripts/validate.sh dotnet
+        run: cargo validate dotnet

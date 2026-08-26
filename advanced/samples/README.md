@@ -78,9 +78,9 @@ For the beginner-friendly JSON Schema definitions samples, see
 From the repository root:
 
 ```sh
-cargo build-examples                 # WIT examples, all languages
-cargo build-examples --lang go       # a single language
-cargo build-json-examples            # JSON Schema outputs (definitions + api)
+cargo build-examples                         # both input formats, all languages
+cargo build-examples --format wit --lang go  # WIT for a single language
+cargo build-examples --format json-schema    # JSON Schema outputs (definitions + api)
 ```
 
 Each example's output directory is deleted before it is regenerated, so a file

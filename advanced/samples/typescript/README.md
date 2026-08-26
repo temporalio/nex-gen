@@ -14,10 +14,8 @@ JSON-Schema samples.
 - Vitest files live in `advanced/samples/typescript/tests/` (WIT round-trip and
   real-workflow/Nexus tests); proto wire fixtures live in
   [`advanced/samples/wire/proto`](../wire/proto)
-- `build_outputs.mjs` is a thin wrapper around
-  `cargo build-examples --lang typescript`
 
-Top-level rebuild command:
+Top-level rebuild command (both WIT and JSON Schema outputs):
 
 ```bash
 cargo build-examples --lang typescript
@@ -26,9 +24,9 @@ cargo build-examples --lang typescript
 Current workflow:
 
 ```bash
+cargo build-examples --lang typescript
 cd advanced/samples/typescript
 npm install
-npm run build-outputs
 npm run typecheck
 npm run test
 ```
@@ -36,12 +34,8 @@ npm run test
 To rebuild one example only:
 
 ```bash
-cd advanced/samples/typescript
-node build_outputs.mjs workflow-service
+cargo build-examples --format wit --lang typescript workflow-service
 ```
-
-Set `NEXGEN_BIN=/path/to/nexgen` to make `build_outputs.mjs` use an
-already-built binary instead of the cargo alias.
 
 The definitions-mode JSON-Schema samples (plain data models) live under
 [`samples/typescript`](../../samples/typescript).

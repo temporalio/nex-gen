@@ -26,8 +26,8 @@ For the more advanced WIT-based generation and the JSON Schema *native-api*
 From the repository root:
 
 ```sh
-cargo build-json-examples            # all languages
-cargo build-json-examples --lang go  # a single language
+cargo build-examples --format json-schema            # all languages
+cargo build-examples --format json-schema --lang go  # a single language
 ```
 
 The generated definitions are checked in and snapshot-tested by `cargo test`.

@@ -9,26 +9,22 @@ generator outputs.
   `models` module and re-exported from the package root
 - Canonical wire fixtures live in `samples/wire/json_schema/`
 - Pytest round-trip tests live in `samples/python/tests/`
-- `build_outputs.py` is a thin wrapper around `cargo build-json-examples --lang python`
 - `cargo test` validates the checked-in packages and does not rebuild them
 
 Top-level rebuild command:
 
 ```bash
-cargo build-json-examples --lang python
+cargo build-examples --format json-schema --lang python
 ```
 
 Current workflow:
 
 ```bash
+cargo build-examples --format json-schema --lang python
 cd samples/python
-uv run build_outputs.py
 uv run pytest
 uv run basedpyright
 ```
-
-Set `NEXGEN_BIN=/path/to/nexgen` to make `build_outputs.py` use an
-already-built binary instead of the cargo alias.
 
 The native-api variant of these schemas (services + clients) lives under
 `advanced/samples/python/json_schema/api/`.

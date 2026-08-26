@@ -9,7 +9,7 @@ converters) with no service/endpoint scaffolding.
   [`../wire/json_schema/`](../wire/json_schema/) through `System.Text.Json` and
   assert JSON-equality.
 
-Regenerate with `cargo build-json-examples --lang dotnet` from the repo root.
+Regenerate with `cargo build-examples --format json-schema --lang dotnet` from the repo root.
 
 ```bash
 dotnet build Nexgen.DotNetExamples.csproj   # compile the models

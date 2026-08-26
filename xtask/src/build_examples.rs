@@ -8,9 +8,17 @@ use nexgen::generator::{GenerationMode, TsDateTimeTypes};
 use nexgen::language::Language;
 use nexgen::{GenerateRequest, generate_to_file};
 
+#[derive(Clone)]
 pub struct BuildExamplesRequest {
+    pub format: Option<ExampleFormat>,
     pub languages: Vec<Language>,
     pub example_ids: Vec<String>,
+}
+
+#[derive(Clone, Copy)]
+pub enum ExampleFormat {
+    Wit,
+    JsonSchema,
 }
 
 fn repo_root() -> PathBuf {
@@ -18,6 +26,127 @@ fn repo_root() -> PathBuf {
 }
 
 pub fn build_examples(request: &BuildExamplesRequest) -> Result<()> {
+    match request.format {
+        Some(ExampleFormat::Wit) => build_wit_examples(request),
+        Some(ExampleFormat::JsonSchema) => build_json_examples(request),
+        None => {
+            let repo_root = repo_root();
+            let wit_request = request_for_languages(request, |language| {
+                matches!(
+                    language,
+                    Language::Dotnet | Language::Python | Language::TypeScript | Language::Go
+                )
+            });
+            let json_request = request_for_languages(request, |language| {
+                matches!(
+                    language,
+                    Language::Python | Language::TypeScript | Language::Go | Language::Java
+                )
+            });
+            build_selected_examples(&repo_root, wit_request, json_request)?;
+            Ok(())
+        }
+    }
+}
+
+fn build_selected_examples(
+    repo_root: &Path,
+    wit_request: Option<BuildExamplesRequest>,
+    json_request: Option<BuildExamplesRequest>,
+) -> Result<()> {
+    let wit_ids = wit_request
+        .as_ref()
+        .map(|request| available_wit_example_ids(repo_root, request))
+        .transpose()?
+        .unwrap_or_default();
+    let json_ids: std::collections::BTreeSet<String> = json_request
+        .as_ref()
+        .map(|_| discover_json_example_ids(repo_root).map(|ids| ids.into_iter().collect()))
+        .transpose()?
+        .unwrap_or_default();
+
+    for request in [wit_request.as_ref(), json_request.as_ref()]
+        .into_iter()
+        .flatten()
+    {
+        for example_id in &request.example_ids {
+            if !wit_ids.contains(example_id) && !json_ids.contains(example_id) {
+                return Err(Error::UnknownExampleId {
+                    language: request
+                        .languages
+                        .first()
+                        .copied()
+                        .unwrap_or(Language::Python),
+                    example_id: example_id.clone(),
+                });
+            }
+        }
+    }
+
+    if let Some(request) =
+        wit_request.and_then(|request| request_with_example_ids(request, &wit_ids))
+    {
+        build_wit_examples(&request)?;
+    }
+    if let Some(request) =
+        json_request.and_then(|request| request_with_example_ids(request, &json_ids))
+    {
+        build_json_examples(&request)?;
+    }
+    Ok(())
+}
+
+fn available_wit_example_ids(
+    repo_root: &Path,
+    request: &BuildExamplesRequest,
+) -> Result<std::collections::BTreeSet<String>> {
+    let languages = if request.languages.is_empty() {
+        vec![
+            Language::Dotnet,
+            Language::Python,
+            Language::TypeScript,
+            Language::Go,
+        ]
+    } else {
+        request.languages.clone()
+    };
+    let mut ids = std::collections::BTreeSet::new();
+    for language in languages {
+        ids.extend(discover_example_ids(repo_root, language)?);
+    }
+    Ok(ids)
+}
+
+fn request_with_example_ids(
+    mut request: BuildExamplesRequest,
+    available_ids: &std::collections::BTreeSet<String>,
+) -> Option<BuildExamplesRequest> {
+    let requested_ids = !request.example_ids.is_empty();
+    request.example_ids.retain(|id| available_ids.contains(id));
+    (!requested_ids || !request.example_ids.is_empty()).then_some(request)
+}
+
+fn request_for_languages(
+    request: &BuildExamplesRequest,
+    supports: impl Fn(Language) -> bool,
+) -> Option<BuildExamplesRequest> {
+    if request.languages.is_empty() {
+        return Some(request.clone());
+    }
+    let languages = request
+        .languages
+        .iter()
+        .copied()
+        .filter(|language| supports(*language))
+        .collect::<Vec<_>>();
+    (!languages.is_empty()).then_some(BuildExamplesRequest {
+        format: request.format,
+        languages,
+        example_ids: request.example_ids.clone(),
+    })
+}
+
+fn build_wit_examples(request: &BuildExamplesRequest) -> Result<()> {
     let repo_root = repo_root();
     let use_default_languages = request.languages.is_empty();
     let languages = if use_default_languages {
