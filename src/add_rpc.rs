@@ -1309,6 +1309,10 @@ impl<'a> AddRpcBuilder<'a> {
 
         let mut rendered = String::new();
         rendered.push_str(&format!(
+            "  /// Protobuf oneof `{}.{}`.\n",
+            message.full_name, oneof.name
+        ));
+        rendered.push_str(&format!(
             "  /// @nexus.proto \"{}.{}\"\n",
             message.full_name, oneof.name
         ));

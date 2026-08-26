@@ -623,10 +623,10 @@ pub fn python_interpreter() -> PathBuf {
 
 /// Resolve an interpreter with the generated models' runtime dependencies.
 ///
-/// Rust validation runs before the Python sample validation in CI, so a clean
-/// checkout does not have the sample virtual environment yet. Provision it
-/// from the lockfile on demand instead of silently falling back to a system
-/// interpreter that cannot import `temporalio`.
+/// Rust validation runs before the Python sample validation in CI, so the
+/// sample virtual environment may be missing or stale. Synchronize it from the
+/// lockfile once per test process instead of trusting whichever dependencies an
+/// existing environment happens to contain.
 pub fn python_runtime_command() -> Result<Command, String> {
     if let Some(explicit) = std::env::var_os("NEXGEN_CONFORMANCE_PYTHON") {
         return Ok(command(&PathBuf::from(explicit).to_string_lossy()));
@@ -634,7 +634,8 @@ pub fn python_runtime_command() -> Result<Command, String> {
 
     let sample_root = repository_root().join("samples/python");
     let venv = sample_root.join(".venv/bin/python");
-    if !venv.is_file() {
+    static SYNC: OnceLock<Result<(), String>> = OnceLock::new();
+    SYNC.get_or_init(|| {
         let sync = run(command("uv")
             .current_dir(&sample_root)
             .args(["sync", "--locked"]));
@@ -644,7 +645,9 @@ pub fn python_runtime_command() -> Result<Command, String> {
                 sync.detail
             ));
         }
-    }
+        Ok(())
+    })
+    .clone()?;
     if !venv.is_file() {
         return Err(format!(
             "uv sync did not create the Python interpreter at {}",
