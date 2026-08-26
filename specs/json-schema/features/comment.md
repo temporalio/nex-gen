@@ -61,11 +61,9 @@ Loader behavior:
   dropped**. Unlike an empty [[description]] — which is rejected because
   it renders a dead doc body — an empty `$comment` produces no output at
   all, so there is nothing degenerate to guard against.
-- `$comment` as a **sibling of `$ref`** needs no special handling: the
-  sibling rewrite ([[ref]]) folds it into the merged schema, where it is
-  dropped like any other `$comment`. It contributes nothing to merge, so
-  multiplicity is a non-issue — several `$comment`s over one merged node
-  all simply vanish (contrast [[description]]'s last-wins).
+- `$comment` as a **sibling of `$ref`** remains inert: it is dropped before
+  deciding whether the reference needs an implicit merge, so adding a comment
+  cannot clone the target into a new type or add a P15 identifier.
 
 ## Type mapping
 
@@ -88,7 +86,7 @@ lifetime ends at load, when it is dropped.
 | Comment on a `$defs` type | `{$comment:"internal: revisit bounds", type:"object", …}` → dropped, type unchanged |
 | Comment on a property | `properties:{age:{$comment:"was int32 in v1", type:"integer"}}` → dropped |
 | Empty comment | `{$comment:"", type:"string"}` → accepted, dropped (no dead output) |
-| Comment sibling of a `$ref` | `{$ref:"#/$defs/User", $comment:"use-site note"}` → merged then dropped ([[ref]]) |
+| Comment sibling of a `$ref` | `{$ref:"#/$defs/User", $comment:"use-site note"}` → comment dropped, reference unchanged ([[ref]]) |
 
 ### Rejected at load time (negative)
 
@@ -98,8 +96,9 @@ lifetime ends at load, when it is dropped.
 
 ### Runtime fixtures
 
-None. `$comment` has no runtime behavior and no generated output — a
-generation-snapshot test confirms it leaves the emitted source unchanged.
+None. `$comment` has no runtime behavior and no generated output. A structural
+generation regression should compare otherwise-identical schemas with and
+without the annotation, including beside a `$ref`.
 
 ## Interactions
 
@@ -108,9 +107,9 @@ generation-snapshot test confirms it leaves the emitted source unchanged.
   but the spec forbids presenting it, so it is dropped rather than
   rendered. Prose meant for the generated output belongs in
   [[description]].
-- **[[ref]]**: a `$comment` sibling of a `$ref` merges via the
-  implicit-`allOf` rewrite and is then dropped; it never needs the
-  last-wins reconciliation [[description]] uses, because it emits nothing.
+- **[[ref]]**: a `$comment` sibling is dropped without triggering the
+  implicit-`allOf` rewrite; the reference and its emitted identity stay
+  unchanged.
 
 ## Ecosystem variance
 

@@ -47,12 +47,12 @@ Distilled:
 pure-Rust **`regex` crate** (the generator's own engine) cannot compile —
 lookahead `(?=…)`/`(?!…)`, lookbehind, backreferences `\1`, and other
 backtracking-only Perl constructs — is **rejected at load** (deferred,
-*not* a categorical P6 exclusion). Three further constructs that *do*
-compile everywhere but match divergently are also handled
-(conformance-proven, below): **inline flag groups** `(?i)`/`(?flags:…)` are
-**rejected**, and **`\s`/`\S`** and the **`$` end-anchor** are **normalized**
-to a portable form in the emitted pattern (with one narrow `\S`-in-class
-reject). Applies only to `string` fields. "RE2-safe" below names the
+*not* a categorical P6 exclusion). Additional syntax categories are rejected
+or normalized where the runtime engines diverge (the complete gate is below):
+inline flags are rejected; `.` / `\s` / `\S` and the `$` end-anchor are
+normalized; non-portable escapes, assertion spellings, class operations,
+named captures, and ambiguous unbounded repetitions are rejected. Applies only
+to `string` fields. "RE2-safe" below names the
 **regular (no-backtracking) subset** — the algorithm family that Rust's
 `regex` and Go's `regexp` both implement — not a dependency on Go.
 
@@ -104,8 +104,7 @@ Rationale (citing [[PRINCIPLES.md]]):
 **Conformance-verified gate rules (beyond no-backtracking).** The
 `(pattern, instance)` corpus run through all four runtime engines + the
 Rust gate (`json-schema/corpora/pattern_conformance/`) showed the compile gate +
-pinned flags is **not** sufficient — three constructs compile in *every*
-engine yet match differently, so each gets an explicit rule:
+pinned flags is **not** sufficient, so the gate applies these explicit rules:
 1. **Inline flag groups `(?i)` / `(?flags:…)` → reject.** JS `RegExp`
    cannot compile them (they are not ECMA-262 syntax); Rust/Go/Python/Java
    all do — a pure compile-acceptance gap (`(?i)^cat$` fails only in JS).
@@ -147,6 +146,22 @@ engine yet match differently, so each gets an explicit rule:
    whereas Java's (and .NET's / Ruby's — see Prospective targets) is `\z`,
    with `\Z` being the *lenient* one there. The generator emits the right
    letter per target.
+4. **`.` → `[^\n]`.** Runtime dot semantics disagree on which line terminators
+   are excluded. The explicit class pins the project's one-code-point,
+   not-newline rule and is the spelling used in diagnostics.
+5. **Non-portable escapes → reject.** Only the shared escape vocabulary is
+   admitted. In particular escaped punctuation such as `\-`, `\_`, `\"`,
+   `\ `, `\#`, `\&`, and `\~`; `\a`/`\v`; octal/`\0`; `\uFFFF`;
+   `\UFFFFFFFF`; `\x{…}`; and Unicode property escapes `\p{…}` are rejected.
+6. **Non-portable assertions and captures → reject.** `\A`, `\z`,
+   `\b{start}`/`\b{end}`, `\<`/`\>`, and both named-capture syntaxes are
+   outside the shared grammar.
+7. **Ambiguous punctuation/classes → reject.** Lone `{`, `}`, or `]`; POSIX
+   classes; nested classes; and class set operations (`&&`, `--`, `~~`) are
+   rejected rather than interpreted differently per engine.
+8. **Ambiguous unbounded repetition → reject (D7).** Nested/unbounded
+   quantifier shapes such as `^([a-z]+)+$` are rejected to keep evaluation
+   linear and avoid target-specific backtracking failures.
 
 All of these compile under `regex::Regex::new`, so the gate additionally
 walks the pattern's `regex-syntax` **AST** — rejecting inline-flag groups,
@@ -288,6 +303,10 @@ is projected from the native value on the encode side.
 | Non-portable: backreference | `{type:"string", pattern:"(a)\\1"}` |
 | Inline flag group (JS can't compile) | `{type:"string", pattern:"(?i)^cat$"}` |
 | `\S` in a multi-member class (open complement) | `{type:"string", pattern:"[\\S.]"}`, `{…, pattern:"[\\S\\d]"}` |
+| Non-portable escape | escaped punctuation, octal, Unicode-property, or engine-specific escape syntax |
+| Non-portable assertion/capture | `\Acat`, `(?<word>cat)` |
+| Class operation / POSIX class | `[a-z&&[^x]]`, `[[:alpha:]]` |
+| Ambiguous unbounded repetition (D7) | `^([a-z]+)+$` |
 | Literal fails pattern | `{type:"string", pattern:"^[a-z]+$", const:"AB"}`, `{…, default:"9"}` |
 
 ### Runtime fixtures (validator)
@@ -303,8 +322,9 @@ new edge cases are added there, not enumerated here.
 
 `tests/json_schema_corpus_runtime.rs` is the executable consumer: it generates
 one member per accepted pattern and runs all 102 runtime rows through Go,
-TypeScript, Python, and Java. The 38 `expect_gate_reject` rows remain shared
-loader coverage because no runtime pattern is emitted for a rejected schema.
+TypeScript, Python, and Java. The 38 `expect_gate_reject` rows exercise the gate
+helper directly; they are not end-to-end loader coverage because no runtime
+pattern is emitted for a rejected schema.
 `tests/json_schema_conformance_manifest.rs` adds the integration/serialize
 case and records `pattern.parse` in its fixed coverage ledger.
 

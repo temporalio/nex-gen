@@ -46,6 +46,7 @@ Loader behavior (mirror of [[maxLength]] with `≥`):
 - Value not a non-negative integer → reject: non-number, **negative**
   (`minLength:-1`), or **fractional** (`minLength:0.5`). `minLength:5.0`
   accepted (≡ `5`).
+- The portable count ceiling from [[maxItems]] applies.
 - `minLength` on a non-string [[type]] → reject (**P7.1**).
 - **`minLength:0`** → accepted, treated as **omitted** (the spec's
   explicit equivalence); it constrains nothing. (Not rejected as

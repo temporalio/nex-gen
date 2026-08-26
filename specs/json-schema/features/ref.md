@@ -138,7 +138,8 @@ Every accepted `$ref` resolves to a named top-level type. Names are
 derived as:
 
 - **File root** → the normalized file **basename** (`user_profile.json`
-  → `UserProfile`), overridable by a root `title` or `x-<lang>-name`.
+  → `UserProfile`), overridable by `x-<lang>-name`. A root [[title]] is
+  documentation only and never names the type.
   This is distinct from the *module file* name (the flattened full path —
   see [[generated-file-layout]]): `a/user.json` and `b/user.json` yield
   modules `a_user`/`b_user` but both derive type name `User`.
@@ -158,7 +159,7 @@ package-wide namespace** — Go flattens to a single package, and the TypeScript
 and Python barrels re-aggregate every module into one. Java and .NET resolve
 per module instead, so there the namespace is the module
 ([[generated-file-layout]]). A collision → **load reject, no mangling**;
-the escape hatch is `x-<lang>-name` / root `title` (**P15**, scope
+the escape hatch is `x-<lang>-name` (**P15**, scope
 widened from per-object to per-package). Consistent with [[properties]],
 **collisions are evaluated per emitted target only** — a name set may be
 accepted for a Go-only run and rejected for a Java run, because
@@ -189,7 +190,9 @@ aggregators, single- vs multi-input collapse, the flattened
 path-to-module encoding) is specified in **[[generated-file-layout]]**.
 The `$ref`-relevant summary:
 
-- One **single flat package** per language; one module per input file.
+- One generated package tree per language, flat for Go and mirroring the input
+  tree for Python, TypeScript, and Java; one module per input file
+  ([[generated-file-layout]]).
 - Reference cycles that span ≥2 input files **hoist** their
   strongly-connected types into a shared module (Python `_recursive.py`;
   TS/Go/Java handle cycles natively).
@@ -245,7 +248,9 @@ the recursion-pointer rule above applies to cyclic edges. Imports follow
 - **TypeScript** — `import type { Foo } from './b'`, plus
   `import { fooTransferTypeConverter } from './b'` since the referencing
   type's converter delegates to the target's (PRINCIPLES TS §4).
-- **Go / Java** — same package; no import.
+- **Go** — same flat package; no import.
+- **Java** — same-package references need no import in a single-input run;
+  cross-file references import the target from its per-input sub-package.
 
 **Bare-`$ref`-root alias.** *(Status: unimplemented — a bare-`$ref` root
 is currently loaded as "not a model": nothing is emitted for it in any

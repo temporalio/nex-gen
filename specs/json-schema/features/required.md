@@ -45,8 +45,9 @@ Rationale (citing [[PRINCIPLES.md]]):
   **required+nullable** — must be present, value may be `null` — and is
   **supported** (presence-check on, null-rejection off). See
   [[nullability]].
-- **P9 (distinguish absent from zero)**: Go/Java read a shadow pointer/
-  boxed value to detect absence; a present zero value is not "absent."
+- **P9 (distinguish absent from zero)**: Go reads the raw-object map and Java
+  reads the exact tree node to detect absence; a present zero value is not
+  "absent."
 
 Loader behavior:
 - `required` not an array → reject.
@@ -93,8 +94,8 @@ Per **P10**/**P11**. The "Required, non-nullable" row of
 
 | Language | Presence enforcement |
 |---|---|
-| Go | shadow `*json.RawMessage` per member; `nil` → `Violation{Path:name, Reason:"required"}`, collected into one `PayloadValidationError` application failure. |
-| TypeScript | `parsed.x === undefined \|\| parsed.x === null` → push `Violation{path:name, reason:"required"}`, throw one `PayloadValidationError` application failure. |
+| Go | raw-object map lookup returning `*json.RawMessage`; `nil` → `Violation{Path:name, Reason:"required"}`, collected into one `PayloadValidationError` application failure. |
+| TypeScript | `raw.x === undefined \|\| raw.x === null` → push `Violation{path:name, reason:"required"}`, throw one `PayloadValidationError` application failure. |
 | Python | in `from_transfer_type` (**PRINCIPLES Python §3**): an absent or `null` key for a required non-nullable member → `Violation(path=name, reason="required")`, appended and the field left unset, so its siblings are still checked; collected into the single `PayloadValidationError` application failure. |
 | Java | in the per-POJO collecting deserializer (PRINCIPLES Java §5): a missing or `null` tree node for a required member → `Violation{path:name, reason:"required"}`; the strict-vs-non-strict `null`-token logic (Java §4) runs as a helper here, not as a per-field binder. Collected into one `PayloadValidationError` application failure. |
 
@@ -106,13 +107,14 @@ optional-non-nullable null rejection in [[nullability]]. For a required
 **Serialize side (P12).** The presence check runs again before emit, off
 the in-memory value: a required member that is empty in memory (Go `nil`
 pointer · TS `undefined` · Python `None` · Java `null` reference) is a
-`PayloadValidationError` application failure, so `MarshalJSON`/`toTransferType`/`to_transfer_type`
-fails rather than emitting a malformed object. A required member is therefore
+`PayloadValidationError` application failure, so Go `MarshalJSON`, TypeScript
+`toTransferType`, Python `to_transfer_type`, and Java's generated `Serializer`
+fail rather than emitting a malformed object. A required member is therefore
 **never omitted** on serialize — required-non-nullable always emits its
 value; required+nullable emits the value or `null`, never absent (see the
 [[nullability]] serialize table). This mirrors the deserialize
 wire-absence check; only the absence *signal* differs (in-memory empty
-vs the missing shadow pointer on the wire).
+vs a missing raw-object/tree entry on the wire).
 
 ## Property-testing matrix
 
@@ -129,7 +131,7 @@ vs the missing shadow pointer on the wire).
 
 | Reason | Example |
 |---|---|
-| Not an array | `required:"id"`, `required:{}` |
+| Not an array | `required:"id"`, `required:{}`, `required:null` |
 | Non-string element | `required:[1]`, `required:[true]` |
 | Duplicate element | `required:["id","id"]` |
 | Name not in `properties` (P7.1) | `properties:{id:{…}}, required:["name"]` |

@@ -10,9 +10,9 @@ affects validation. **Supported** — it lowers into each target's
 **native deprecation marker** (Go's `// Deprecated:` godoc paragraph, a
 TS JSDoc `@deprecated` tag, a Java `@Deprecated` annotation, a Python
 PEP 702 `@deprecated(…, category=None)` marker), so editors, compilers,
-and type checkers flag call sites the same way they flag any
-hand-deprecated symbol — a static, generation-time signal with no runtime
-side-effect in any target. It is a **tag** in the doc-comment assembly
+and type checkers surface the marker where their native mechanism supports the
+placement. It has no validation, serialization, or access-warning effect. It is
+a **tag** in the doc-comment assembly
 [[description]] owns; because `deprecated` is boolean-only it carries no
 message of its own, so the human rationale comes from the sibling
 [[description]].
@@ -60,9 +60,11 @@ The defining choices (citing [[PRINCIPLES.md]]):
   `Deprecated:` convention, JSDoc `@deprecated`, `java.lang.Deprecated`,
   PEP 702 `@deprecated`. Emitting the native marker is what makes the
   generated code read like code a human wrote, and it makes the
-  deprecation *actionable*: `staticcheck`, `tsc`, `javac`, and type
-  checkers surface a warning or strike-through at every call site. So we
-  emit, not ignore.
+  deprecation *actionable* where the target tooling supports that placement.
+  TypeScript exposes JSDoc deprecation through language services rather than a
+  `tsc` diagnostic; Python's PEP 702 signal applies to decorated types and
+  callables, while its field/operation `Annotated` form is documentation-only.
+  So we emit, not ignore.
 - **No modeling problem to block it.** [[readOnly]] / [[writeOnly]]
   reject because their directional intent has no single-type lowering;
   `deprecated` has no such fork — it merely *marks* a location and leaves
@@ -72,8 +74,8 @@ The defining choices (citing [[PRINCIPLES.md]]):
   contributes **no** constraint predicate to the shared `Validate` and
   **no** parse/encode adapter logic. A deprecated value is accepted and
   round-trips exactly like a non-deprecated one. Its entire effect is at
-  generation time, in the emitted declaration — a **compile-/lint-time
-  signal in every target, with no runtime side-effect in any of them**.
+  generation time, in the emitted declaration — with no runtime validation,
+  serialization, or access-warning effect in any target.
   Python is held to the same bar: it uses PEP 702's `category=None` so
   even its `@deprecated` marker raises no access-time `DeprecationWarning`
   (see Type mapping); we deliberately do **not** emit the runtime
@@ -129,8 +131,8 @@ text):
 | Language | Native marker | Effect for consumers |
 |---|---|---|
 | Go | a `// Deprecated: This <kind> is deprecated.` paragraph in the doc comment (godoc convention; generic reason — see below) | `gopls` / `staticcheck` SA1019 flag every use; `go doc` renders it. A doc-comment tag, not a keyword. |
-| TypeScript | a bare JSDoc `@deprecated` tag in the `/** … */` block | `tsc` and editors strike-through and warn at call sites. |
-| Python | PEP 702 `@deprecated("…", category=None)` (`typing_extensions` backport / `warnings.deprecated`) on the **type / service / operation**; for a **field**, `Annotated[T, deprecated("…", category=None)]` | static type checkers flag every use; **`category=None` suppresses the access-time `DeprecationWarning`**, so there is no runtime side-effect (parity with the other three). |
+| TypeScript | a bare JSDoc `@deprecated` tag in the `/** … */` block | Editors and language services strike through or suggest at call sites; `tsc` emits no deprecation diagnostic. |
+| Python | PEP 702 `@deprecated("…", category=None)` (`typing_extensions` backport) on a generated type/service; fields and operation attributes use `Annotated[T, deprecated("…", category=None)]` as documentation metadata | Type/service decorators are recognized by PEP 702-aware checkers. Field and operation attribute metadata is not a PEP 702 warning construct. `category=None` suppresses access-time `DeprecationWarning`. |
 | Java | the `@Deprecated` annotation on the type / getter / method, paired with a Javadoc `@deprecated` tag | `javac` warns at every use; IDEs strike-through. |
 
 No new identifier is ever synthesized, so `deprecated` has **no P15
@@ -180,12 +182,11 @@ in the parse or encode adapter, and never causes a runtime pass/fail in
 either direction (**P12**). A deprecated value deserializes, validates,
 and re-serializes identically to a non-deprecated one.
 
-There is **no runtime side-effect in any target** — every marker is a
-compile-/lint-time signal only. Python is deliberately held to this bar:
-its PEP 702 marker is emitted with `category=None`, which suppresses the
-access-time `DeprecationWarning` (see Type mapping). This keeps the four
-targets in parity (P1) — deprecation is purely a generation-time
-annotation.
+There is no runtime validation, serialization, or access-warning effect in any
+target. Python emits `category=None`, which suppresses access-time
+`DeprecationWarning`; Python also retains `__deprecated__`, and Java's
+`@Deprecated` is runtime-visible metadata. Generated code does not inspect
+either artifact.
 
 ## Property-testing matrix
 
@@ -213,9 +214,8 @@ annotation.
 None. `deprecated` has no runtime behavior — it neither validates nor
 (de)serializes. Its only observable output is the generated declaration
 (marker + doc tag), covered by generation-snapshot tests. The Python
-snapshot asserts the `category=None` form, i.e. that accessing a
-deprecated field or instantiating a deprecated type raises **no**
-`DeprecationWarning`.
+snapshot asserts the `category=None` form. A dedicated access-warning runtime
+assertion is still needed; the snapshot alone cannot prove warning behavior.
 
 ## Interactions
 

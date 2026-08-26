@@ -35,9 +35,10 @@ its native module unit:
 Cross-directory mutual references are supported: Python hoists the cyclic
 types into `_recursive.py` (Recursion, below), TypeScript relies on
 cycle-safe `import type` and call-time live bindings, and Java on object
-references. Because each input file's types live in their own module, type
-names only need to be unique **within** that module (see Collisions and
-[[ref]]).
+references. Because each input file's types live in its own module, type names
+need to be unique only within that module for Java. Python and TypeScript root
+barrels re-aggregate module exports, so their names must be unique across the
+whole run (see Collisions and [[ref]]).
 
 ## Go flattens to one package
 
@@ -54,8 +55,9 @@ of per file.
 
 Within the one package, each input file emits a `<module>.go` whose name
 is its flattened path (Module paths, below), plus a shared `definitions.go`.
-Because everything shares one namespace, type and module names cannot
-collide across files — the loader validates this (see Collisions).
+Because everything shares one namespace, type and module names cannot collide
+across files — the loader or generation planner rejects such collisions (see
+Collisions).
 
 ## The single-input special case
 
@@ -65,10 +67,11 @@ than in a per-input subdirectory. A single `chat.yaml` → package `chat/`
 holding `models.py`, `services.py`, the shared `_definitions.py`, and the
 `__init__.py` aggregator side by side. No per-input subdirectory, and no
 `_recursive` (a cross-file cycle is impossible with one file). The
-models/services split and the shared-runtime file are still present in
-every language, Go included: Go always emits the one input's `<package>.go`
-alongside its own `definitions.go`, the same shared-runtime layout it uses
-for multi-input closures.
+shared-runtime file is still separate in every language, Go included: Go always
+emits the one input's `<package>.go` alongside its own `definitions.go`, the
+same shared-runtime layout it uses for multi-input closures. The
+models/services split itself is a Python/TypeScript property; Go places both in
+one file and Java emits one file per class.
 
 ## Files per language
 
@@ -81,7 +84,7 @@ Per input file `<subpath>/<name>`:
 | **Python** | `<subpath>/<name>/models.py` (+ `services.py` if it declares services) | `_definitions.py` (package root) | `_recursive.py` (package root) | `__init__.py` per directory — the per-input directory, every intermediate directory, and the package root |
 | **TypeScript** | `<subpath>/<name>/models.ts` (+ `services.ts`) | `definitions.ts` (package root) | — | `index.ts` per directory (barrels chain upward) |
 | **Go** | `<module>.go` in the one flat package (`<module>` = flattened path) | `definitions.go` (same package) | — | — (capitalized = exported) |
-| **Java** | one `<ClassName>.java` per exported class, in a package mirroring `<subpath>/<name>/` | each runtime class its own file in the root package (`Violation.java`, `SpecNumbers.java`, …) | — | — (`public` = exported) |
+| **Java** | one `<ClassName>.java` per exported class plus `package-info.java` in each package containing generated classes, in a package mirroring `<subpath>/<name>/` | each runtime class its own file in the root package (`Violation.java`, `SpecNumbers.java`, …), plus root `package-info.java` | — | — (`public` = exported) |
 
 **A module emits only the types its own input file declares.** A type reached by
 `$ref` into another file belongs to the module that declares it, and is imported
@@ -108,7 +111,13 @@ All output lands at the package root (no per-input subdirectory, no
 | **Python** | `models.py` (+ `services.py`), the shared `_definitions.py`, and the `__init__.py` aggregator — the same split as multi-input, flattened to the package root |
 | **TypeScript** | `models.ts` (+ `services.ts`), `definitions.ts`, `index.ts` |
 | **Go** | one `<package>.go` (types and services) + the shared `definitions.go` |
-| **Java** | one `.java` per public class + the runtime classes; nothing to aggregate |
+| **Java** | one `.java` per public class + the runtime classes and root `package-info.java`; nothing to aggregate |
+
+For Java, the package root is the required `--package-name`. Its final
+dot-separated segment must match the output directory name. A
+`package-info.java` carrying `@NullMarked` is emitted for each package that
+contains generated classes; class-less intermediate directories are not Java
+packages and receive no file.
 
 ## The shared `definitions` file
 
@@ -133,7 +142,9 @@ generator-internal rather than part of the package's surface.
   locally retained first detail back to the generated violation-list type; the
   cast is cheap and performs no serialization (P11).
 - Spec-number helpers — `parseSpecInteger` (Go), `_parse_spec_integer`
-  (Python), `SpecNumbers.specLong` (Java), TS's safe-integer check.
+  (Python), and `SpecNumbers.specLong` (Java). TypeScript inlines the
+  `Number.isSafeInteger` intrinsic at each use site rather than wrapping it in a
+  shared helper.
 - Shared (de)serialize scaffolding — the **P12** three-layer base: the
   temporal and content-encoding parse/format helpers, the constraint
   checks both directions call, and the helper that re-paths a nested
@@ -212,9 +223,11 @@ reject costs little.
 
 **Go** — one unified namespace per package holds the **reserved generated
 names** (`definitions` and `_definitions`, the union across languages) plus one
-entry per input module. Any collision
-in that namespace → **load reject** with a fix-it. The fix-it is **rename
-the input file or directory**; a per-input `x-output-module` override is a
+entry per input module. Any collision in that namespace is rejected during
+loading, planning, or emission, depending on the collision family. Reserved-name
+and P15 diagnostics include an actionable rename or language-name override;
+flattened generated-file conflicts are detected at emission. A per-input
+`x-output-module` override is a
 *possible* future escape hatch and is **not implemented** — nothing in the
 generator reads such a keyword today, and there is no per-module escape
 hatch at all (`x-<lang>-name` names types and members, not modules):
@@ -302,9 +315,11 @@ types:
   live bindings read at call time, not module-init. A converter is
   instantiated at module-init, but the sibling converters it delegates to
   are named only inside its method bodies, so a mutually-referencing pair
-  initializes in either order. Every other generated const is a
-  self-contained leaf literal. So there is no init-order hazard, and cyclic
-  types stay in their per-input modules.
+  initializes in either order. Every other const emitted by a **model module**
+  is a self-contained leaf literal. A service module's `nexus.service(…)` const
+  reads model converters at module-init, but model modules never import service
+  modules, so service modules cannot join a model cycle. Thus there is no
+  init-order hazard, and cyclic types stay in their per-input modules.
 - **Go**: no recursive file — the single flat package makes every cycle
   (same-file or cross-directory) a within-package reference, which Go
   resolves natively. This is exactly why Go flattens (above).

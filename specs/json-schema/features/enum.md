@@ -155,7 +155,7 @@ wire value against the same set.
 in [[const]]).
 
 **Java.** A generated **value class** wrapping the primitive, carrying one
-known constant per member — a private constructor, a membership `switch`,
+known constant per member — a private constructor, a membership lookup,
 and Jackson `@JsonCreator`/`@JsonValue` for wire mapping:
 
 ```java
@@ -169,22 +169,22 @@ public final class Color {
     @JsonCreator                              // standalone / interop decode
     public static Color fromString(String v) {
         if (v == null) return null;
-        return switch (v) {
-            case "red" -> RED;
-            case "green" -> GREEN;
-            case "blue" -> BLUE;
-            default -> throw new IllegalArgumentException(
-                "must be one of [\"red\",\"green\",\"blue\"], got \"" + v + "\"");
-        };
+        if ("red".equals(v)) return RED;
+        if ("green".equals(v)) return GREEN;
+        if ("blue".equals(v)) return BLUE;
+        throw new IllegalArgumentException(
+            "must be one of [\"red\",\"green\",\"blue\"], got \"" + v + "\"");
     }
     @JsonValue public String getValue() { return value; }
     // equals/hashCode/toString by value (omitted)
 }
 ```
 
-The private constructor makes the known constants the only obtainable
-instances, so a value outside the set **cannot be constructed** in-language
-— a compile-time guarantee. This is the shared carrier of [[const]] (one
+For an object property that receives this value-class carrier, the private
+constructor makes the known constants the only obtainable instances, so a value
+outside the set **cannot be constructed** in-language. Array elements, map
+values, and union variants retain their primitive Java type and rely on the
+runtime membership check. This is the shared carrier of [[const]] (one
 constant) and `enum` (several). Numeric and boolean value classes wrap
 `long`/`double`/`boolean`, with `@JsonCreator` over the corresponding
 primitive. How the aggregating deserialize path validates (without the
@@ -291,8 +291,8 @@ identical in both directions (a pure predicate over the decoded value — the
 | Language | Strategy |
 |---|---|
 | Go | A predicate in the shared `Validate`, called by `UnmarshalJSON` after decoding: `switch v { case ColorRed, ColorGreen, ColorBlue: default: … Violation{Path, Reason: fmt.Sprintf("must be one of [%s], got %q", set, v)} }`, collected into one `PayloadValidationError` application failure. The field is the defined type; the typed constants are both the compared set and the idiomatic setters. |
-| TypeScript | the shared `Validate` predicate tests set membership: ``if (!SET.has(v)) push(Violation{path, reason: `must be one of [...], got ${JSON.stringify(v)}`})``, throwing one `PayloadValidationError` application failure. The field's union type closes it in-language. |
-| Python | the transfer type converter (PRINCIPLES Python §3) tests `v not in SET` — a module-level `frozenset` — and appends `Violation(path=…, reason='must be one of [...], got <json>')` into the single generated `PayloadValidationError` application failure. The field is the closed `Literal` (`float` enums are plain `float`, validated the same way). |
+| TypeScript | the emitted validator tests membership against the literal set with an inline inequality chain, throwing one `PayloadValidationError` application failure. The field's union type closes it in-language. |
+| Python | the transfer type converter (PRINCIPLES Python §3) tests membership against an inline tuple and appends a `Violation` into the single generated `PayloadValidationError` application failure. The field is the closed `Literal` (`float` enums are plain `float`, validated the same way). |
 | Java | the aggregating path is the per-POJO collecting deserializer (PRINCIPLES Java §5): a **non-throwing membership lookup** — known value → the constant, otherwise record a `Violation{path, "must be one of [...], got …"}` — so multiple bad fields collect into the single `PayloadValidationError` application failure. The value class's `@JsonCreator fromString` *throws* only on the **standalone/interop** path, where fail-fast is expected. Serialize needs no separate check: the value class can only hold a known constant. |
 
 The reason string names the **expected set and the offending value**
@@ -324,8 +324,10 @@ memory before emit: an optional+enum mutated to a wrong value, a Go
 zero-value/mutated field (`Color("")` is not a member), or any Python
 in-memory assignment (a dataclass validates nothing on construction,
 PRINCIPLES Python §1). In TS and Java the value cannot be out of set in
-memory (union / value class), so the check is effectively a
-deserialize-direction guard there.
+memory when a union or property value-class carrier is emitted, so the check is
+effectively a deserialize-direction guard there. Java collection and map
+positions retain primitive carriers and therefore run the check in both
+directions.
 
 ## Property-testing matrix
 

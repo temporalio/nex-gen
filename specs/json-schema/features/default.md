@@ -73,7 +73,8 @@ The defining choices (citing [[PRINCIPLES.md]]):
   [[const]] also defers composite values in v1.
 
 Because `default` is an annotation, it has **no runtime validation check
-of its own**. The only load-time obligations are shape checks:
+of its own**. At load time its shape is checked here, while each supported
+constraint keyword validates the literal against its own rule:
 
 Loader behavior:
 - `default` on a **required** member → **reject**. A required member is
@@ -85,14 +86,10 @@ Loader behavior:
   a default that can never satisfy the field (`{type:"integer",
   minimum:5, default:0}`, `{type:"string", default:42}`) is a schema bug,
   not a runtime concern. Diagnostic names the violated constraint.
-  **Called out, not yet fully specced:** the `type`-mismatch case
-  (`default:42` on a `string`) is enforceable today; validating the
-  default against *constraint* keywords — `pattern`, `minLength`/
-  `maxLength`, `minimum`/`maximum`, `multipleOf`, … (e.g. the
-  `minimum:5, default:0` example) — reuses those keywords' own validators
-  over the literal at load time, and is **deferred to land with those
-  constraint features** (none specced yet). Same cross-cutting obligation
-  as [[const]] and [[enum]].
+  Constraint keywords including `pattern`, `minLength`/`maxLength`,
+  numeric bounds, `multipleOf`, `format`, `contentEncoding`, and `enum`
+  validate `default` literals in their own loader validators. This is the
+  same cross-cutting obligation as [[const]] and [[enum]].
 - `default` **and** [[const]] both present → reject (see [[const]]):
   `const` already fixes the value; opposite serialize behavior
   (always-emit vs omit-unset).
@@ -125,13 +122,13 @@ which differ per language:
 | Language | Set-ness signal (omit-unset) | Read-side surfacing of the default |
 |---|---|---|
 | Python | private `_<field>: T | None` | **native property** — `@property def field(self) -> T` returns the private value when set and the scalar default otherwise. Its setter accepts `T`; `del model.field` invokes a property deleter that restores unset. Models with defaults receive a generated keyword-only constructor so `Model(field=...)` remains the public construction API. |
-| Java | `null` field + `@JsonInclude(NON_NULL)` | **native** — the generated **getter** returns the default when the backing field is `null` (`return nickname != null ? nickname : "anon";`). Getters already exist in the POJO design (PRINCIPLES Java §1). |
-| TypeScript | `undefined` (the `?` field) | **advisory** — interfaces have no methods (PRINCIPLES TS §2), so the consumer applies the default with the native `?? DEFAULT_X`; the generator emits `export const DEFAULT_X = "anon"`. No accessor needed; `??` is the idiom. |
+| Java | `null` field, omitted by the generated serializer | **generated accessor** — the plain getter preserves the nullable set-ness signal; a separate `get<Field>OrDefault()` returns the field when set and the scalar default otherwise. |
+| TypeScript | `undefined` (the `?` field) | **advisory** — interfaces have no methods (PRINCIPLES TS §2), so the generator emits `export const DEFAULT_X = "anon"`. Consumers use `value.x === undefined ? DEFAULT_X : value.x` when `null` must remain distinct; `??` is sufficient only for non-nullable fields. |
 | Go | `*T` `nil` + `,omitempty` | **generated accessor** — a `func (m M) <Field>OrDefault() T` returns `*m.Field` when set and the default literal when `nil` (`func (u User) NicknameOrDefault() string { if u.Nickname != nil { return *u.Nickname }; return "anon" }`). The bare field stays `*T` (set-ness intact); the accessor is the materialize-on-read path. Emitted **only** for default-bearing fields. Modeled on proto3's `GetX()` — the same omit-default-on-wire + accessor-materializes-default pattern already familiar to Temporal users. Named `<Field>OrDefault` rather than `Get<Field>` to read as "the value, or its default" and to avoid implying a getter on every field. Alternative approaches considered: (a) advisory constant (`DEFAULT_X` + caller nil-checks) — pushes nil-checks to every call site; (b) populate on deserialize — destroys set-ness, forces deep-equals, breaks P9. |
 
 ### Naming and collisions (P15)
 
-The read-side surfacing synthesizes **one new identifier in three targets**
+The read-side surfacing synthesizes **one new identifier in four targets**
 — names absent from the schema, so they can collide:
 
 | Target | Synthesized identifier | Scope | Collision risk |
@@ -139,7 +136,7 @@ The read-side surfacing synthesizes **one new identifier in three targets**
 | Go | `<Field>OrDefault()` method | struct method-set | a **declared** member whose name maps to `<Field>OrDefault` (Go forbids a field and method of the same name — a **hard compile error**); another `<Field>OrDefault` from a sibling field |
 | TypeScript | `DEFAULT_<FIELD>` const | module | another `DEFAULT_<FIELD>` from a field that case-maps the same. [[const]] synthesizes no named *type* in TS (the type closes to an inline literal) but does emit a module-scope `<FIELD>_CONST` binding holding the wire value, which shares this scope — unexported, yet still a redeclaration error if it coincides |
 | Python | `_<field>` backing slot | class/member | a declared member overridden to that private identifier; another backing slot after member mapping |
-| Java | none (default folds into the existing getter) | — | — |
+| Java | `get<Field>OrDefault()` method | POJO method namespace | the plain getter of a sibling member named `<field>OrDefault`; another default accessor after member mapping |
 
 The TypeScript constant is named `DEFAULT_<FIELD>`, or
 **`DEFAULT_<MODEL>_<FIELD>`** when that member identifier is not unique across
@@ -149,10 +146,10 @@ slot is exactly the emitted member identifier prefixed with `_`.
 Per **P15** these participate in the single per-scope collision pass and
 **reject at load** on any coincidence — never auto-mangled (a
 `NicknameOrDefault2` would renumber under schema evolution, a P13 break).
-Java adds no name, so it carries no default-specific collision.
 The rename **escape hatch** is the [[properties]] case-mapping override
 (`x-go-name`, …) on the *declaring* field — re-mapping it moves the
-synthesized `<Field>OrDefault` / `DEFAULT_<FIELD>` / `_<field>` names with it,
+synthesized Go `<Field>OrDefault`, Java `get<Field>OrDefault`,
+`DEFAULT_<FIELD>`, and `_<field>` names with it,
 because all are named off the **emitted** member identifier rather than the JSON
 key (`retryCount` + `x-ts-name: attempts` → `DEFAULT_ATTEMPTS`). The
 derivation has to work that way for the hatch to open at all: two members
@@ -162,7 +159,7 @@ would reject with a fix-it the author cannot act on — the only remaining
 escape being a rename of the JSON property, i.e. a change to the wire
 contract (P15, P7.1).
 
-Java materializes-on-read through its getter; Go does so via the generated
+Java materializes-on-read through `get<Field>OrDefault()`; Go does so via the generated
 `<Field>OrDefault()` accessor, and Python through a generated property.
 TypeScript interfaces have no methods, so TypeScript alone leans on a generated
 constant the consumer applies. In every language the
@@ -196,10 +193,10 @@ default. Mechanisms:
 
 | Language | Omit-unset mechanism |
 |---|---|
-| Go | `*T` with `,omitempty` → `nil` omitted by the stdlib encoder via the type-alias `MarshalJSON`. Pointer-to-zero-value still emits, so set-ness ≡ pointer-presence. |
+| Go | the generated `MarshalJSON` builds its raw output map field by field, omitting a nil pointer and emitting a non-nil pointer even when it points to the zero value. |
 | TypeScript | `toTransferType` skips keys whose value is `undefined` when building the transfer value (PRINCIPLES TS §4). |
-| Python | `to_transfer_type` reads the private backing slot and skips the key when that slot is `None`; it never reads the materializing public property. |
-| Java | `@JsonInclude(NON_NULL)` — `null` (unset) omitted; getter still returns the default to the consumer. |
+| Python | `to_transfer_type` uses the private backing slot as the emitted value and skips the key when that slot is `None`; constraint checks may read the public property under the same presence guard. |
+| Java | the class-level serializer writes the field only when its raw backing value is non-null; the plain getter preserves that raw state and `get<Field>OrDefault()` supplies the read default. |
 
 Three consequences that the count specs already encode:
 - A default-filled key is **never on the wire**, so it does not count
@@ -228,7 +225,7 @@ Three consequences that the count specs already encode:
 |---|---|
 | `default` on a required member | `required:["x"]` with `x:{type:"string", default:"a"}` |
 | Default `type`-mismatch (enforced now, P7.1) | `{type:"string", default:42}` |
-| Default fails a *constraint* (deferred) | `{type:"integer", minimum:5, default:0}` |
+| Default fails a *constraint* | `{type:"integer", minimum:5, default:0}` |
 | **Object default (deferred)** | `{type:"object", properties:{…}, default:{a:1}}` |
 | **Array default (deferred)** | `{type:"array", items:{type:"string"}, default:["a"]}` |
 | `default: null` (degenerate) | `{oneOf:[{type:"string"},{type:"null"}], default:null}` |
@@ -256,7 +253,8 @@ Three consequences that the count specs already encode:
   omit-unsets. See [[const]].
 - **[[nullability]]**: composable. For an optional+nullable member with a
   default, **absence** materializes the default on read while an
-  **explicit `null`** pins `null` (faithful in TS via the presence signal;
+  **explicit `null`** pins `null` (faithful in TS via an explicit
+  `=== undefined` read; `??` would collapse null;
   Go, Java and Python collapse absent-vs-`null` — see [[nullability]]
   round-trip tiers). The default applies to *absence*, never overriding an
   explicit `null`.
@@ -284,9 +282,8 @@ Three consequences that the count specs already encode:
 only divergence is *our* strengthening of "RECOMMENDED valid" to a
 load-time MUST (P7.1), which is stricter than every source dialect — a
 schema that ships an out-of-range default is accepted upstream but
-rejected here, with a fix-it diagnostic. (The MUST is fully *defined*
-now; its enforcement against constraint keywords like `minimum` lands
-with those features — see Loader behavior.)
+rejected here, with a fix-it diagnostic. The owning constraint validators
+enforce that MUST; see Loader behavior.
 
 ## See also
 

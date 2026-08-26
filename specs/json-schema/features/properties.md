@@ -35,6 +35,11 @@ Distilled:
 - Its matched-name set is an *annotation* consumed by
   [[additionalProperties]] / [[unevaluatedProperties]] to decide which
   members count as "additional."
+- An explicit empty `properties: {}` declares a zero-member struct. Omitting
+  `properties` instead declares a free-form object owned by
+  [[additionalProperties]]. Both are open by default, but when
+  `additionalProperties: false` is present the explicit empty form accepts
+  only `{}`, while the omitted form is rejected as shapeless under **P7.1**.
 
 ## Support decision
 
@@ -79,12 +84,12 @@ from [[type]]; optional/nullable wrapping from [[required]] +
 |---|---|---|---|---|
 | Aggregate | `struct` | `interface` (**not class**) | `@dataclasses.dataclass(slots=True, kw_only=True)` (**not a validating base**) | POJO `class` (Java 8; **not records**) |
 | Member | struct field | interface member | dataclass field; default-bearing property over private storage | private field + getter |
-| JSON-name binding | `json:"<name>"` tag | exact key (index access) | the wire key, read and written by the converter | `@JsonProperty("<name>")` |
+| JSON-name binding | `json:"<name>"` tag | exact key (index access) | the wire key, read and written by the converter | exact key in the collecting deserializer and serializer |
 
 Field naming: JSON member names are mapped to each language's idiomatic
 identifier and the **original JSON name is always pinned** — by a Go
-struct tag, a Java annotation, and in TS/Python by the wire key the
-converter reads and writes — so the wire contract is stable regardless of
+struct tag and by the exact wire key the TypeScript, Python, and Java
+converters read and write — so the wire contract is stable regardless of
 the emitted identifier (**P2**, **P3**). The exact transform, collision
 policy, and escape hatch are specified in [Identifier
 case-mapping](#identifier-case-mapping) below.
@@ -92,7 +97,7 @@ case-mapping](#identifier-case-mapping) below.
 ## Identifier case-mapping
 
 One shared algorithm drives every emitter so the four languages agree on
-which JSON names they accept. A language-agnostic **segmentation** core
+segmentation and recasing. A language-agnostic **segmentation** core
 produces a canonical word list; thin per-language layers **recase** it;
 then each emitted target **validates** the result. The original JSON name
 is always pinned on the wire (above), so this transform is purely
@@ -125,28 +130,27 @@ From the canonical word list:
 |---|---|---|
 | Go | exported `PascalCase` | `UserId` |
 | TypeScript | `camelCase` | `userId` |
-| Java | field `camelCase` + `get`/`set` + `PascalCase` accessors | `userId` / `getUserId` |
+| Java | field `camelCase` + `get` + `PascalCase` accessor | `userId` / `getUserId` |
 | Python | `snake_case` | `user_id` |
 
 ### Stage 3 — Validity (per emitted target)
 
-The recased identifier is **rejected at load** if, *for a language being
-generated*, it is empty, begins with a digit, contains a character
-illegal in that language's identifier grammar, or is a word that language
-reserves **in the position the identifier is emitted into**. Rejection is
-**per emitted target** only — a name that is invalid in a language you are
-not generating is not a concern and produces no diagnostic.
+The recased identifier is **rejected at load** if it is empty, begins with a
+digit, contains a character outside the shared ASCII identifier grammar
+(`A-Z`, `a-z`, `0-9`, and `_` after an ASCII letter or `_`), or is a word the
+emitted target reserves in any position where the identifier is emitted.
+The deliberately conservative ASCII intersection avoids unexported Go fields
+and normalization collisions in Python. Rejection is **per emitted target**
+only — a name invalid in a language not being generated is not a concern and
+produces no diagnostic.
 
-The position qualifier is load-bearing, because a language's keyword list
-and the set of words it refuses *as a member name* are not the same set.
-A TypeScript interface member may be named after any keyword
-(`interface X { class: string; default: number }` compiles, and so does
-`x.class`), so TS's reserved set in this position is **empty** and a
-keyword-named property is not a Stage-3 rejection there. Go's exported
-`PascalCase` likewise never collides with Go's all-lowercase keywords. So
-**Python** (`class`, `import`, `lambda` → `SyntaxError`) and **Java**
-(`class`, `new`, `default` → keyword) are the only targets that hit
-Stage-3 rejections on a keyword-named property.
+The emitted-position qualifier is load-bearing. A TypeScript interface member
+and property access may use a keyword, but the converter also stages each
+member in a `let` binding, where a keyword is illegal. Java likewise uses
+method-local bindings, and Python emits attribute/binding identifiers. Go's
+exported `PascalCase` identifiers do not collide with its lowercase keywords.
+Consequently Go is the only target where a keyword-named property needs no
+override under the current emission strategy.
 
 ### Stage 4 — Escape hatch (per-language override)
 
@@ -155,7 +159,8 @@ A property may carry a per-language override —
 used **verbatim** (it skips Stages 1–2), must itself be a legal,
 non-reserved identifier in that language, and participates in collision
 detection. It is the only way to admit a name Stage 3 rejects (e.g. a
-`class` member needs `x-py-name` + `x-java-name`; Go/TS need nothing).
+`class` member needs `x-ts-name` + `x-py-name` + `x-java-name`; Go needs
+nothing).
 
 ### Collision policy
 
@@ -214,9 +219,9 @@ namespace and cannot collide with a coincidentally-named top-level type:
 - **Python** — a const/enum is an inline `typing.Literal[…]`, so there is
   no named type to nest and nothing synthesized in the module namespace;
   the fixed value is compared inline in the converter.
-- **TypeScript** — a const/enum is an inline literal / union of literals,
-  so there is nothing to nest and nothing synthesized; the validator
-  compares the wire value against the inline literal.
+- **TypeScript** — a const/enum is an inline literal / union of literals.
+  Enums synthesize no binding; const validation may synthesize a private
+  module-scope binding, which participates in the run-wide namespace check.
 - **Go** — has no nested types (a `type` decl inside a struct is a syntax
   error), so it falls back to flat package-level composition
   `<EnclosingType><Property>` (`UserEventKind`) and relies on the P15
@@ -353,8 +358,8 @@ deserialize.
 | Mutual / indirect self-reference (see [[ref]]) | two `$defs` types referencing each other (cycle through `$ref`) |
 | Name needing recasing | `{properties:{user_id:{type:string}}}` → Go `UserId`, TS `userId`, Python `user_id` |
 | Acronym folded | `{properties:{userID:{…}, httpServer:{…}}}` → Go `UserId`, `HttpServer` |
-| Per-language override admits an otherwise-rejected name | `{properties:{class:{type:string, x-py-name:"klass", x-java-name:"klazz"}}}` |
-| Keyword-named member needs no override in Go / TypeScript | `{properties:{class:{type:string}}}` generating Go + TS only → `Class` / `class:` (a TS interface member may be any keyword) |
+| Per-language override admits an otherwise-rejected name | `{properties:{class:{type:string, x-ts-name:"klass", x-py-name:"klass", x-java-name:"klazz"}}}` |
+| Keyword-named member needs no override in Go | `{properties:{class:{type:string}}}` generating Go only → `Class` |
 
 ### Rejected at load time (negative)
 
@@ -366,7 +371,7 @@ deserialize.
 | Member missing `type` | `{properties:{a: {minLength: 1}}}` |
 | `properties` without `type:object` | `{properties:{...}}` (no `type`) — per [[type]] |
 | Name collision after recasing (emitted lang) | `{properties:{user_id:{…}, userId:{…}}}` → one Go `UserId` |
-| Invalid identifier in an emitted lang (no override) | `{properties:{class:{…}}}` when emitting Python/Java; `{properties:{"2fa":{…}}}` (leading digit); `{properties:{"":{…}}}` (empty) |
+| Invalid identifier in an emitted lang (no override) | `{properties:{class:{…}}}` when emitting TypeScript/Python/Java; `{properties:{"2fa":{…}}}` (leading digit); `{properties:{"":{…}}}` (empty) |
 | Override not a legal identifier | `x-py-name:"2fa"` / `x-py-name:"class"` (reserved) |
 | Override collides | two members whose `x-go-name` both resolve to `Foo` |
 | Unsatisfiable direct self-reference (see [[ref]] satisfiability check) | direct `$ref:"#"` member that is **required and non-nullable** — the chain can never terminate, so no finite instance exists (a satisfiability constraint, not a nullability one). A terminating form is required: optional (absent ends it), required+nullable (`null` ends it), or a collection wrapper. |
@@ -408,9 +413,9 @@ deserialize.
   `oneOf` null pattern is nullable; it is optional+nullable when absent
   from `required` and required+nullable when listed (both supported —
   presence and null-acceptance are orthogonal per **P8**).
-- **[[dependentRequired]] / [[dependentSchemas]] / [[propertyNames]] /
-  [[minProperties]] / [[maxProperties]]**: layer additional object-level
-  assertions over the same member set.
+- **[[dependentRequired]] / [[propertyNames]] / [[minProperties]] /
+  [[maxProperties]]**: layer additional object-level assertions over the same
+  member set. [[dependentSchemas]] is unsupported and rejected at load time.
 - **[[ref]]**: a member schema may be a `$ref`, including one
   that resolves back to the containing object (direct, via-array, or
   mutual recursion). This is the only way to express recursive types;

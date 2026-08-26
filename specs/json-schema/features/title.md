@@ -109,7 +109,7 @@ resolved policy / [[ref]]. `title`'s sole materialization is the
 |---|---|
 | `$defs` type | doc comment on the generated **type** (Go `type` / TS `interface` / Python class / Java class) |
 | property subschema | doc comment on the generated **field/member** |
-| `items` / other inline subschema | doc comment on the nearest generated declaration, if any; otherwise dropped (nowhere to attach) |
+| `items` / other inline subschema | doc comment on the declaration synthesized from that subschema, if any; otherwise dropped (nowhere to attach) |
 
 Per-language rendering of the summary line (the shared doc-comment
 mechanism — placement, line-wrapping, escaping — is owned by
@@ -159,9 +159,10 @@ whole** (it governs whichever text — `title` or, absent a title,
 
 When both `title` and [[description]] are present, the doc comment is the
 summary line (`title`) then the body ([[description]]); when only `title`
-is present, the doc comment is just the summary line. No new identifier is
-ever synthesized, so `title` has **no P15 collision surface** (contrast
-[[const]]/[[default]], which do).
+is present, the doc comment is just the summary line. On an ordinary
+declaration `title` synthesizes no identifier. Beside a `$ref`, the implicit
+merge may create a standalone use-site type whose position-derived name
+participates in P15; the title text itself never supplies that name.
 
 ## Validator mapping
 

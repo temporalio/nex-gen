@@ -333,6 +333,9 @@ Loader behavior:
 - A synthesized branch name already declared in `$defs`, or colliding with
   another emitted type → reject per **P15**, `x-<lang>-name` as the escape
   hatch (as for every synthesized name).
+- A `default` on a `oneOf` sum type → reject: the literal does not identify
+  which branch to construct. The two-branch [[nullability]] wrapper remains
+  governed by [[default]].
 - A `oneOf` **sum type** written inline in an element position (an array's
   `items` at any depth, an object's typed `additionalProperties`) → name it
   after its position (below), move it into `$defs`, and rewrite the position to
@@ -491,7 +494,10 @@ the field is the bare interface, type-switched directly (no wrapper, no
 accessor):
 
 ```go
-type Foo interface{ isFoo() }
+type Foo interface {
+    isFoo()
+    Validate() error
+}
 
 func (Widget) isFoo() {}          // a $ref/named branch implements the marker directly
 type FooString string             // a non-nameable branch gets a synthesized variant type…
@@ -680,7 +686,7 @@ then delegate**, never a trial-all-branches loop.
 
 | Language | Strategy |
 |---|---|
-| Go | The container's collecting `UnmarshalJSON` (shadow `*json.RawMessage` layout, **PRINCIPLES Go** / [[nullability]]) peeks the field's first non-space token, routes to the branch of that kind (`{`→object; `[`→array: `FooArray`; `"`→string: `FooString`; number→the numeric branch via `parseSpecInteger`/spec-number so `1.5` still yields a `Violation`). For an object token with 2+ object branches it further reads the discriminator property and selects the branch with that `const`. It then runs that branch's shared `Validate` and assigns the concrete type to the interface field. No matching kind / unknown discriminator value → `Violation` collected into the single `PayloadValidationError` application failure. |
+| Go | The container's collecting `UnmarshalJSON` reads the field from the raw `map[string]json.RawMessage`, peeks its first non-space token, and routes to the branch of that kind (`{`→object; `[`→array: `FooArray`; `"`→string: `FooString`; number→the numeric branch via `parseSpecInteger`/spec-number so `1.5` still yields a `Violation`). For an object token with 2+ object branches it further reads the discriminator property and selects the branch with that `const`. It then runs that branch's shared `Validate` and assigns the concrete type to the interface field. No matching kind / unknown discriminator value → `Violation` collected into the single `PayloadValidationError` application failure. |
 | TypeScript | `fromTransferType` is the `typeof`/`Array.isArray` chain shown above; for an object it switches on the discriminant literal (`raw.kind`) and delegates to that branch's converter (e.g. `catTransferTypeConverter.fromTransferType`); the fall-through pushes one `Violation`. Plain checks only (**PRINCIPLES TS §1** — no runtime schema lib). |
 | Python | The union's module-private `_<union>_from_transfer_type(value, path, violations)`, called by the declaring model's `_<Model>TransferTypeConverter` (**PRINCIPLES Python §3**), classifies the raw value with `isinstance` — `dict`→object, `list`→array, `str`→string, a non-`bool` `int`/`float`→the numeric branch via `_parse_spec_integer`/the spec-number rule so `1.5` still yields a `Violation`, `bool`→boolean, `None`→null. For an object token with 2+ object branches it reads the discriminator key out of the raw dict and delegates to that branch's converter, re-pathing its `PayloadValidationError` application failure under the current path with `_collect`. No decidable branch / unknown discriminator value → a `Violation` appended and `None` returned, so sibling members are still checked and the model's converter raises the one `PayloadValidationError` application failure (**PRINCIPLES Python §2**). |
 | Java | The union interface's static `fromNode` (called by the enclosing POJO's collecting deserializer, **PRINCIPLES Java §5**) switches on the `JsonNode` kind (`isObject`/`isArray`/`isTextual`/`isNumber`/`isBoolean`); for an object with 2+ object branches it peeks the discriminator node and dispatches to the matching POJO's collecting deserializer. On no match / unknown discriminator it pushes a `Violation` into the single `PayloadValidationError` application failure and returns `null`. One dispatcher serves both positions: a named union def and a union written inline on a property. |
@@ -799,6 +805,7 @@ of the declared union type, tests every branch and raises
 | Ambiguous discriminator (2+ qualifying properties) | two object branches sharing both `kind` and `variant` as required-`const` |
 | A materialized temporal `format` on a sum-type branch (deferred) | `{oneOf:[{type:string,format:"date-time"},{type:integer}]}` |
 | A materialized `contentEncoding` on a sum-type branch (deferred) | `{oneOf:[{type:string,contentEncoding:base64},{type:integer}]}` |
+| `default` on a sum type | `{oneOf:[{type:string},{type:integer}], default:"x"}` — no branch is identified for construction |
 | Two same-**scalar**-kind branches (use `enum`) | `{oneOf:[{type:string,const:"a"},{type:string,const:"b"}]}` → [[enum]] |
 | `integer`+`number` overlap (unsatisfiable, P7.1) | `{oneOf:[{type:integer},{type:number}]}` |
 | Duplicate `null` branches | `{oneOf:[{type:string},{type:"null"},{type:"null"}]}` (same-kind, and a tautology) |

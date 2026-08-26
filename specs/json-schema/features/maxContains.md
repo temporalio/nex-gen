@@ -59,6 +59,7 @@ Loader behavior:
   **negative** value (`maxContains:-1`), or a **fractional** value
   (`maxContains:2.5`). `maxContains:2.0` is accepted (≡ `2`, honoring the
   `1.0`-as-integer rule from [[type]]).
+- The portable count ceiling from [[maxItems]] applies.
 - **`maxContains` without [[contains]]** on the same node → **reject**
   (**P7.1**, statically meaningless — the spec's "no effect" tightened to a
   loud error). Diagnostic: add a `contains` matcher or remove `maxContains`.
@@ -85,20 +86,16 @@ None. The emitted collection type is [[items]]'s `[]T` / `T[]` /
 ## Validator mapping
 
 Per **P10**/**P11**. A single `≤` comparison of the **match count** against
-the fixed bound, identical in both directions (a pure predicate over the
-decoded value — the **shared `Validate`** layer of **P12**). The presence
-of `maxContains` (or [[minContains]] ≥ 2) **defeats the [[contains]]
-short-circuit**: instead of stopping at the first match, the scan tallies
-**every** matching element, because the exact count is what the bound
-compares. `matchCount` reuses the [[contains]] matcher predicate
-(`matchesContains`).
+the fixed bound. Deserialize tallies every original wire element; serialize
+tallies the decoded collection. The same matcher predicate, comparison, and
+reason apply in both directions (**P12**).
 
 | Language | Strategy |
 |---|---|
-| Go | A predicate in the shared `Validate`, called by `UnmarshalJSON` after decoding into the `[]T`: `n := 0; for _, e := range v { if matchesContains(e) { n++ } }; if n > max { push(Violation{Path, Reason: fmt.Sprintf("too many matching items: at most %d, got %d", max, n)}) }`, collected into one `PayloadValidationError` application failure. |
-| TypeScript | After the `Array.isArray` guard ([[items]]), the shared `Validate` counts: ``const n = v.filter(matchesContains).length; if (n > max) push(Violation{path, reason: `too many matching items: at most ${max}, got ${n}`})``, throwing one `PayloadValidationError` application failure. `max` is an emitted numeric constant. |
-| Python | `_check_contains` in the transfer type converter tallies `n = sum(1 for e in v if _matches_contains(e))` and on `n > max` appends `Violation(path=…, reason=f"too many matching items: at most {max}, got {n}")` into the single generated `PayloadValidationError` application failure. |
-| Java | The per-POJO collecting deserializer (PRINCIPLES Java §5) reads the `List<T>`, tallies matches against the matcher predicate, and on `n > max` pushes a `Violation{path, "too many matching items: at most " + max + ", got " + n}` into the single `PayloadValidationError` application failure. Not bean-validation. |
+| Go | `UnmarshalJSON` tallies the original `json.RawMessage` elements; shared `Validate` tallies the typed slice before serialize. Both push the same bound/count violation. |
+| TypeScript | The transfer converters tally the raw array inbound and the typed array outbound after the `Array.isArray` guard. `max` is an emitted numeric constant. |
+| Python | `_check_contains` receives the raw list inbound and the typed list outbound, appending the same bound/count violation. |
+| Java | The collecting deserializer tallies the original Jackson array node; serialize tallies the typed `List<T>`. Not bean-validation. |
 
 **Informative `reason` strings.** The `reason` names the **concrete bound
 and the offending match count** — `too many matching items: at most 2, got
@@ -160,8 +157,7 @@ in both directions.
 
 - **[[contains]]**: the gate — `maxContains` is meaningless without it and
   is a load reject on its own. It reuses [[contains]]' matcher predicate and
-  its scalar-only support envelope, and **cancels [[contains]]'
-  short-circuit** (the full match count is needed). `contains` alone is the
+  its scalar-only support envelope and full match tally. `contains` alone is the
   spec-default `minContains:1` with no ceiling.
 - **[[minContains]] — satisfiability (canonical, owned here)**: the paired
   lower bound over the same match count. `minContains > maxContains` is a

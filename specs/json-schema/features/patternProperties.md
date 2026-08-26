@@ -55,17 +55,20 @@ Why deferred rather than landed in v1 (citing [[PRINCIPLES.md]]):
 - **Regex-dialect divergence** compounds it: the spec mandates ECMA-262,
   but Go's `regexp` (RE2) rejects lookahead/backreferences that ECMA-262
   and `java.util.regex` accept. A pattern accepted by the input could be
-  unrepresentable in one target's runtime. (The same hazard is confined
-  and managed for the value-level [[pattern]] keyword; here it multiplies
-  across the *key space*.)
+  unrepresentable in one target's runtime. The value-level [[pattern]] keyword
+  at least confines this hazard to one auditable gate; here it multiplies
+  across the *key space*.
 
 These hazards apply to the general form only. A single-pattern,
 no-`properties`, RE2-safe schema is the candidate carve-out — it is why
 this keyword is "temporarily unsupported" rather than a hard P6 reject
-like [[dependentSchemas]].
+like [[dependentSchemas]]. Landing that carve-out first requires a sound
+cross-runtime regex gate for pattern keys.
 
 Loader behavior (v1):
 - Any `patternProperties` present → reject with a located diagnostic.
+- An authored empty `patternProperties: {}` is also rejected as a dead keyword;
+  it constrains nothing, so the actionable remedy is to remove it.
 - The diagnostic must read as "not yet supported," not "forbidden," and
   offer the two coherent alternatives available today:
   1. A **typed map** — `{type:object, additionalProperties:{type:T}}` —
@@ -97,6 +100,9 @@ key check.
 | Overlapping patterns | `{type:object, patternProperties:{"^a":{…}, "a$":{…}}}` |
 | RE2-incompatible pattern | `{type:object, patternProperties:{"(?=x)":{type:string}}}` |
 
+All rows currently receive the same keyword-level rejection. Pattern syntax and
+overlap are not inspected until a supported carve-out exists.
+
 There are no accepted or runtime fixtures in v1: the keyword does not yet
 reach code generation. The single-pattern carve-out, should it land,
 would add accepted + runtime rows.
@@ -114,17 +120,17 @@ would add accepted + runtime rows.
 - **[[propertyNames]]**: the supported escape hatch for *constraining
   key shape* without assigning per-pattern value schemas — partial
   support, map-shaped objects only.
-- **[[pattern]]**: the value-level regex keyword; managed there with the
-  documented dialect caveats.
+- **[[pattern]]**: the value-level regex keyword; it confines dialect handling
+  to one gate, whose portability limitations are documented there.
 
 ## Ecosystem variance
 
 | Source dialect | Action |
 |---|---|
-| JSON Schema 2020-12 | Reject (P6). |
+| JSON Schema 2020-12 | Reject (deferred — see Support decision). |
 | OpenAPI 3.1 | `patternProperties` present (3.1 adopts 2020-12) → reject. |
 | OpenAPI 3.0 | No `patternProperties` keyword — nothing to reject; users already lean on `additionalProperties`. |
-| Swagger 2.0 / draft-4 | `patternProperties` present → reject. |
+| Swagger 2.0 / draft-4 | Human porting note: a declared older dialect rejects on the `$schema` pin first; a schema-shaped document with no `$schema` reaches the keyword-level deferred rejection. |
 
 ## See also
 

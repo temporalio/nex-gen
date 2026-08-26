@@ -68,6 +68,7 @@ Loader behavior:
   value (`maxLength:-1`), or a **fractional** value (`maxLength:5.5`).
   `maxLength:5.0` is accepted (≡ `5`, honoring the `1.0`-as-integer rule
   from [[type]]).
+- The portable count ceiling from [[maxItems]] applies.
 - `maxLength` on a non-string [[type]] (`{type:"integer", maxLength:5}`) →
   reject per **P7.1** (statically meaningless — the array-length analog is
   `maxItems`, the member-count analog is [[maxProperties]]).

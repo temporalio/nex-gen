@@ -105,8 +105,8 @@ generation.
 
 - **[[contentEncoding]]**: `base64` alone materializes to a native bytes
   type; adding `contentMediaType` rejects the node here, so v1 bytes are
-  **unlabeled** binary. Owns the "no emit site" rationale that blocks the
-  label.
+  **unlabeled** binary. This spec owns the "no emit site" rationale that
+  blocks the label.
 - **[[contentSchema]]**: only meaningful alongside `contentMediaType`;
   both reject, so an embedded structured document is inexpressible in the
   subset. [[contentSchema]] owns the embedded-document / non-lowerable
@@ -123,7 +123,7 @@ generation.
 | JSON Schema 2020-12 | Annotation by default → reject (no emit site). |
 | OpenAPI 3.1 | Adopts 2020-12; `contentMediaType` native → reject. OAS carries media types structurally (the `content` map keyed by media type), which is the transport-level home this keyword lacks in a bare schema. |
 | OpenAPI 3.0 | No `contentMediaType`; media types live in the `content` map — nothing to reject at the schema level. |
-| draft-07 | `contentMediaType` present since draft-07 (assertion-leaning) → reject. |
+| draft-07 | Human porting note: the keyword existed there, but a document that declares draft-07 rejects on the dialect pin before this keyword is inspected. In a schema with no `$schema`, the keyword itself rejects. |
 
 ## Open questions
 

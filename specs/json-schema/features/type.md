@@ -22,7 +22,8 @@ a schema's assertions are meaningful for a given instance.
 
 **Support:** partial — single-string form only.
 
-We accept `type: "<primitive>"` for all seven primitive type names. We
+We accept the single-string form for all seven primitive type names, with
+`"null"` admitted only as a [[oneOf]] branch. We
 **reject** schemas where `type` is an array. A **leaf** schema — one that
 must describe its own shape — with no `type` keyword is also **rejected**;
 a typeless schema is legal only when its shape comes from a supported
@@ -61,9 +62,9 @@ Loader behavior:
   `additionalProperties: false` (closed empty object).
 - `type: "null"` standalone (not inside the [[nullability]] pattern) →
   reject. A field that is *always* `null` carries no information and
-  is almost always a schema bug. The only legitimate appearance of
-  `{"type":"null"}` is as one branch of the recognized nullability
-  `oneOf` (see [[nullability]]).
+  is almost always a schema bug. A legitimate `{"type":"null"}` appears as
+  a branch of a [[oneOf]]: in the two-branch form it is [[nullability]], and
+  among 3+ kinds it is a nullable sum type.
 
 ## Type mapping
 
@@ -81,7 +82,7 @@ field; Python uses `T | None`).
 | `"integer"` | `int64`             | `number`             | `int`             | `long` |
 | `"number"`  | `float64`           | `number`             | `float`           | `double` |
 | `"boolean"` | `bool`              | `boolean`            | `bool`            | `boolean` |
-| `"object"`  | struct from [[properties]] | interface from [[properties]] (**not classes**) | `@dataclasses.dataclass` from [[properties]] (an inline anonymous object schema stays a `dict[str, V]`) | POJO class (Java 8; **not records** — see PRINCIPLES Java §1) |
+| `"object"`  | struct from [[properties]] | interface from [[properties]] (**not classes**) | `@dataclasses.dataclass` from [[properties]]; inline object shapes are hoisted and named, while only a free-form `oneOf` object branch stays `dict[str, typing.Any]` | POJO class (Java 8; **not records** — see PRINCIPLES Java §1) |
 | `"array"`   | `[]T` (T from [[items]])   | `T[]`                | `list[T]`         | `List<T>` |
 | `"null"`    | only inside [[nullability]] pattern | only inside [[nullability]] pattern | only inside [[nullability]] pattern | only inside [[nullability]] pattern |
 
@@ -111,17 +112,17 @@ errors aggregate into the language-native primitive.
 | `type` token | Go | TypeScript | Python | Java |
 |---|---|---|---|---|
 | `"string"`  | typed `Unmarshal` into `string` | `typeof v === 'string'` | `isinstance(v, str)` | Jackson typed binding |
-| `"integer"` | shadow `*json.Number` → runtime `parseSpecInteger` → `int64` (accepts `1.0`, rejects `1.5`, caps ±(2^53−1)) | `typeof v === 'number' && Number.isSafeInteger(v)` (accepts `1.0` natively; caps ±(2^53−1)) | runtime `_parse_spec_integer(v, path, violations)` → `int` (accepts `1.0`, rejects `1.5` and `bool`, caps ±(2^53−1)) | node helper `SpecNumbers.specLong(node, path, errs)` called by the collecting deserializer (accepts `1.0`, rejects `1.5`, caps ±(2^53−1)) |
-| `"number"`  | finite `float64` parse | `typeof v === 'number' && Number.isFinite(v)` | numeric, non-`bool`, and finite-binary64 check, stored as-is | node helper `SpecNumbers.specDouble(node, path, errs)` (numeric and finite) |
+| `"integer"` | raw-map `*json.RawMessage` → runtime `parseSpecInteger` → `int64` (accepts `1.0`, rejects `1.5`, caps ±(2^53−1)) | `typeof v === 'number' && Number.isSafeInteger(v)` (accepts `1.0` natively; caps ±(2^53−1)) | runtime `_parse_spec_integer(v, path, violations)` → `int` (accepts `1.0`, rejects `1.5` and `bool`, caps ±(2^53−1)) | node helper `SpecNumbers.specLong(node, path, errs)` called by the collecting deserializer (accepts `1.0`, rejects `1.5`, caps ±(2^53−1)) |
+| `"number"`  | finite `float64` parse | `typeof v === 'number' && Number.isFinite(v)` | numeric, non-`bool`, and finite-binary64 check, narrowed through `_binary64` | node helper `SpecNumbers.specDouble(node, path, errs)` (numeric and finite) |
 | `"boolean"` | `bool` unmarshal | `typeof v === 'boolean'` | `isinstance(v, bool)` (rejects `1`/`0`) | `Boolean` binding |
 | `"object"`  | typed struct unmarshal | `typeof v === 'object' && v !== null && !Array.isArray(v)` | `isinstance(v, dict)`, then the branch/member converter builds the dataclass | typed class binding |
 | `"array"`   | typed slice unmarshal | `Array.isArray(v)` | `isinstance(v, list)` | typed `List` binding |
-| `"null"`    | `raw == nil` / `bytes.Equal(raw, []byte("null"))` | `v === null` | `v is None` | `v == null` |
+| `"null"`    | `raw == nil` / `isNull(*raw)` | `v === null` | `v is None` | `v == null` |
 
 Strategy per language:
 - **Go**: Every generated struct gets a custom `UnmarshalJSON`. It decodes
-  into a shadow struct of `*json.Number` / `*T` pointers (absence
-  observable per P9), dispatches per field, builds
+  the object into `map[string]json.RawMessage` and uses per-key raw-message
+  pointers to preserve absence (P9), dispatches per field, builds
   `Violation{Path, Reason}` and collects them into a single non-retryable
   Temporal `ApplicationError` with type `PayloadValidationError` and
   `[]Violation` as its first detail.
@@ -130,11 +131,11 @@ Strategy per language:
   ```go
   // integerCap = 1<<53 - 1 = 9007199254740991 (== JS Number.MAX_SAFE_INTEGER)
   func parseSpecInteger(n json.Number) (int64, error) {
-      f, err := n.Float64()
-      if err != nil { return 0, err }
-      if f != math.Trunc(f) { return 0, errFractional }         // "1.5" → reject
-      if f < -integerCap || f > integerCap { return 0, errRange } // > ±(2^53-1) → reject
-      return int64(f), nil                                       // "1", "1.0", "1e2"
+      // Pseudocode: the emitted helper classifies n.String() directly,
+      // normalizes sign/exponent, rejects non-zero fractional digits, compares
+      // digit strings against integerCap, then converts the proven-safe token.
+      // It never rounds through Float64 before testing integer-ness.
+      // ...exact token algorithm...
   }
   ```
   User-facing field stays plain `int64`. The Go primitive holds ±2^63,
@@ -212,6 +213,9 @@ Strategy per language:
       if (!n.isNumber()) {                        // rejects "1", true, etc.
           errs.add(new Violation(path, "expected integer"));  return null;
       }
+      if (!isFiniteNode(n)) {
+          errs.add(new Violation(path, "expected finite integer")); return null;
+      }
       BigDecimal d = n.decimalValue();            // exact; no double rounding
       if (d.stripTrailingZeros().scale() > 0) {   // "1.0"/"1e2" ok, "1.5" rejected
           errs.add(new Violation(path, "not an integer"));    return null;
@@ -227,13 +231,12 @@ Strategy per language:
   blocking shipping with defaults. `ACCEPT_FLOAT_AS_INT=false` fixes
   truncation but rejects spec-valid `1.0`/`1e2` and still coerces `"1"`.
   The custom helper is the only path that matches the spec. The body
-  printed above is **normative**, including its use of
-  `n.decimalValue()`: a `BigDecimal` built from the token is exact, so
+  printed above is **normative**, including its finiteness guard and use of
+  `n.decimalValue()`: a finite `BigDecimal` built from the token is exact, so
   `4503599627370496.5` rejects, whereas the `n.doubleValue()` shortcut
   would round it to an integer first and accept it.
-  The `±(2^53−1)` cap is enforced
-  explicitly above; `>2^63` would also trip Jackson's own range check,
-  but our cap is tighter so ours fires first. **Reading from a `JsonNode`
+  The `±(2^53−1)` cap is enforced explicitly above, before Java's own
+  `longValueExact()` conversion. **Reading from a `JsonNode`
   (not a live parser) is what lets a spec-strict failure become a
   `Violation{path,reason}` instead of a bind-aborting
   `MismatchedInputException`** — the helper is called from the two-stage
@@ -276,7 +279,7 @@ omit/emit-`null` rules owned by [[nullability]].
 
 | Shape | Values |
 |---|---|
-| Single primitive | `"null"`, `"boolean"`, `"object"`, `"array"`, `"number"`, `"string"`, `"integer"` |
+| Single primitive | `"boolean"`, `"object"`, `"array"`, `"number"`, `"string"`, `"integer"` |
 | Typeless via combinator/reference | `{"oneOf":[{"type":"string"},{"type":"null"}]}`, `{"allOf":[…]}`, `{"$ref":"#/$defs/X"}` — shape from the branches / merge / target (see [[oneOf]] / [[allOf]] / [[ref]]) |
 
 ### Rejected at load time (negative tests)
@@ -288,7 +291,7 @@ Loader must produce a clear, located diagnostic for each.
 | Array form (P6/P7) | `["string","null"]`, `["integer","number"]`, full 7-element union, `[]`, `["string"]` |
 | Absent `type` on a **leaf** schema (P7) | `{}`, `{"description":"…"}` (no `oneOf`/`allOf`/`$ref` to supply the shape) |
 | Object without shape (P7.1) | `{"type":"object"}` with no `properties` and no `additionalProperties` (spec says "any object"; we require explicit intent). [[patternProperties]] does not supply a shape — it is rejected unconditionally. |
-| `"null"` standalone | `{"type":"null"}` anywhere except as a branch of the [[nullability]] `oneOf` pattern |
+| `"null"` standalone | `{"type":"null"}` anywhere except as a branch of a [[oneOf]] |
 | Unknown type name | `"int"`, `"float"`, `"date"`, `"any"`, `"bigint"`, `"String"`, `"INTEGER"` |
 | Wrong outer type | `5`, `null`, `true`, `{"type":"string"}` |
 | Nested / malformed | `[["string"]]` |
@@ -375,8 +378,8 @@ For each accepted `type`, fuzz over:
 |---|---|
 | JSON Schema 2020-12 | Native. Reject only documented out-of-subset cases. |
 | OpenAPI 3.1         | Aligns with 2020-12. Native. |
-| OpenAPI 3.0         | `nullable: true` → reject; only the canonical `oneOf:[{T},{null}]` form is accepted ([[nullability]]). User must rewrite. |
-| Swagger 2.0 / draft-4 | Same as OAS 3.0; no type arrays; nullable rewrite required. |
+| OpenAPI 3.0         | Human porting guidance: rewrite `nullable: true` as canonical `oneOf:[{T},{null}]` ([[nullability]]). OpenAPI 3.0 documents are not a separate accepted input dialect. |
+| Swagger 2.0 / draft-4 | Human porting guidance: rewrite nullable forms during conversion to 2020-12; a declared older `$schema` rejects at the document dialect gate. |
 
 Pre-draft-4 union-of-schemas form (`type: [{...},{...}]`) is irrelevant —
 no current toolchain emits it.

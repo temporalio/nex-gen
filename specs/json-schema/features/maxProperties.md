@@ -31,6 +31,9 @@ types. Citing [[PRINCIPLES.md]]: **P10** (enforced at the boundary),
 Loader behavior:
 - Value not a non-negative integer (per spec; honors the `1.0`-as-integer
   rule and the integer cap, see [[type]]) → reject.
+- The portable count ceiling from [[maxItems]] applies.
+- The keyword requires `type: "object"`; a missing or different type rejects
+  at load time under **P7.1**.
 - `maxProperties: 0` → accepted (object must be empty). Note this is a
   near-equivalent of a closed empty object; prefer
   `additionalProperties:false` with no [[properties]] when *emptiness*
@@ -57,8 +60,8 @@ declared-vs-extras split is a language-side artifact, not a wire fact).
 
 | Language | Strategy |
 |---|---|
-| Go | `UnmarshalJSON` counts decoded members (wire keys, pre-population) and hands the count to the shared `Validate`, whose `> max` predicate raises `Violation{Path:"", Reason: fmt.Sprintf("must have at most %d properties, got %d", max, n)}`; collected into one `PayloadValidationError` application failure. |
-| TypeScript | count `Object.keys(parsed).length` on the raw parsed wire object (before defaults applied); the shared `Validate`'s `> max` check pushes ``Violation{path, reason: `must have at most ${max} properties, got ${n}`}``, throw one `PayloadValidationError` application failure. |
+| Go | `UnmarshalJSON` applies the predicate to the raw wire-key count; `Validate` applies the same comparison and reason to the model-derived set of keys that serialize will emit. |
+| TypeScript | `fromTransferType` applies the predicate to `Object.keys(raw).length`; `toTransferType` applies it to the keys the outbound conversion will emit. The comparison is inlined in each converter. |
 | Python | `from_transfer_type` counts `len(raw)` on the raw wire dict — one number over the wire object, taken before any default is materialized — and appends `Violation(path="", reason=f"must have at most {max} properties, got {n}")` when `n > max`, into the single generated `PayloadValidationError` application failure. |
 | Java | the per-POJO collecting deserializer (PRINCIPLES Java §5) counts distinct keys in the parsed tree (`> max`) — one number over the wire object, **not** populated POJO fields + catch-all map summed post-bind; a violation joins the single `PayloadValidationError` application failure. |
 
@@ -92,6 +95,7 @@ the wire object.
 | Reason | Example |
 |---|---|
 | Not non-negative integer | `maxProperties:-1`, `maxProperties:1.5`, `maxProperties:"3"` |
+| Missing/mismatched object type | `{maxProperties:3}`, `{type:"array", maxProperties:3}` |
 | `< minProperties` | `minProperties:5, maxProperties:2` |
 | `<` required count | `required:["a","b","c"], maxProperties:2` |
 

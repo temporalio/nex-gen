@@ -37,10 +37,12 @@ property:
     trivial true-schema (validates anything), so emitting a file-root
     type would mean a meaningless `any`-typed top-level type named from
     the basename. In this case the generator emits **no file-root type**
-    — the file contributes only its `$defs` types, exactly as a Nexus
-    document's envelope contributes only its `$defs`. The moment **any**
-    schema-shaped keyword (`type`, `properties`, `allOf`, `enum`, `$ref`,
-    …) appears at the root, the root is a real type again and is emitted.
+    — the file contributes only its **non-empty** `$defs` types, exactly as a
+    Nexus document's envelope contributes only its `$defs`. A root shape such
+    as `type: object`, `properties`, or `allOf` leaves definitions-only mode and
+    is emitted subject to the root-shape rules. A bare `$ref` is governed by
+    [[ref]]'s root-alias status; a scalar `enum` root is not an admitted root
+    shape.
 
 The mode is a property of the file, not of the run: a single generator
 input set may mix Nexus documents and pure JSON Schema files freely. Both
@@ -140,7 +142,7 @@ see those specs for the detail.
 |---|---|
 | Pure JSON Schema, no marker | a file with `type`/`properties` and no `nexusrpc` → root is a type |
 | Pure JSON Schema, explicit dialect | as above + `$schema: ".../2020-12/schema"` |
-| Definitions-only pure file | only `$defs` (+ optional `description` / `$schema`), no `nexusrpc` → no file-root type, contributes `$defs` types only |
+| Definitions-only pure file | a non-empty `$defs` (+ optional `description` / `$schema`), no `nexusrpc` → no file-root type, contributes `$defs` types only |
 | Nexus document opt-in | root `nexusrpc: "1.0.0"` + `services` (+ optional `$schema` 2020-12, `description`) |
 | Nexus document with `$defs` only | `nexusrpc: "1.0.0"` + `$defs`, no `services` (valid envelope) |
 | Dialect assumed when absent | no `$schema` → 2020-12 assumed in either mode |
@@ -157,6 +159,7 @@ see those specs for the detail.
 | Schema-shaped root in a Nexus document | root `type`/`properties`/`additionalProperties` alongside `nexusrpc` → "move the type into `$defs`" |
 | `$id` present (anywhere) | root or nested `$id` — owned by [[ref]] |
 | `$vocabulary` present | root `$vocabulary` — meta-schema-only keyword, no place in a type schema (P5/P6) |
+| No root shape and no definitions | `{}`, a description-only document, or `$defs: {}` |
 
 ## Interactions
 
