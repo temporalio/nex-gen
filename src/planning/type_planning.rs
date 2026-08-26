@@ -77,7 +77,7 @@ fn collect_spec_module_imports(
             }
             TypeDeclSpec::Record(record) => {
                 if let Some(source) = &record.source {
-                    collect_external_source_module_imports(&spec.module_path, source, imports);
+                    collect_type_source_module_imports(&spec.module_path, source, imports);
                 }
                 for field in record.fields.values() {
                     collect_type_module_imports(
@@ -106,7 +106,7 @@ fn collect_spec_module_imports(
             }
             TypeDeclSpec::Variant(variant) => {
                 if let Some(source) = &variant.source {
-                    collect_external_source_module_imports(&spec.module_path, source, imports);
+                    collect_variant_source_module_imports(&spec.module_path, source, imports);
                 }
                 for case in &variant.cases {
                     if let Some(payload) = &case.payload {
@@ -116,12 +116,12 @@ fn collect_spec_module_imports(
             }
             TypeDeclSpec::Enum(enumeration) => {
                 if let Some(source) = &enumeration.source {
-                    collect_external_source_module_imports(&spec.module_path, source, imports);
+                    collect_type_source_module_imports(&spec.module_path, source, imports);
                 }
             }
             TypeDeclSpec::Flags(flags) => {
                 if let Some(source) = &flags.source {
-                    collect_external_source_module_imports(&spec.module_path, source, imports);
+                    collect_type_source_module_imports(&spec.module_path, source, imports);
                 }
             }
         }
@@ -195,19 +195,43 @@ fn collect_external_type_module_imports(
         ExternalTypeSpec::Json(json_type) => {
             collect_symbol_module_import(source_module, &json_type.name, imports)
         }
-        ExternalTypeSpec::Alias { name, target, .. } => {
-            collect_symbol_module_import(source_module, name, imports);
-            collect_type_module_imports(source_module, Some(target), imports);
+        ExternalTypeSpec::Alias(alias) => {
+            collect_symbol_module_import(source_module, &alias.name, imports);
+            collect_type_module_imports(source_module, Some(&alias.target), imports);
         }
     }
 }
 
-fn collect_external_source_module_imports(
+fn collect_type_source_module_imports(
     source_module: &ModulePath,
-    source: &ExternalSourceSpec<OperationLoweredFamily>,
+    source: &TypeSourceSpec<OperationLoweredFamily>,
     imports: &mut BTreeMap<ModulePath, BTreeMap<ModulePath, BTreeSet<String>>>,
 ) {
-    collect_symbol_module_import(source_module, source.proto_target().message(), imports);
+    match source {
+        TypeSourceSpec::Proto(proto) => {
+            collect_symbol_module_import(source_module, &proto.proto, imports)
+        }
+        TypeSourceSpec::Alias(alias) => {
+            collect_symbol_module_import(source_module, &alias.name, imports);
+            collect_type_module_imports(source_module, Some(&alias.target), imports);
+        }
+    }
+}
+
+fn collect_variant_source_module_imports(
+    source_module: &ModulePath,
+    source: &VariantSourceSpec<OperationLoweredFamily>,
+    imports: &mut BTreeMap<ModulePath, BTreeMap<ModulePath, BTreeSet<String>>>,
+) {
+    match source {
+        VariantSourceSpec::ProtoOneof(oneof) => {
+            collect_symbol_module_import(source_module, &oneof.message, imports)
+        }
+        VariantSourceSpec::Alias(alias) => {
+            collect_symbol_module_import(source_module, &alias.name, imports);
+            collect_type_module_imports(source_module, Some(&alias.target), imports);
+        }
+    }
 }
 
 fn collect_resource_symbol_module_import(
@@ -233,9 +257,9 @@ fn collect_authored_external_type_module_imports(
         ExternalTypeSpec::Json(json_type) => {
             collect_symbol_module_import(source_module, &json_type.name, imports)
         }
-        ExternalTypeSpec::Alias { name, target, .. } => {
-            collect_symbol_module_import(source_module, name, imports);
-            collect_authored_type_module_imports(source_module, target, imports);
+        ExternalTypeSpec::Alias(alias) => {
+            collect_symbol_module_import(source_module, &alias.name, imports);
+            collect_authored_type_module_imports(source_module, &alias.target, imports);
         }
     }
 }
@@ -720,7 +744,7 @@ impl<'a> TypePlanningContext<'a> {
             ExternalTypeSpec::Json(json_type) => {
                 ExternalTypeSpec::Json(self.map_json_type(json_type))
             }
-            ExternalTypeSpec::Alias { name, .. } => {
+            ExternalTypeSpec::Alias(AliasTypeSpec { name, .. }) => {
                 return Err(Error::UnknownOperationOutputProto {
                     service: service.name.clone(),
                     operation: operation.name.clone(),
@@ -876,11 +900,11 @@ impl<'a> TypePlanningContext<'a> {
             ExternalTypeSpec::Json(json_type) => {
                 ExternalTypeSpec::Json(self.map_json_type(json_type))
             }
-            ExternalTypeSpec::Alias {
+            ExternalTypeSpec::Alias(AliasTypeSpec {
                 name,
                 target,
                 type_name,
-            } => ExternalTypeSpec::Alias {
+            }) => ExternalTypeSpec::Alias(AliasTypeSpec {
                 name: PlannedAliasType {
                     name: name.as_str().to_string(),
                 },
@@ -892,7 +916,7 @@ impl<'a> TypePlanningContext<'a> {
                         .map(ToOwned::to_owned),
                     ..Default::default()
                 },
-            },
+            }),
         }
     }
 
@@ -1077,17 +1101,17 @@ impl<'a> TypePlanningContext<'a> {
                     .as_ref()
                     .map(|err| Box::new(self.planned_authored_type_override_from_authored(err))),
             },
-            TypeSpec::External(ExternalTypeSpec::Alias {
+            TypeSpec::External(ExternalTypeSpec::Alias(AliasTypeSpec {
                 name,
                 target,
                 type_name,
-            }) => TypeSpec::External(ExternalTypeSpec::Alias {
+            })) => TypeSpec::External(ExternalTypeSpec::Alias(AliasTypeSpec {
                 name: PlannedAliasType {
                     name: name.as_str().to_string(),
                 },
                 target: Box::new(self.planned_authored_type_override_from_authored(target)),
                 type_name: materialize_selected_text(type_name),
-            }),
+            })),
             TypeSpec::External(ExternalTypeSpec::Json(json_type)) => {
                 TypeSpec::External(ExternalTypeSpec::Json(self.map_json_type(json_type)))
             }
@@ -1175,19 +1199,19 @@ impl<'a> TypePlanningContext<'a> {
                     .as_ref()
                     .map(|err| Box::new(self.planned_value_type_from_authored(err))),
             },
-            TypeSpec::External(ExternalTypeSpec::Alias {
+            TypeSpec::External(ExternalTypeSpec::Alias(AliasTypeSpec {
                 name,
                 target,
                 type_name,
-            }) => {
+            })) => {
                 let fallback = self.planned_value_type_from_authored(target.without_option());
-                TypeSpec::External(ExternalTypeSpec::Alias {
+                TypeSpec::External(ExternalTypeSpec::Alias(AliasTypeSpec {
                     name: PlannedAliasType {
                         name: name.as_str().to_string(),
                     },
                     target: Box::new(fallback),
                     type_name: materialize_selected_text(type_name),
-                })
+                }))
             }
             TypeSpec::List(inner) => TypeSpec::List(Box::new(
                 self.planned_type_from_authored(inner.without_option()),
@@ -1355,7 +1379,8 @@ mod tests {
     use crate::language::Language;
     use crate::spec::{ApiSpecLeaf, ApiSpecNode, ApiSpecTree, CompilerPass};
     use crate::spec::{
-        ExternalTypeSpec, LanguageStringSpec, ModulePath, ProtoSourceTarget, SupportSpec,
+        ExternalTypeSpec, LanguageStringSpec, ModulePath, ProtoOneofSpec, SupportSpec,
+        VariantSourceSpec,
     };
 
     #[test]
@@ -1413,10 +1438,10 @@ mod tests {
         let Some(source) = &variant.source else {
             panic!("oneof variant should retain its protobuf source");
         };
-        let ProtoSourceTarget::Oneof {
+        let VariantSourceSpec::ProtoOneof(ProtoOneofSpec {
             message: PlannedProtoType::Message(message),
             name,
-        } = source.proto_target()
+        }) = source
         else {
             panic!("oneof variant source should resolve to a protobuf oneof");
         };
@@ -1464,13 +1489,8 @@ mod tests {
         .unwrap();
         for entry in spec.types.values_mut() {
             match &mut entry.declaration {
-                TypeDeclSpec::Variant(variant) if variant.name == "OutcomeValue" => {
-                    if let Some(source) = &mut variant.source {
-                        source.reference.default_import = Some("variant.module".to_string());
-                    }
-                }
                 TypeDeclSpec::Record(record) if record.name == "Outcome" => {
-                    if let Some(source) = &mut record.source {
+                    if let Some(TypeSourceSpec::Proto(source)) = &mut record.source {
                         source.reference.default_import = Some("record.module".to_string());
                     }
                 }

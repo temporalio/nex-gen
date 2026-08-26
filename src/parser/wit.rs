@@ -706,18 +706,18 @@ fn authored_field_type_for_language(field_type: TypeSpec, language: Language) ->
             ok: ok.map(|ok| Box::new(authored_field_type_for_language(*ok, language))),
             err: err.map(|err| Box::new(authored_field_type_for_language(*err, language))),
         },
-        TypeSpec::External(ExternalTypeSpec::Alias {
+        TypeSpec::External(ExternalTypeSpec::Alias(AliasTypeSpec {
             name,
             target,
             type_name,
-        }) => {
+        })) => {
             let target = authored_field_type_for_language(*target, language);
             if type_name.for_language(language).is_some() {
-                TypeSpec::External(ExternalTypeSpec::Alias {
+                TypeSpec::External(ExternalTypeSpec::Alias(AliasTypeSpec {
                     name,
                     target: Box::new(target),
                     type_name,
-                })
+                }))
             } else {
                 target
             }
@@ -945,7 +945,7 @@ fn build_wit_enum_spec(
                 number: i32::try_from(index).expect("WIT enum case index should fit in i32"),
             })
             .collect(),
-        source: build_native_source(type_def, path, interface_name)?,
+        source: build_type_source(type_def, path, interface_name)?,
     }))
 }
 
@@ -973,7 +973,7 @@ fn build_wit_flags_spec(
                 bit: index,
             })
             .collect(),
-        source: build_native_source(type_def, path, interface_name)?,
+        source: build_type_source(type_def, path, interface_name)?,
     }))
 }
 
@@ -1014,7 +1014,7 @@ fn build_wit_variant_spec(
         name: type_name.to_upper_camel_case(),
         full_name: wit_type_full_name(resolve, type_id),
         cases,
-        source: build_native_source(type_def, path, "")?,
+        source: build_variant_source(type_def, path, "")?,
     }))
 }
 
@@ -1034,7 +1034,7 @@ fn build_wit_record_spec(
     let context = format!("type `{interface_name}.{type_name}`");
     let directives = parse_directives(type_def.docs.contents.as_deref(), path, &context)?;
     let experimental = experimental_directive(&directives, path, &context)?;
-    let source = build_native_source(type_def, path, interface_name)?;
+    let source = build_type_source(type_def, path, interface_name)?;
     let flatten_in_api = directive(&directives, "flatten-in-api", path, &context)?.is_some();
     if directive(&directives, "omit", path, &context)?.is_some() {
         return Err(Error::InvalidWitDirective {
@@ -1070,11 +1070,59 @@ fn build_wit_record_spec(
     }))
 }
 
-fn build_native_source(
+fn build_type_source(
     type_def: &TypeDef,
     path: &Path,
     interface_name: &str,
-) -> Result<Option<ExternalSourceSpec>> {
+) -> Result<Option<TypeSourceSpec>> {
+    build_native_proto_source(type_def, path, interface_name).map(|source| {
+        source.map(|source| {
+            TypeSourceSpec::Proto(ProtoTypeSpec {
+                proto: source.message,
+                reference: source.reference,
+                type_name: source.type_name,
+            })
+        })
+    })
+}
+
+fn build_variant_source(
+    type_def: &TypeDef,
+    path: &Path,
+    interface_name: &str,
+) -> Result<Option<VariantSourceSpec>> {
+    let Some(source) = build_native_proto_source(type_def, path, interface_name)? else {
+        return Ok(None);
+    };
+    let Some(name) = source.oneof else {
+        return Err(Error::InvalidWitDirective {
+            path: path.to_path_buf(),
+            context: format!(
+                "type `{}`",
+                type_def.name.as_deref().unwrap_or("unnamed-type")
+            ),
+            directive: "@nexus.proto".to_string(),
+            reason: "protobuf variants must identify a oneof as `<message>.<oneof>`".to_string(),
+        });
+    };
+    Ok(Some(VariantSourceSpec::ProtoOneof(ProtoOneofSpec {
+        message: source.message,
+        name,
+    })))
+}
+
+struct NativeProtoSource {
+    message: Symbol,
+    oneof: Option<String>,
+    reference: LanguageStringSpec,
+    type_name: LanguageStringSpec,
+}
+
+fn build_native_proto_source(
+    type_def: &TypeDef,
+    path: &Path,
+    interface_name: &str,
+) -> Result<Option<NativeProtoSource>> {
     let type_name = type_def.name.as_deref().unwrap_or("unnamed-type");
     let context = if interface_name.is_empty() {
         format!("type `{type_name}`")
@@ -1149,14 +1197,9 @@ fn build_native_source(
         ..Default::default()
     };
     apply_directive_imports(&mut reference, proto_directive);
-    Ok(Some(ExternalSourceSpec {
-        target: match oneof {
-            Some(name) => ProtoSourceTarget::Oneof {
-                message: Symbol::new(proto_name.to_string()),
-                name,
-            },
-            None => ProtoSourceTarget::Type(Symbol::new(proto_name.to_string())),
-        },
+    Ok(Some(NativeProtoSource {
+        message: Symbol::new(proto_name.to_string()),
+        oneof,
         reference,
         type_name: directive_prefixed_language_string(proto_directive, "type"),
     }))
@@ -1564,13 +1607,13 @@ fn resolve_authored_field_type_spec(
                     return Ok(TypeSpec::Resource(AuthoredResourceType::new(resource_name)));
                 }
                 if let Some(type_directive) = directive(&directives, "type", path, &type_context)? {
-                    return Ok(TypeSpec::External(ExternalTypeSpec::Alias {
+                    return Ok(TypeSpec::External(ExternalTypeSpec::Alias(AliasTypeSpec {
                         name: Symbol::new(wit_type_full_name(resolve, *id)),
                         target: Box::new(TypeSpec::External(ExternalTypeSpec::Proto(Symbol::new(
                             proto_name,
                         )))),
                         type_name: directive_language_string(type_directive),
-                    }));
+                    })));
                 }
                 return Ok(TypeSpec::External(ExternalTypeSpec::Proto(Symbol::new(
                     proto_name,
@@ -1630,11 +1673,11 @@ fn resolve_authored_field_type_spec(
                     if let Some(type_directive) =
                         directive(&directives, "type", path, &type_context)?
                     {
-                        Ok(TypeSpec::External(ExternalTypeSpec::Alias {
+                        Ok(TypeSpec::External(ExternalTypeSpec::Alias(AliasTypeSpec {
                             name: Symbol::new(wit_type_full_name(resolve, *id)),
                             target: Box::new(target),
                             type_name: directive_language_string(type_directive),
-                        }))
+                        })))
                     } else if let Some(function_directive) =
                         directive(&directives, "function", path, &type_context)?
                     {
@@ -1645,11 +1688,11 @@ fn resolve_authored_field_type_spec(
                             path,
                             &type_context,
                         )? {
-                            Ok(TypeSpec::External(ExternalTypeSpec::Alias {
+                            Ok(TypeSpec::External(ExternalTypeSpec::Alias(AliasTypeSpec {
                                 name: Symbol::new(wit_type_full_name(resolve, *id)),
                                 target: Box::new(target),
                                 type_name,
-                            }))
+                            })))
                         } else {
                             Ok(target)
                         }
@@ -2260,11 +2303,11 @@ fn function_alias_type_name(
         if result.is_empty() {
             return Ok(None);
         }
-        TypeSpec::External(ExternalTypeSpec::Alias {
+        TypeSpec::External(ExternalTypeSpec::Alias(AliasTypeSpec {
             name: Symbol::new(""),
             target: Box::new(TypeSpec::String),
             type_name: result,
-        })
+        }))
     };
     let mut result_type = authored_type_language_string(&result);
     if result_type.is_empty() {
@@ -2303,9 +2346,9 @@ fn function_alias_type_name(
 
 fn authored_type_language_string(authored_type: &TypeSpec) -> LanguageStringSpec {
     match authored_type {
-        TypeSpec::External(ExternalTypeSpec::Alias {
+        TypeSpec::External(ExternalTypeSpec::Alias(AliasTypeSpec {
             type_name, target, ..
-        }) => {
+        })) => {
             if type_name.is_empty() {
                 authored_type_language_string(target)
             } else {
@@ -3611,7 +3654,10 @@ mod tests {
     use crate::descriptors::DescriptorIndex;
     use crate::error::Error;
     use crate::language::Language;
-    use crate::spec::{CompilerPass, ExternalSourceSpec, LanguageStringSpec, ProtoSourceTarget};
+    use crate::spec::{
+        CompilerPass, LanguageStringSpec, ProtoOneofSpec, ProtoTypeSpec, TypeSourceSpec,
+        VariantSourceSpec,
+    };
 
     use super::{
         ApiSpec, AuthoredResourceType, DeclaredTypeName, ExternalTypeSpec, FunctionArgSpec,
@@ -4501,8 +4547,8 @@ interface models {
         assert!(spec.flags_decl("models.features").unwrap().source.is_some());
         let variant = spec.variant("models.choice").unwrap();
         assert!(matches!(
-            variant.source.as_ref().map(ExternalSourceSpec::proto_target),
-            Some(ProtoSourceTarget::Oneof { name, .. })
+            variant.source.as_ref(),
+            Some(VariantSourceSpec::ProtoOneof(ProtoOneofSpec { name, .. }))
                 if name == "value"
         ));
         for proto_name in [
@@ -4586,14 +4632,14 @@ interface user-service {
                 .unwrap()
                 .source
                 .as_ref(),
-            Some(&ExternalSourceSpec {
-                target: ProtoSourceTarget::Type(Symbol::new("acme.users.v1.ProtoRequest",)),
+            Some(&TypeSourceSpec::Proto(ProtoTypeSpec {
+                proto: Symbol::new("acme.users.v1.ProtoRequest"),
                 reference: LanguageStringSpec {
                     default: Some("acme.users.v1.ProtoRequest".to_string()),
                     ..Default::default()
                 },
                 type_name: LanguageStringSpec::default(),
-            })
+            }))
         );
         assert_eq!(
             spec.record("user-service.json-request")

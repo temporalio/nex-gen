@@ -4,8 +4,8 @@ use prost_types::field_descriptor_proto::{Label, Type};
 
 use crate::descriptors::{DescriptorIndex, EnumMetadata, MessageMetadata, real_oneof_groups};
 use crate::spec::{
-    ApiSpec, ExternalSourceSpec, ExternalTypeSpec, IntSpec, ProtoSourceTarget, RecordSpec,
-    TypeDeclSpec, TypeSpec,
+    ApiSpec, ExternalTypeSpec, IntSpec, ProtoTypeSpec, RecordSpec, TypeDeclSpec, TypeSourceSpec,
+    TypeSpec,
 };
 
 use super::OperationLoweredFamily;
@@ -44,20 +44,19 @@ impl PlannedProtoTypeInfo {
 fn native_source_for_proto<'a>(
     spec: &'a ApiSpec<OperationLoweredFamily>,
     proto_name: &str,
-) -> Option<&'a ExternalSourceSpec<OperationLoweredFamily>> {
+) -> Option<&'a ProtoTypeSpec<OperationLoweredFamily>> {
     let proto_name = proto_name.trim_start_matches('.');
     spec.types.values().find_map(|entry| {
         let source = match &entry.declaration {
             TypeDeclSpec::Record(record) => record.source.as_ref(),
             TypeDeclSpec::Enum(enumeration) => enumeration.source.as_ref(),
             TypeDeclSpec::Flags(flags) => flags.source.as_ref(),
-            TypeDeclSpec::Variant(variant) => variant.source.as_ref(),
+            TypeDeclSpec::Variant(_) => None,
             TypeDeclSpec::External(_) => None,
         }?;
         source
-            .proto_type()
-            .is_some_and(|source_proto| source_proto.as_ref() == proto_name)
-            .then_some(source)
+            .proto()
+            .filter(|source| source.proto.as_ref() == proto_name)
     })
 }
 
@@ -70,7 +69,7 @@ fn proto_reference(
         .map(materialize_selected_text)
         .or_else(|| {
             native_source_for_proto(spec, proto_name)
-                .map(|source| materialize_selected_text(source.reference()))
+                .map(|source| materialize_selected_text(&source.reference))
         })
         .unwrap_or_default()
 }
@@ -83,7 +82,7 @@ fn proto_type_name(
         .map(|binding| materialize_selected_text(binding.type_name()))
         .or_else(|| {
             native_source_for_proto(spec, proto_name)
-                .map(|source| materialize_selected_text(source.type_name()))
+                .map(|source| materialize_selected_text(&source.type_name))
         })
         .unwrap_or_default()
 }
@@ -274,14 +273,11 @@ pub(super) fn planned_record_field_type(
 }
 
 fn record_proto_name(record: &RecordSpec<OperationLoweredFamily>) -> Option<&str> {
-    let Some(ExternalSourceSpec {
-        target: ProtoSourceTarget::Type(proto_name),
-        ..
-    }) = record.source.as_ref()
-    else {
-        return None;
-    };
-    Some(proto_name.as_str())
+    record
+        .source
+        .as_ref()
+        .and_then(TypeSourceSpec::proto_type)
+        .map(|symbol| symbol.as_str())
 }
 
 fn descriptor_field_by_name<'a>(

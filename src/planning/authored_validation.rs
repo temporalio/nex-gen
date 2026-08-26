@@ -14,9 +14,8 @@ use crate::generator::proto::typescript as typescript_proto;
 use crate::generator::python;
 use crate::language::Language;
 use crate::spec::{
-    ApiSpec, AuthoredFamily, ExternalSourceSpec, ExternalTypeBindingSpec, ExternalTypeSpec,
-    FunctionArgsSpec, FunctionResultSpec, ProtoSourceTarget, RecordFieldVisibility, RecordSpec,
-    ServiceSpec, TypeSpec,
+    ApiSpec, AuthoredFamily, ExternalTypeBindingSpec, ExternalTypeSpec, FunctionArgsSpec,
+    FunctionResultSpec, RecordFieldVisibility, RecordSpec, ServiceSpec, TypeSourceSpec, TypeSpec,
 };
 use crate::spec::{ApiSpecLeaf, CompilerPass};
 
@@ -210,7 +209,6 @@ fn validate_external_type_bindings(
     descriptors: &DescriptorIndex,
     language: Language,
 ) -> Result<()> {
-    validate_native_source_targets(spec)?;
     let usages = language_message_usages(spec, descriptors, language)?;
     for (type_name, binding) in spec.external_types() {
         if descriptors.message(type_name).is_some() {
@@ -227,11 +225,7 @@ fn validate_external_type_bindings(
     }
 
     for (_, record) in spec.records() {
-        let Some(proto_name) = record
-            .source
-            .as_ref()
-            .and_then(ExternalSourceSpec::proto_type)
-        else {
+        let Some(proto_name) = record.source.as_ref().and_then(TypeSourceSpec::proto_type) else {
             continue;
         };
         let Some(message) = descriptors.message(proto_name.as_str()) else {
@@ -254,21 +248,15 @@ fn validate_external_type_bindings(
     }
 
     for (_, variant) in spec.variants() {
-        let Some(source) = &variant.source else {
+        let Some(source) = variant
+            .source
+            .as_ref()
+            .and_then(crate::spec::VariantSourceSpec::proto_oneof)
+        else {
             continue;
         };
-        let ProtoSourceTarget::Oneof {
-            message: proto_name,
-            name: oneof_name,
-        } = source.proto_target()
-        else {
-            return Err(Error::InvalidTypeOverrideField {
-                message: "<unknown>".to_string(),
-                field: variant.name.clone(),
-                property: "source",
-                reason: "protobuf variants must identify a protobuf oneof".to_string(),
-            });
-        };
+        let proto_name = &source.message;
+        let oneof_name = &source.name;
         let Some(message) = descriptors.message(proto_name.as_str()) else {
             if descriptors.file_count() == 0 {
                 continue;
@@ -290,80 +278,6 @@ fn validate_external_type_bindings(
     }
 
     Ok(())
-}
-
-fn validate_native_source_targets(spec: &ApiSpec) -> Result<()> {
-    for (_, record) in spec.records() {
-        validate_type_source_target(
-            "record",
-            &record.name,
-            record.source.as_ref(),
-            NativeSourceTargetKind::Type,
-        )?;
-    }
-    for (_, enumeration) in spec.enums() {
-        validate_type_source_target(
-            "enum",
-            &enumeration.name,
-            enumeration.source.as_ref(),
-            NativeSourceTargetKind::Type,
-        )?;
-    }
-    for (_, flags) in spec.flags() {
-        validate_type_source_target(
-            "flags",
-            &flags.name,
-            flags.source.as_ref(),
-            NativeSourceTargetKind::Type,
-        )?;
-    }
-    for (_, variant) in spec.variants() {
-        validate_type_source_target(
-            "variant",
-            &variant.name,
-            variant.source.as_ref(),
-            NativeSourceTargetKind::Oneof,
-        )?;
-    }
-    Ok(())
-}
-
-#[derive(Clone, Copy)]
-enum NativeSourceTargetKind {
-    Type,
-    Oneof,
-}
-
-fn validate_type_source_target(
-    declaration_kind: &str,
-    declaration_name: &str,
-    source: Option<&crate::spec::ExternalSourceSpec>,
-    expected: NativeSourceTargetKind,
-) -> Result<()> {
-    let Some(source) = source else {
-        return Ok(());
-    };
-    let valid = matches!(
-        (expected, source.proto_target()),
-        (NativeSourceTargetKind::Type, ProtoSourceTarget::Type(_))
-            | (
-                NativeSourceTargetKind::Oneof,
-                ProtoSourceTarget::Oneof { .. }
-            )
-    );
-    if valid {
-        return Ok(());
-    }
-    let target_kind = match expected {
-        NativeSourceTargetKind::Type => "protobuf type",
-        NativeSourceTargetKind::Oneof => "protobuf oneof",
-    };
-    Err(Error::InvalidTypeOverrideField {
-        message: source.proto_target().message().as_str().to_string(),
-        field: declaration_name.to_string(),
-        property: "source",
-        reason: format!("native WIT {declaration_kind} declarations must bind to a {target_kind}"),
-    })
 }
 
 fn validate_message_external_type_binding(
@@ -620,11 +534,7 @@ fn validate_oneof_variant_source(
             ),
         });
     };
-    let ProtoSourceTarget::Oneof {
-        message: source_message,
-        name: source_oneof,
-    } = source.proto_target()
-    else {
+    let Some(source) = source.proto_oneof() else {
         return Err(Error::InvalidTypeOverrideField {
             message: message_name.to_string(),
             field: oneof.name.to_string(),
@@ -635,15 +545,16 @@ fn validate_oneof_variant_source(
             ),
         });
     };
-    if source_message.as_str() != message_name || source_oneof != oneof.name {
+    if source.message.as_str() != message_name || source.name != oneof.name {
         return Err(Error::InvalidTypeOverrideField {
             message: message_name.to_string(),
             field: oneof.name.to_string(),
             property: "type",
             reason: format!(
-                "variant `{}` binds to protobuf oneof `{}.{source_oneof}`",
+                "variant `{}` binds to protobuf oneof `{}.{}`",
                 variant.name,
-                source_message.as_str(),
+                source.message.as_str(),
+                source.name,
             ),
         });
     }
@@ -1504,47 +1415,6 @@ interface generic-service {
   complete: func(request: request) -> response;
 }
 "#;
-
-    fn source(target: ProtoSourceTarget) -> ExternalSourceSpec {
-        ExternalSourceSpec {
-            target,
-            reference: Default::default(),
-            type_name: Default::default(),
-        }
-    }
-
-    #[test]
-    fn rejects_oneof_sources_on_record_declarations() {
-        let source = source(ProtoSourceTarget::Oneof {
-            message: crate::spec::Symbol::new("acme.v1.Message"),
-            name: "value".to_string(),
-        });
-        let error = validate_type_source_target(
-            "record",
-            "message",
-            Some(&source),
-            NativeSourceTargetKind::Type,
-        )
-        .unwrap_err();
-
-        assert!(error.to_string().contains("must bind to a protobuf type"));
-    }
-
-    #[test]
-    fn rejects_whole_type_sources_on_variant_declarations() {
-        let source = source(ProtoSourceTarget::Type(crate::spec::Symbol::new(
-            "acme.v1.Message",
-        )));
-        let error = validate_type_source_target(
-            "variant",
-            "message-value",
-            Some(&source),
-            NativeSourceTargetKind::Oneof,
-        )
-        .unwrap_err();
-
-        assert!(error.to_string().contains("must bind to a protobuf oneof"));
-    }
 
     #[test]
     fn rejects_unknown_default_for_proto_enum_alias() {

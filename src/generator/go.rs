@@ -14,13 +14,14 @@ use crate::planning::{
     PlannedResourceMethodBindingSpec as PlannedResourceMethodBinding,
     PlannedResourceMethodResultKind as PlannedResourceMethodResult, PlannedSpec, PlannedType,
 };
-use crate::spec::{ApiSpecBranch, ApiSpecLeaf, ApiSpecNode, ApiSpecTree};
 use crate::spec::{
-    EnumSpec, ExternalTypeSpec, FlagsSpec, FunctionArgsSpec as GenericFunctionArgsSpec,
-    FunctionFieldSpec as GenericFunctionFieldSpec, FunctionResultSpec as GenericFunctionResultSpec,
-    IntSpec, LanguageStringSpec, ModulePath, OperationSpec, RecordFieldSpec, RecordSpec,
-    SupportFragmentSpec, TypeReplacementSpec, TypeSpec, VariantSpec,
+    AliasTypeSpec, EnumSpec, ExternalTypeSpec, FlagsSpec,
+    FunctionArgsSpec as GenericFunctionArgsSpec, FunctionFieldSpec as GenericFunctionFieldSpec,
+    FunctionResultSpec as GenericFunctionResultSpec, IntSpec, LanguageStringSpec, ModulePath,
+    OperationSpec, RecordFieldSpec, RecordSpec, SupportFragmentSpec, TypeReplacementSpec, TypeSpec,
+    VariantSpec,
 };
+use crate::spec::{ApiSpecBranch, ApiSpecLeaf, ApiSpecNode, ApiSpecTree};
 
 use super::json_schema::go as json;
 use super::proto::go as proto;
@@ -267,9 +268,9 @@ pub(in crate::generator) fn planned_message_type(
             authored_type: None,
             source: PlannedMessageSource::Json,
         }),
-        TypeSpec::External(ExternalTypeSpec::Alias {
+        TypeSpec::External(ExternalTypeSpec::Alias(AliasTypeSpec {
             target, type_name, ..
-        }) => {
+        })) => {
             let mut info = local_type_info("alias");
             info.type_name = type_name.clone();
             Some(PlannedMessageType {
@@ -473,9 +474,9 @@ fn planned_value_type(value_type: &PlannedType, spec: &PlannedSpec) -> PlannedVa
                 source: PlannedMessageSource::Json,
             })
         }
-        TypeSpec::External(ExternalTypeSpec::Alias {
+        TypeSpec::External(ExternalTypeSpec::Alias(AliasTypeSpec {
             target, type_name, ..
-        }) => PlannedValueType::External {
+        })) => PlannedValueType::External {
             type_name: type_name.clone(),
             fallback: Box::new(planned_value_type(target.without_option(), spec)),
         },
@@ -2597,9 +2598,9 @@ pub(in crate::generator) fn go_authored_type_annotation(wit_type: &PlannedType) 
             go_authored_type_annotation(value)
         ),
         TypeSpec::Result { .. } => "any".to_string(),
-        TypeSpec::External(ExternalTypeSpec::Alias {
+        TypeSpec::External(ExternalTypeSpec::Alias(AliasTypeSpec {
             type_name, target, ..
-        }) => type_name
+        })) => type_name
             .for_language(Language::Go)
             .map(str::to_string)
             .unwrap_or_else(|| go_authored_type_annotation(target)),
@@ -2963,9 +2964,9 @@ fn collect_imports_from_authored_type(wit_type: &PlannedType, imports: &mut BTre
                 collect_imports_from_authored_type(err, imports);
             }
         }
-        TypeSpec::External(ExternalTypeSpec::Alias {
+        TypeSpec::External(ExternalTypeSpec::Alias(AliasTypeSpec {
             type_name, target, ..
-        }) => {
+        })) => {
             if let Some(annotation) = type_name.for_language(Language::Go) {
                 let (import_path, _) = parse_go_import(annotation);
                 if let Some(path) = import_path {
@@ -4488,9 +4489,9 @@ fn go_authored_function_type_expr(
             go_authored_function_type_expr(key, package, visibility),
             go_authored_function_type_expr(value, package, visibility)
         ),
-        TypeSpec::External(ExternalTypeSpec::Alias {
+        TypeSpec::External(ExternalTypeSpec::Alias(AliasTypeSpec {
             type_name, target, ..
-        }) => type_name
+        })) => type_name
             .for_language(Language::Go)
             .map(|annotation| package.go_type_expr(annotation))
             .unwrap_or_else(|| go_authored_function_type_expr(target, package, visibility)),

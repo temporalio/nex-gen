@@ -18,7 +18,7 @@ use crate::json_schema::scalar::{ScalarKind, ScalarMatcher};
 use crate::language::Language;
 use crate::parser::NameManifest;
 use crate::planning::{PlannedFamily, PlannedJsonType, PlannedSpec};
-use crate::spec::{ExternalTypeSpec, OperationSpec, RecordSpec, TypeSpec};
+use crate::spec::{AliasTypeSpec, ExternalTypeSpec, OperationSpec, RecordSpec, TypeSpec};
 
 #[derive(Debug, Deserialize, Default, Clone)]
 struct Schema {
@@ -1540,10 +1540,12 @@ fn operation_io_type(
             .record(&record_ref.full_name)
             .map(|record| record.name.clone())
             .unwrap_or_else(|| record_ref.model_name.clone())),
-        TypeSpec::External(ExternalTypeSpec::Alias { type_name, .. }) => Ok(type_name
-            .for_language(crate::language::Language::Go)
-            .map(|annotation| package.go_type_expr(annotation))
-            .unwrap_or_else(|| "any".to_string())),
+        TypeSpec::External(ExternalTypeSpec::Alias(AliasTypeSpec { type_name, .. })) => {
+            Ok(type_name
+                .for_language(crate::language::Language::Go)
+                .map(|annotation| package.go_type_expr(annotation))
+                .unwrap_or_else(|| "any".to_string()))
+        }
         _ => Ok("nexus.NoValue".to_string()),
     }
 }

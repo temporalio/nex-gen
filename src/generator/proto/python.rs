@@ -15,9 +15,7 @@ use crate::planning::{
     PlannedFamily, PlannedProtoType, PlannedProtoTypeInfo, PlannedSpec, PlannedType,
     PlannedWireFieldBinding, PlannedWireVariantMember, relative_descriptor_name,
 };
-use crate::spec::{
-    ExternalTypeSpec, ProtoSourceTarget, RecordFieldSpec, RecordSpec, TypeReplacementSpec,
-};
+use crate::spec::{ExternalTypeSpec, RecordFieldSpec, RecordSpec, TypeReplacementSpec};
 
 #[derive(Debug)]
 struct RenderedWireRead {
@@ -125,9 +123,10 @@ fn oneof_variant_names(api_plan: &PlannedSpec) -> BTreeSet<String> {
     api_plan
         .variants()
         .filter(|(_, variant)| {
-            variant.source.as_ref().is_some_and(|source| {
-                matches!(source.proto_target(), ProtoSourceTarget::Oneof { .. })
-            })
+            variant
+                .source
+                .as_ref()
+                .is_some_and(|source| source.proto_oneof().is_some())
         })
         .map(|(full_name, _)| full_name.to_string())
         .collect()

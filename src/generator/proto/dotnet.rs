@@ -9,7 +9,8 @@ use crate::planning::{
     PlannedType, PlannedWireFieldBinding,
 };
 use crate::spec::{
-    ExternalTypeSpec, RecordFieldSpec, RecordFieldVisibility, RecordSpec, TypeReplacementSpec,
+    AliasTypeSpec, ExternalTypeSpec, RecordFieldSpec, RecordFieldVisibility, RecordSpec,
+    TypeReplacementSpec,
 };
 
 #[derive(Debug, Default)]
@@ -86,9 +87,10 @@ impl ModelBackend {
                 .map(|reference| vec![reference.to_string()])
                 .unwrap_or_default(),
             PlannedType::Record(_) | PlannedType::Resource(_) => Vec::new(),
-            PlannedType::External(ExternalTypeSpec::Alias {
-                target: fallback, ..
-            }) => self.support_references(fallback),
+            PlannedType::External(ExternalTypeSpec::Alias(AliasTypeSpec {
+                target: fallback,
+                ..
+            })) => self.support_references(fallback),
             PlannedType::Option(inner) | PlannedType::List(inner) => self.support_references(inner),
             PlannedType::Map(key, value) => {
                 let mut references = self.support_references(key);
@@ -245,9 +247,10 @@ impl ModelBackend {
                 }
             }
             PlannedType::Resource(_) => source_expr.to_string(),
-            PlannedType::External(ExternalTypeSpec::Alias {
-                target: fallback, ..
-            }) => self.value_to_wire_expr(
+            PlannedType::External(ExternalTypeSpec::Alias(AliasTypeSpec {
+                target: fallback,
+                ..
+            })) => self.value_to_wire_expr(
                 fallback,
                 source_expr,
                 optional,
@@ -314,9 +317,10 @@ impl ModelBackend {
                 self.value_uses_support_extensions(key, api_plan)
                     || self.value_uses_support_extensions(value, api_plan)
             }
-            PlannedType::External(ExternalTypeSpec::Alias {
-                target: fallback, ..
-            }) => self.value_uses_support_extensions(fallback, api_plan),
+            PlannedType::External(ExternalTypeSpec::Alias(AliasTypeSpec {
+                target: fallback,
+                ..
+            })) => self.value_uses_support_extensions(fallback, api_plan),
             PlannedType::Result { ok, err } => {
                 ok.as_deref()
                     .is_some_and(|ok| self.value_uses_support_extensions(ok, api_plan))
@@ -701,14 +705,16 @@ fn value_from_wire_expr(
                 optional,
             )
         }
-        PlannedType::External(ExternalTypeSpec::Alias { target, .. }) => value_from_wire_expr(
-            target,
-            source_expr,
-            optional,
-            has_presence,
-            api_plan,
-            support_namespace,
-        ),
+        PlannedType::External(ExternalTypeSpec::Alias(AliasTypeSpec { target, .. })) => {
+            value_from_wire_expr(
+                target,
+                source_expr,
+                optional,
+                has_presence,
+                api_plan,
+                support_namespace,
+            )
+        }
         _ => source_expr.to_string(),
     }
 }
