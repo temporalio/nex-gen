@@ -10,8 +10,12 @@ affects validation. **Supported** — it lowers into each target's
 **native deprecation marker** (Go's `// Deprecated:` godoc paragraph, a
 TS JSDoc `@deprecated` tag, a Java `@Deprecated` annotation, a Python
 PEP 702 `@deprecated(…, category=None)` marker), so editors, compilers,
-and type checkers surface the marker where their native mechanism supports the
-placement. It has no validation, serialization, or access-warning effect. It is
+and type checkers surface the marker to the extent their native mechanism
+allows — a genuine limit in TypeScript (JSDoc deprecation reaches language
+services, not a `tsc` diagnostic) and in Python (PEP 702 has no field form).
+It is **not** a licence for a marker the generator has simply placed wrongly:
+Go's `// Deprecated:` must be its own godoc paragraph, and a marker emitted
+without the preceding blank line is inert through no fault of the toolchain. It has no validation, serialization, or access-warning effect. It is
 a **tag** in the doc-comment assembly
 [[description]] owns; because `deprecated` is boolean-only it carries no
 message of its own, so the human rationale comes from the sibling
@@ -60,7 +64,9 @@ The defining choices (citing [[PRINCIPLES.md]]):
   `Deprecated:` convention, JSDoc `@deprecated`, `java.lang.Deprecated`,
   PEP 702 `@deprecated`. Emitting the native marker is what makes the
   generated code read like code a human wrote, and it makes the
-  deprecation *actionable* where the target tooling supports that placement.
+  deprecation *actionable* wherever the target tooling can carry it — and
+  where the generator controls the placement, it must produce the form the tool
+  recognizes rather than one it ignores.
   TypeScript exposes JSDoc deprecation through language services rather than a
   `tsc` diagnostic; Python's PEP 702 signal applies to decorated types and
   callables, while its field/operation `Annotated` form is documentation-only.

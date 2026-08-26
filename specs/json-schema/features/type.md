@@ -60,7 +60,7 @@ Loader behavior:
   names the three resolutions: add `properties: {...}` (typed struct),
   add `additionalProperties: true` (open opaque map), or add
   `additionalProperties: false` (closed empty object).
-- `type: "null"` standalone (not inside the [[nullability]] pattern) →
+- `type: "null"` standalone (outside any [[oneOf]]) →
   reject. A field that is *always* `null` carries no information and
   is almost always a schema bug. A legitimate `{"type":"null"}` appears as
   a branch of a [[oneOf]]: in the two-branch form it is [[nullability]], and
@@ -84,7 +84,12 @@ field; Python uses `T | None`).
 | `"boolean"` | `bool`              | `boolean`            | `bool`            | `boolean` |
 | `"object"`  | struct from [[properties]] | interface from [[properties]] (**not classes**) | `@dataclasses.dataclass` from [[properties]]; inline object shapes are hoisted and named, while only a free-form `oneOf` object branch stays `dict[str, typing.Any]` | POJO class (Java 8; **not records** — see PRINCIPLES Java §1) |
 | `"array"`   | `[]T` (T from [[items]])   | `T[]`                | `list[T]`         | `List<T>` |
-| `"null"`    | only inside [[nullability]] pattern | only inside [[nullability]] pattern | only inside [[nullability]] pattern | only inside [[nullability]] pattern |
+| `"null"`    | only as a [[oneOf]] branch † | only as a [[oneOf]] branch † | only as a [[oneOf]] branch † | only as a [[oneOf]] branch † |
+
+† Two branches is the [[nullability]] pattern; among three or more kinds it
+is a nullable sum type. Standalone `type: "null"` — outside a `oneOf` — is a
+reject.
+
 
 Notes:
 - **TS**: `integer` and `number` collapse to `number`; integer-ness moves

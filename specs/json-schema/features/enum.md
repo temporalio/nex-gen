@@ -183,7 +183,8 @@ public final class Color {
 For an object property that receives this value-class carrier, the private
 constructor makes the known constants the only obtainable instances, so a value
 outside the set **cannot be constructed** in-language. Array elements, map
-values, and union variants retain their primitive Java type and rely on the
+values, and — on the evidence available, though the union-variant leg is not
+reproduced — union variants retain their primitive Java type and rely on the
 runtime membership check. This is the shared carrier of [[const]] (one
 constant) and `enum` (several). Numeric and boolean value classes wrap
 `long`/`double`/`boolean`, with `@JsonCreator` over the corresponding

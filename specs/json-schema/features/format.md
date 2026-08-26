@@ -568,6 +568,12 @@ Representative cases:
 
 ## Interactions
 
+- **[[contentEncoding]]**: a materializing temporal `format` and
+  `contentEncoding` cannot share a node — both claim the same in-memory slot.
+  **Reject the combination at load.** This mirrors the rule in
+  [[contentEncoding]]; a one-sided statement would leave the question
+  unadjudicated, which is how a non-materializing `format` beside
+  `contentEncoding` came to be silently dropped in Go.
 - **[[pattern]]**: `format` reuses its RE2-safe gate, compile-once
   mechanism, ASCII-class rule, and end-anchor normalization for every
   regex-lowered format. Both may appear on one node — the value must satisfy
@@ -606,7 +612,7 @@ Representative cases:
 |---|---|
 | JSON Schema 2020-12 | `format-annotation` is the default (collect only); we opt into `format-assertion` for the curated subset and reject the rest. Native format names, no rewrite. |
 | OpenAPI 3.1 | Adopts 2020-12 `format`; same names. Native. OAS-specific formats (`int32`, `int64`, `float`, `double`, `password`, `byte`, `binary`) are **not** JSON Schema formats — treated as unknown and rejected. |
-| OpenAPI 3.0 / draft-4 | **Human porting guidance only:** these documents are not accepted inputs. When converting one to JSON Schema 2020-12, `date-time` / `date` / `uuid` / `email` / `uri` / `hostname` names carry over; rewrite `url` to `uri`. |
+| OpenAPI 3.0 / draft-4 | **Human porting guidance only:** such documents are rejected when they declare a non-2020-12 `$schema`; a `$schema`-less fragment reaches no dialect gate. When converting one to JSON Schema 2020-12, `date-time` / `date` / `uuid` / `email` / `uri` / `hostname` names carry over; rewrite `url` to `uri`. |
 | Swagger 2.0 | **Human porting guidance only:** same conversion rules as OpenAPI 3.0; the original document is not an accepted input. |
 
 **Why native validators / parsers can't serve as the oracle** (empirical, in

@@ -64,6 +64,8 @@ Loader behavior:
 - `$comment` as a **sibling of `$ref`** remains inert: it is dropped before
   deciding whether the reference needs an implicit merge, so adding a comment
   cannot clone the target into a new type or add a P15 identifier.
+  *(Status: unimplemented — the fold gate admits only the four `x-<lang>-name`
+  keywords, so today a `$comment` sibling does trigger the fold; see [[allOf]].)*
 
 ## Type mapping
 

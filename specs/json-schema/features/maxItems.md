@@ -49,6 +49,14 @@ Loader behavior:
   from [[type]]).
 - A bound greater than `9007199254740991` (2^53−1) → reject. Count bounds
   must be exactly representable in every target.
+- **A bound in `[2^31, 2^53−1]` obliges Java to emit a `long` literal**
+  (`{n}L`). Java integer literals stop at 2^31−1, so a bound above it emitted
+  bare is a `javac` "integer number too large" error — the bound loads and the
+  generated package does not compile. The ceiling above is *not* what makes the
+  range safe, and must not be read as implying it: the range is only conformant
+  once the emitter suffixes the literal. Narrowing the cap to
+  `Integer.MAX_VALUE` instead would also be conformant, but is a stricter accept
+  set and is not what this spec chooses.
 - `maxItems` on a non-array [[type]] (`{type:"string", maxItems:3}`) →
   reject per **P7.1** (statically meaningless — the string-length analog
   is [[maxLength]], the object member-count analog is [[maxProperties]]).

@@ -79,8 +79,15 @@ fix-it:
   sugar is rewritten to an explicit `allOf` and merged ([[allOf]]). The
   merged result is subject to `allOf`'s reject rules (e.g. a sibling that
   contradicts the target), and unresolvable/cyclic targets still reject
-  here. An `x-<lang>-name` sibling is not merged — it renames the member and
-  leaves the reference intact (above).
+  here. Two sibling classes are **not** merged and leave the reference intact:
+  an `x-<lang>-name`, which renames the member (above); and the **purely inert
+  annotations** `$comment`, `examples` and `deprecated: false`, which are
+  dropped **before** the loader decides whether the reference needs an implicit
+  merge, so they can neither clone the target into a new type nor add a P15
+  identifier. See [[allOf]] for the same rule stated from the merge side.
+  *(Status: unimplemented — the loader currently admits only the four
+  `x-<lang>-name` keywords here, so an inert annotation still triggers the fold.
+  The clause is the contract; the gate is the defect.)*
 - **`$id` anywhere** (root or nested) → reject. Fix-it: "remove `$id`;
   refs resolve by file path + JSON pointer." (local-file-only — no URI resolution.)
 - **HTTP/URI ref**, `$anchor` fragment, `$dynamicRef`, `$dynamicAnchor`
