@@ -215,10 +215,19 @@ the Go/Java optional+nullable collapse (a wire distinction the in-memory model
 cannot carry). Loss happens **only at a native type's genuine capacity limit**,
 never as an artificial common-denominator floor, so a value round-trips
 **byte-identically across every target whose type can hold its offset and
-precision** and diverges only where a chosen type cannot. `date`, `time`, and
-`duration` round-trip losslessly; **`date-time` is the one format whose
+precision** and diverges only where a chosen type cannot. `date` and `duration`
+round-trip losslessly. **`date-time` and `time` are the two formats whose
 round-trip may lose information** across ordinary targets — which target, and
 how much, is tabulated below.
+
+For `time` the only licensed loss is **Python's**: `datetime.time` resolves to
+microseconds, a genuine capacity limit of the native type, so finer input is
+truncated. **No other target may lose a digit of `time`.** Go, Java and
+TypeScript all carry `time` in a container that holds the serialized form
+verbatim — Java in a `String` — and the clause above applies to them without
+exception: a target that *can* represent a value must not be made to drop it, and
+narrowing to the least-capable target is the artificial common-denominator floor
+[[PRINCIPLES.md]] P1 forbids.
 
 | Format | Go | Java | Python | TS (per `--date-time-types`) | Wire form |
 |---|---|---|---|---|---|
@@ -398,12 +407,20 @@ add back the `|60` seconds alternative; `duration` uses the full
 | Go | Parse adapter: run the pinned regex + `validRFC3339(...)` over the wire string, pushing a `Violation` on failure; else `t, _ := time.Parse(time.RFC3339Nano, strings.ToUpper(s))` → store `t` **as parsed** (offset and nanoseconds retained; no `UTC()`, no truncation) for `date-time`, or `time.Parse("2006-01-02", s)` (`date`); `duration` parses the `PT…` components into a `time.Duration`. Encode adapter: `t.Format(time.RFC3339Nano)` (offset preserved, `Z` for zero offset, trailing-zero fractional trimmed). `regexp.MustCompile` compiled once at init. |
 | TypeScript | Parse adapter: pinned regex (`/…/u`) + calendar/range check, then per `--date-time-types`: **`string`** (default) store the generator-serialized string for every temporal; **`date`** `new Date(s)` for `date-time` (others string); **`temporal`** `Temporal.ZonedDateTime.from` (`date-time`, in the wire's offset zone) / `PlainDate.from` (`date`) / `Duration.from` (`duration`), with `time` staying a string. Encode adapter: **`string`** emit the stored string; **`date`** `date-time` → `.toISOString()` (UTC, ms, 3 digits); **`temporal`** `ZonedDateTime.toString({ timeZoneName: 'never' })` (offset kept, then `+00:00`→`Z`), `PlainDate.toString()`, and for `Duration` a generator-owned formatter over `value.total({unit: 'seconds'})` so component-equivalent values canonicalize. |
 | Python | Parse: the `_parse_date_time` / `_parse_date` / `_parse_time` / `_parse_duration` runtime helpers, called from the transfer type converter (PRINCIPLES Python §3) — regex + calendar over the wire string, then `datetime.fromisoformat(s.upper())` **retaining the parsed offset** (`date-time`; `datetime`'s native microsecond resolution truncates any finer input — the one Python-side loss), `date.fromisoformat(s)` (`date`), `time.fromisoformat(s)` **retaining any offset** as an aware `time` (`time`), or parse `PT…` into a `timedelta` (`duration`). Each appends a `Violation` and returns `None` on failure so the rest of the object still validates. Encode: the matching generator-owned `_format_*` helper (offset preserved, fractional trimmed). The dataclass field is the plain `datetime.datetime` / `date` / `time` / `timedelta`, so no library's own coercion is in the path (native coercions typically accept a missing offset and normalize differently). |
-| Java | The per-POJO collecting deserializer (PRINCIPLES Java §5): regex + calendar over the `String`, then `OffsetDateTime.parse(s)` **retaining the offset and nanoseconds** (no `atOffset(UTC)`, no `truncatedTo`) (`date-time`), `LocalDate.parse` (`date`), a generator helper that validates and canonicalizes `time` through `OffsetTime` or `LocalTime` but stores a `String`, or checked component parsing plus `Duration.ofSeconds` for the `PT…` form. The `Serializer` emits the **generator-owned** string (offset preserved, fractional trimmed) — **not** `Duration.toString()` for `.NET` parity and **not** the BCL serializer (`.NET XmlConvert` rolls `PT24H`→`P1D`). |
+| Java | The per-POJO collecting deserializer (PRINCIPLES Java §5): regex + calendar over the `String`, then `OffsetDateTime.parse(s)` **retaining the offset and nanoseconds** (no `atOffset(UTC)`, no `truncatedTo`) (`date-time`), `LocalDate.parse` (`date`), a generator helper that validates `time` and stores it as a `String` **retaining every accepted digit** (it must not round-trip the value through `OffsetTime`/`LocalTime`, whose nanosecond resolution would truncate a `String` carrier that can hold more — see the `time` clause above), or checked component parsing plus `Duration.ofSeconds` for the `PT…` form. The `Serializer` emits the **generator-owned** string (offset preserved, fractional trimmed) — **not** `Duration.toString()` for `.NET` parity and **not** the BCL serializer (`.NET XmlConvert` rolls `PT24H`→`P1D`). |
 
-There is **no common truncation floor**: the TypeScript `string` representation
-retains every accepted digit; Go, Java, and TypeScript Temporal retain
-nanoseconds; Python retains native microseconds; and TypeScript `Date` retains
-milliseconds. The generator-owned
+There is **no common truncation floor**, and the resolutions are a property of
+the *carrier*, not of the target:
+
+* A **`string` carrier retains every accepted digit** — TypeScript in every mode
+  for `time`, and Java's `String` for `time`. A `String`-held value has no
+  resolution of its own, so nothing about it licenses a truncation.
+* A **native temporal carrier retains its type's genuine resolution** — Go
+  `time.Time`, Java `OffsetDateTime` and TypeScript `Temporal` are nanosecond;
+  Python `datetime`/`time` are microsecond; the legacy TypeScript `Date` mode is
+  millisecond.
+
+Only the second bullet is a licensed loss, and only at the type's real limit. The generator-owned
 serializer trims trailing-zero fractional digits so equal values agree
 byte-for-byte wherever the types are equally capable. Under `--date-time-types`,
 `Temporal.ZonedDateTime` keeps the offset (byte-identical with Go/Java); only

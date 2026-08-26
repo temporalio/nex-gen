@@ -59,9 +59,11 @@ The defining choices (citing [[PRINCIPLES.md]]):
   generated doc comment, rendered to read like a comment a human wrote
   (P2). It composes with [[title]] as **summary line + body** (assembly
   order below). Authors' Markdown is passed through **verbatim** (escaped
-  only for the comment block); the generator does not render, reflow, or
-  reinterpret it — what the author wrote is what lands in the source (see
-  Ecosystem variance).
+  only for the comment block); the generator does not render or reinterpret
+  it — what the author wrote is what lands in the source (see Ecosystem
+  variance). It **is** word-wrapped to the format line length, which is the one
+  transformation applied; see *Wrapping* below, and the caveat there about what
+  wrapping can change.
 
 Loader behavior:
 - `description` value **not a string** → **reject** (P7.1; and the spec's
@@ -160,6 +162,19 @@ length (88 columns) minus the current indent and the comment prefix width
 (`// `, ` * `, docstring indent). Wrapping is per source line, so an
 author's explicit line breaks and paragraph breaks are kept while long
 lines reflow to fit.
+
+Wrapping is the only way the generator alters authored prose, and it is not
+always inert. A doc tool that assigns meaning to a **position** — godoc reading
+`Deprecated:` at the start of a line, Javadoc reading a `@`-tag in block-tag
+position — can be made to see a tag the author wrote mid-sentence, purely
+because the wrap point moved. The same authored string is then inert at one
+enclosing-name length and live at another, which no author can predict. The
+generator must not rely on wrapping to preserve inertness, and a reader
+diagnosing an unexpected `@deprecated` or `Deprecated:` should suspect the wrap
+before suspecting the schema. Reconciling this properly — by never breaking a
+line immediately before a token a target's doc tool treats as positional — is
+open; it is recorded here so the two paragraphs above do not read as
+contradicting each other.
 
 **Escaping.** Each part is escaped so the prose cannot break out of the
 comment or the host language's lexer:

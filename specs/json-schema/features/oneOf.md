@@ -336,6 +336,28 @@ Loader behavior:
 - A `default` on a `oneOf` sum type → reject: the literal does not identify
   which branch to construct. The two-branch [[nullability]] wrapper remains
   governed by [[default]].
+- **Any other keyword as a sibling of `oneOf` on the same node → reject.** A
+  node that carries `oneOf` is a union; it is not simultaneously a leaf, an
+  object, or a closed value set. The union node admits only: the annotations
+  ([[title]], [[description]], [[comment]], [[examples]], [[deprecated]]), an
+  `x-<lang>-name` override, and `default` (which rejects, above). Everything
+  else — `type`, [[properties]], [[items]], [[additionalProperties]],
+  [[const]]/[[enum]], and every count or string bound — is a load reject whose
+  fix-it says to move the keyword **into the branch or branches it constrains**.
+
+  This is a **P7.1** obligation, not a preference. All four backends currently
+  discard such a sibling silently, and its presence additionally suppresses
+  [[type]]'s leaf-`type` and object-without-shape rejects, so a keyword the
+  author wrote has no effect *and* disables an unrelated guard. Silent discard
+  is the outcome P7.1 exists to prevent. The rule holds at every position a
+  union can occupy — a property, a `$defs` entry, an `items`, a typed
+  `additionalProperties`, and an operation `input`/`output`.
+
+  `const`/`enum` deserve their own mention because the failure is louder than a
+  drop: today the same schema yields three different accept sets across the four
+  targets, and two of them emit code their own type-checker rejects. A closed
+  value set over a union is written by putting the `const`/`enum` **in each
+  branch**, which is the spelling the conformance corpus already uses.
 - A `oneOf` **sum type** written inline in an element position (an array's
   `items` at any depth, an object's typed `additionalProperties`) → name it
   after its position (below), move it into `$defs`, and rewrite the position to

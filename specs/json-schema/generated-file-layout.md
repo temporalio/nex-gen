@@ -225,8 +225,12 @@ reject costs little.
 names** (`definitions` and `_definitions`, the union across languages) plus one
 entry per input module. Any collision in that namespace is rejected during
 loading, planning, or emission, depending on the collision family. Reserved-name
-and P15 diagnostics include an actionable rename or language-name override;
-flattened generated-file conflicts are detected at emission. A per-input
+and P15 diagnostics **must** name a remedy that is applicable at the site the
+author can edit — a rename or a language-name override that, once applied,
+makes the input load. Diagnostics that offer a remedy the author has already
+taken, cannot take, or that does not resolve the collision are defects; they are
+not conformant merely because some fix-it text is present. Flattened
+generated-file conflicts are detected at emission. A per-input
 `x-output-module` override is a
 *possible* future escape hatch and is **not implemented** — nothing in the
 generator reads such a keyword today, and there is no per-module escape

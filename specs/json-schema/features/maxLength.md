@@ -136,6 +136,24 @@ teeth hold there too (an in-memory bytes value whose base64 exceeds
 `maxLength`, or a temporal whose canonical form does, fails serialize).
 Still one predicate, still identical in both directions; the wire string
 is simply projected from the native value on the encode side.
+**Which string, precisely — and it is *not* the incoming one.** "Canonical wire
+string" means the form the encode adapter produces for that value, and the
+assertion measures **that** form at both boundaries. On parse this means the
+predicate runs **after** the value has been parsed and re-canonicalized, not
+against the bytes as they arrived. The distinction is invisible for a format
+with a single spelling and decisive for one without: `PT90M` and `PT1H30M` are
+the same [[format]] `duration`, they canonicalize to `PT1H30M`, and they differ
+in length and in what a regex matches.
+
+Measuring the incoming form on parse and the canonical form on serialize would
+make "identical in both directions" false — a payload could be admitted and then
+be unre-emittable, which is a **P1** accept-set defect, not a rounding of it.
+
+The same rule governs a **literal** ([[const]], [[enum]], [[default]]) on a
+materialized node: the literal is canonicalized first, and the assertion is
+checked against the canonical form. A load-time check that compares the authored
+spelling against the pattern while the emitted constant carries the canonical
+one can both accept an unsatisfiable schema and reject a satisfiable one.
 
 ## Property-testing matrix
 

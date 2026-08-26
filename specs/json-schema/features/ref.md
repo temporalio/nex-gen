@@ -125,10 +125,25 @@ standalone applicators — and share one rationale:
   module.
 - The **input root** is the absolute path of the directory common to all
   resolved input files (their longest common-ancestor directory),
-  computed **after** `..` normalization — so a ref that walks upward
-  simply raises the common root. Module names derive relative to the root
-  (see [[generated-file-layout]]); because they are relative to the
-  common ancestor they never contain `..`. Reproducible (local-file-only).
+  computed **after** `..` normalization. Module names derive relative to the
+  root (see [[generated-file-layout]]); because they are relative to the
+  common ancestor they never contain `..`.
+- **The root is bounded below by the invocation root** — the file or directory
+  the CLI/API was given. A `$ref` that would raise the common ancestor **above**
+  it is a load reject, naming the reference and the directory it escaped to.
+  Without that bound a reference can lift the root to an ancestor of the
+  checkout, at which point the emitted module tree, Java package names and Go
+  file names encode the **absolute filesystem location of the working copy** —
+  so two developers generating the same schema get different package names, and
+  a committed artifact can never match a colleague's regeneration.
+- **Reproducible** means exactly that: for a given invocation root, the emitted
+  module names, package names and file names are a function of the input files'
+  paths *relative to it* and of nothing else — not of where the checkout lives,
+  not of the machine. "Local-file-only" (no network fetch) is a separate and
+  weaker property, and is not what this bullet promises.
+- An **absolute-path `$ref`** is rejected: the accepted-form table above admits
+  only `<relative-path>`, and an absolute reference both escapes the invocation
+  root and is unreproducible by construction.
 - **Dead `$defs`** (defined but never referenced) are still generated and
   exported — they are intended reusable API surface, not waste.
 
