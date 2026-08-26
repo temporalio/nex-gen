@@ -68,7 +68,7 @@ fn validate_python(repo_root: &Path) -> Result<()> {
         run(&root, "uv", &["sync", "--locked"])?;
         run(&root, "uv", &["run", "ruff", "check", "."])?;
         run(&root, "uv", &["run", "ruff", "format", "--check", "."])?;
-        run(&root, "uv", &["run", "basedpyright"])?;
+        run(&root, "uv", &["run", "basedpyright", "--warnings"])?;
         run(&root, "uv", &["run", "pytest"])?;
     }
     Ok(())

@@ -6,7 +6,7 @@ use heck::ToSnakeCase;
 use nexgen::error::{Error, Result};
 use nexgen::generator::{GenerationMode, TsDateTimeTypes};
 use nexgen::language::Language;
-use nexgen::{GenerateRequest, generate_to_file};
+use nexgen::{GenerateRequest, generate_to_file, generate_to_file_with_system_nexus};
 
 #[derive(Clone)]
 pub struct BuildExamplesRequest {
@@ -381,7 +381,7 @@ fn build_example(repo_root: &Path, language: Language, example_id: &str) -> Resu
     let output_path = example_output_path(repo_root, language, example_id);
     let language_root = advanced_language_root(repo_root, language);
     reset_example_output_directory(&language_root, &output_path)?;
-    generate_to_file(&GenerateRequest {
+    let generate_request = GenerateRequest {
         language,
         input_paths,
         support_paths: Vec::new(),
@@ -392,7 +392,11 @@ fn build_example(repo_root: &Path, language: Language, example_id: &str) -> Resu
         java_package_name: (language == Language::Java)
             .then(|| example_directory_name(language, example_id)),
         ts_date_time_types: Default::default(),
-    })?;
+    };
+    generate_to_file_with_system_nexus(
+        &generate_request,
+        language == Language::Python && example_id == "workflow-service",
+    )?;
     format_example_output(&language_root, language, &output_path)?;
     println!("Built {} with nexgen", output_path.display());
     Ok(())

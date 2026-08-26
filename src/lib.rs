@@ -48,6 +48,17 @@ pub struct GenerateRequest {
 }
 
 pub fn generate_to_file(request: &GenerateRequest) -> Result<()> {
+    generate_to_file_with_system_nexus(request, false)
+}
+
+/// Generates bindings with optional Temporal System Nexus-specific output.
+///
+/// This is used by the advanced CLI surface; ordinary library generation keeps
+/// the option disabled.
+pub fn generate_to_file_with_system_nexus(
+    request: &GenerateRequest,
+    system_nexus: bool,
+) -> Result<()> {
     // A resolved output path with no name at all (the filesystem root, or
     // `..` past it) is never a real output directory: Go and Java derive
     // package names from its basename, and for every language it means the
@@ -79,6 +90,7 @@ pub fn generate_to_file(request: &GenerateRequest) -> Result<()> {
             None
         },
         ts_date_time_types: request.ts_date_time_types,
+        system_nexus,
     };
     let generated = compile_tree_to_files(
         request.language,

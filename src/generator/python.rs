@@ -46,13 +46,14 @@ pub(crate) fn generate(
     tree: &crate::spec::ApiSpecTree<PlannedFamily>,
     support: &crate::SupportFiles,
     mode: GenerationMode,
+    system_nexus: bool,
 ) -> Result<GeneratedFiles> {
     match &tree.root {
         ApiSpecNode::Leaf(leaf) => {
             let support_fragments = support_fragments_for_plan(&leaf.spec, support);
-            generate_leaf(&leaf.spec, &support_fragments, mode)
+            generate_leaf(&leaf.spec, &support_fragments, mode, system_nexus)
         }
-        ApiSpecNode::Branch(branch) => generate_tree(branch, support, mode),
+        ApiSpecNode::Branch(branch) => generate_tree(branch, support, mode, system_nexus),
     }
 }
 
@@ -60,6 +61,7 @@ fn generate_leaf(
     api_plan: &PlannedSpec,
     support_fragments: &[SupportFragmentSpec],
     mode: GenerationMode,
+    system_nexus: bool,
 ) -> Result<GeneratedFiles> {
     reject_support_namespaces(Language::Python, support_fragments)?;
     let inline_model_rebuilds = api_plan
@@ -67,8 +69,11 @@ fn generate_leaf(
         .module_imports
         .values()
         .all(BTreeSet::is_empty);
-    let generated =
-        ApiPlanner::new(api_plan, inline_model_rebuilds, None)?.build(support_fragments, mode)?;
+    let generated = ApiPlanner::new(api_plan, inline_model_rebuilds, None)?.build(
+        support_fragments,
+        mode,
+        system_nexus,
+    )?;
     Ok(generated.generated_files)
 }
 
@@ -77,15 +82,21 @@ fn generate_leaf_with_model_hoists(
     support_fragments: &[SupportFragmentSpec],
     mode: GenerationMode,
     model_hoists: &PythonModelHoists,
+    system_nexus: bool,
 ) -> Result<PythonGenerationResult> {
     reject_support_namespaces(Language::Python, support_fragments)?;
-    ApiPlanner::new(api_plan, true, Some(model_hoists))?.build(support_fragments, mode)
+    ApiPlanner::new(api_plan, true, Some(model_hoists))?.build(
+        support_fragments,
+        mode,
+        system_nexus,
+    )
 }
 
 fn generate_tree(
     branch: &ApiSpecBranch<PlannedFamily>,
     support: &crate::SupportFiles,
     mode: GenerationMode,
+    system_nexus: bool,
 ) -> Result<GeneratedFiles> {
     let model_hoists = tree_model_hoists(branch)?;
     let mut files = BTreeMap::new();
@@ -102,6 +113,7 @@ fn generate_tree(
             support,
             mode,
             &model_hoists,
+            system_nexus,
             &mut files,
             &mut warnings,
             &mut root_package_imports,
@@ -127,6 +139,7 @@ fn generate_tree_node(
     support: &crate::SupportFiles,
     mode: GenerationMode,
     model_hoists: &PythonModelHoists,
+    system_nexus: bool,
     files: &mut BTreeMap<PathBuf, String>,
     warnings: &mut Vec<String>,
     root_package_imports: &mut RootPackageImports,
@@ -139,6 +152,7 @@ fn generate_tree_node(
                 &support_fragments,
                 mode,
                 model_hoists,
+                system_nexus,
             )?;
             extend_root_package_imports(root_package_imports, generated.root_package_imports);
             warnings.extend(generated.generated_files.warnings);
@@ -156,6 +170,7 @@ fn generate_tree_node(
                     support,
                     mode,
                     model_hoists,
+                    system_nexus,
                     files,
                     warnings,
                     root_package_imports,
@@ -510,6 +525,7 @@ impl<'a> ApiPlanner<'a> {
         mut self,
         support_fragments: &[SupportFragmentSpec],
         mode: GenerationMode,
+        system_nexus: bool,
     ) -> Result<PythonGenerationResult> {
         let api_plan = self.api_plan;
         let services = api_plan
@@ -564,8 +580,13 @@ impl<'a> ApiPlanner<'a> {
             self.render_model_fragments(model_refs.as_slice(), variant_refs.as_slice())?;
         validate_python_generated_names(self.api_plan, &model_fragments.generated_names)?;
 
-        let (generated_files, exported_names) =
-            self.render_package(&model_fragments, &services, support_fragments, mode)?;
+        let (generated_files, exported_names) = self.render_package(
+            &model_fragments,
+            &services,
+            support_fragments,
+            mode,
+            system_nexus,
+        )?;
         Ok(PythonGenerationResult {
             generated_files,
             root_package_imports: model_fragments.root_package_imports,
@@ -588,6 +609,7 @@ impl<'a> ApiPlanner<'a> {
         services: &[RenderedService<'_>],
         support_fragments: &[SupportFragmentSpec],
         mode: GenerationMode,
+        system_nexus: bool,
     ) -> Result<(GeneratedFiles, BTreeSet<String>)> {
         let mut files = BTreeMap::new();
         render_support_package(&mut files, support_fragments)?;
@@ -731,6 +753,13 @@ impl<'a> ApiPlanner<'a> {
                 &mut files,
                 "operations/__init__.py",
                 render_operations_package_init(),
+            )?;
+        }
+        if system_nexus && mode == GenerationMode::NativeApi {
+            insert_generated_file(
+                &mut files,
+                "_system_nexus_interceptor.py",
+                render_system_nexus_interceptor(services),
             )?;
         }
 
@@ -4630,6 +4659,99 @@ fn render_operations_package_init() -> String {
     output
 }
 
+/// Renders the mixins that turn System Nexus operations into operation-specific
+/// workflow-outbound interception points.
+fn render_system_nexus_interceptor(services: &[RenderedService<'_>]) -> String {
+    let operations = services
+        .iter()
+        .flat_map(|service| {
+            service
+                .operations
+                .iter()
+                .map(move |operation| (service, operation))
+        })
+        .collect::<Vec<_>>();
+    let mut output = String::new();
+    render_generated_file_header(&mut output);
+    output.push_str("\n\nimport abc\nimport typing\n\nfrom temporalio.nexus.system import TEMPORAL_SYSTEM_ENDPOINT\n\nfrom . import models\n\nif typing.TYPE_CHECKING:\n    import temporalio.workflow\n    from temporalio.worker._interceptor import StartNexusOperationInput\n\n\n__all__ = [\n    \"_start_system_nexus_operation\",\n    \"_SystemNexusWorkflowOutboundInterceptorBase\",\n    \"_SystemNexusWorkflowOutboundInterceptorTerminal\",\n]\n\n\n_InputT = typing.TypeVar(\"_InputT\")\n_OutputT = typing.TypeVar(\"_OutputT\")\n\n\n");
+    output.push_str(
+        "async def _start_system_nexus_operation(\n    interceptor: _SystemNexusWorkflowOutboundInterceptorBase,\n    input: StartNexusOperationInput[_InputT, _OutputT],\n) -> temporalio.workflow.NexusOperationHandle[_OutputT]:\n",
+    );
+    for (service, operation) in &operations {
+        let output_type = system_nexus_type_expr(&operation.output_type_expr);
+        output.push_str("    if input.service == ");
+        output.push_str(&python_string_literal(service.wire_name));
+        output.push_str(" and input.operation_name == ");
+        output.push_str(&python_string_literal(operation.wire_name));
+        output.push_str(
+            ":\n        typed_input = typing.cast(\n            \"StartNexusOperationInput[",
+        );
+        output.push_str(operation_input_type_ref(operation));
+        output.push_str(", ");
+        output.push_str(&output_type);
+        output.push_str("]\",\n            input,\n        )\n        # The dispatch check above establishes that this operation's response type is _OutputT.\n        return typing.cast(\n            \"temporalio.workflow.NexusOperationHandle[_OutputT]\",\n            await interceptor.start_");
+        output.push_str(&operation.attr_name);
+        output.push_str("(typed_input.input),\n        )\n");
+    }
+    output.push_str("    raise ValueError(f\"unsupported System Nexus operation: {input.service}/{input.operation_name}\")\n");
+
+    output.push_str("\n\nclass _SystemNexusWorkflowOutboundInterceptorBase(abc.ABC):\n");
+    output.push_str("    @abc.abstractmethod\n    def _next_system_nexus_interceptor(\n        self,\n    ) -> _SystemNexusWorkflowOutboundInterceptorBase:\n        ...\n");
+    for (service, operation) in &operations {
+        let output_type = system_nexus_type_expr(&operation.output_type_expr);
+        output.push_str("\n    async def start_");
+        output.push_str(&operation.attr_name);
+        output.push_str("(\n        self, request: ");
+        output.push_str(operation_input_type_ref(operation));
+        output.push_str("\n    ) -> temporalio.workflow.NexusOperationHandle[");
+        output.push_str(&output_type);
+        output.push_str("]:\n");
+        output.push_str("        \"\"\"Intercept the System Nexus ");
+        output.push_str(service.wire_name);
+        output.push('/');
+        output.push_str(operation.wire_name);
+        output.push_str(" operation.\"\"\"\n");
+        output.push_str("        return await self._next_system_nexus_interceptor().start_");
+        output.push_str(&operation.attr_name);
+        output.push_str("(request)\n");
+    }
+
+    output.push_str("\n\nclass _SystemNexusWorkflowOutboundInterceptorTerminal(abc.ABC):\n");
+    output.push_str("    @abc.abstractmethod\n    async def _outbound_start_nexus_operation(\n        self,\n        input: StartNexusOperationInput[_InputT, _OutputT],\n    ) -> temporalio.workflow.NexusOperationHandle[_OutputT]:\n        ...\n");
+    for (service, operation) in operations {
+        let output_type = system_nexus_type_expr(&operation.output_type_expr);
+        output.push_str("\n    async def start_");
+        output.push_str(&operation.attr_name);
+        output.push_str("(\n        self, request: ");
+        output.push_str(operation_input_type_ref(operation));
+        output.push_str("\n    ) -> temporalio.workflow.NexusOperationHandle[");
+        output.push_str(&output_type);
+        output.push_str("]:\n");
+        output.push_str(
+            "        from temporalio.worker._interceptor import StartNexusOperationInput\n",
+        );
+        output
+            .push_str("        from temporalio.workflow import NexusOperationCancellationType\n\n");
+        output.push_str("        return await self._outbound_start_nexus_operation(\n");
+        output.push_str("            StartNexusOperationInput(\n                endpoint=TEMPORAL_SYSTEM_ENDPOINT,\n                service=");
+        output.push_str(&python_string_literal(service.wire_name));
+        output.push_str(",\n                operation=");
+        output.push_str(&python_string_literal(operation.wire_name));
+        output.push_str(",\n                input=request,\n                output_type=");
+        output.push_str(&output_type);
+        output.push_str(",\n                schedule_to_close_timeout=None,\n                schedule_to_start_timeout=None,\n                start_to_close_timeout=None,\n                cancellation_type=NexusOperationCancellationType.WAIT_COMPLETED,\n                headers=None,\n                summary=None,\n            )\n        )\n");
+    }
+    output
+}
+
+fn system_nexus_type_expr(type_expr: &str) -> String {
+    if type_expr == "None" || type_expr.contains('.') || type_expr.contains('[') {
+        type_expr.to_string()
+    } else {
+        format!("models.{type_expr}")
+    }
+}
+
 fn function_type_parameters(
     functions: &[RenderedFunctionField],
     output_type_parameters: &BTreeSet<String>,
@@ -7921,7 +8043,10 @@ class Example(enum.Enum):
             &descriptors,
             &crate::SupportFiles::default(),
             GenerationMode::NativeApi,
-            GenerateFilesOptions::default(),
+            GenerateFilesOptions {
+                system_nexus: true,
+                ..GenerateFilesOptions::default()
+            },
         )
         .unwrap();
         assert_eq!(generated.layout, GeneratedOutputLayout::Directory);

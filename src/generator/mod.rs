@@ -123,6 +123,8 @@ pub(crate) struct GenerateFilesOptions {
     /// The TypeScript temporal representation (`--date-time-types`); ignored by
     /// the non-TypeScript backends.
     pub(crate) ts_date_time_types: TsDateTimeTypes,
+    /// Enables Python-only output needed by Temporal System Nexus bindings.
+    pub(crate) system_nexus: bool,
 }
 
 pub(crate) fn generate_files_for_tree_with_mode_and_options(
@@ -147,7 +149,7 @@ pub(crate) fn generate_files_from_planned_tree(
         Language::Dotnet => dotnet::generate(tree, support, mode),
         Language::Go => generate_go_tree(tree, support, mode, options),
         Language::Java => java::generate(tree, support, mode, options.java_package_root.as_deref()),
-        Language::Python => python::generate(tree, support, mode),
+        Language::Python => python::generate(tree, support, mode, options.system_nexus),
         Language::TypeScript => {
             typescript::generate(tree, support, mode, options.ts_date_time_types)
         }

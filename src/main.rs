@@ -2,6 +2,8 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
+#[cfg(feature = "advanced")]
+use nexgen::generate_to_file_with_system_nexus;
 use nexgen::generator::TsDateTimeTypes;
 use nexgen::language::Language;
 #[cfg(feature = "advanced")]
@@ -65,6 +67,10 @@ struct GenerateArgs {
     #[cfg(feature = "advanced")]
     #[arg(long = "native-api")]
     generate_native_api: bool,
+    /// Generate Temporal System Nexus-specific bindings.
+    #[cfg(feature = "advanced")]
+    #[arg(long = "system-nexus")]
+    system_nexus: bool,
 }
 
 #[derive(Args)]
@@ -162,12 +168,25 @@ fn main() -> ExitCode {
             Default::default(),
             Some(args.package_name),
         )),
-        Commands::Python(args) => generate_to_file(&generate_request(
-            Language::Python,
-            args,
-            Default::default(),
-            None,
-        )),
+        Commands::Python(args) => {
+            #[cfg(feature = "advanced")]
+            {
+                let system_nexus = args.system_nexus;
+                generate_to_file_with_system_nexus(
+                    &generate_request(Language::Python, args, Default::default(), None),
+                    system_nexus,
+                )
+            }
+            #[cfg(not(feature = "advanced"))]
+            {
+                generate_to_file(&generate_request(
+                    Language::Python,
+                    args,
+                    Default::default(),
+                    None,
+                ))
+            }
+        }
         Commands::Typescript(args) => generate_to_file(&generate_request(
             Language::TypeScript,
             args.common,
