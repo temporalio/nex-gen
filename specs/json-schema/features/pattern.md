@@ -48,7 +48,7 @@ pure-Rust **`regex` crate** (the generator's own engine) cannot compile —
 lookahead `(?=…)`/`(?!…)`, lookbehind, backreferences `\1`, and other
 backtracking-only Perl constructs — is **rejected at load** (deferred,
 *not* a categorical P6 exclusion). Additional syntax categories are rejected
-or normalized where the runtime engines diverge (the complete gate is below):
+or normalized where the runtime engines diverge (the gate is below (its known holes are marked in rules 7 and 8)):
 inline flags are rejected; `.` / `\s` / `\S` and the `$` end-anchor are
 normalized; non-portable escapes, assertion spellings, class operations,
 named captures, and ambiguous unbounded repetitions are rejected. Applies only
@@ -156,12 +156,22 @@ pinned flags is **not** sufficient, so the gate applies these explicit rules:
 6. **Non-portable assertions and captures → reject.** `\A`, `\z`,
    `\b{start}`/`\b{end}`, `\<`/`\>`, and both named-capture syntaxes are
    outside the shared grammar.
-7. **Ambiguous punctuation/classes → reject.** Lone `{`, `}`, or `]`; POSIX
-   classes; nested classes; and class set operations (`&&`, `--`, `~~`) are
-   rejected rather than interpreted differently per engine.
+7. **Ambiguous punctuation/classes → reject.** A lone `{`, `}`, or `]`
+   **outside a character class**; POSIX classes; nested classes; and class set
+   operations (`&&`, `--`, `~~`) are rejected rather than interpreted
+   differently per engine. The `outside a class` scoping is load-bearing and is
+   **a known hole, not a design choice**: `[]]`, `[]a]`, `[^]]` and `[]-a]` pass
+   the gate today, and Node in `u` mode throws `Invalid regular expression:
+   /[]]/u: Lone quantifier brackets` at import. Closing it is a gate fix.
 8. **Ambiguous unbounded repetition → reject (D7).** Nested/unbounded
-   quantifier shapes such as `^([a-z]+)+$` are rejected to keep evaluation
-   linear and avoid target-specific backtracking failures.
+   quantifier shapes such as `^([a-z]+)+$` are rejected. **This rule is not a
+   soundness guarantee**, and must not be read as one: it fires only when the
+   *outer* quantifier is unbounded, so `a{2}*` reaches `regexp.MustCompile` and
+   panics at Go package init, and `^(a|b)*$` reaches Java's matcher and throws
+   `StackOverflowError` on inputs of a few kilobytes — an `Error`, which no
+   generated `catch` intercepts. Both are open defects. The rule reduces
+   target-specific backtracking failures; it does not eliminate them, and
+   nothing here licenses either escape.
 
 All of these compile under `regex::Regex::new`, so the gate additionally
 walks the pattern's `regex-syntax` **AST** — rejecting inline-flag groups,
@@ -385,7 +395,7 @@ Fixtures outside the corpus (validator integration, not pure matching):
 | OpenAPI 3.0 / draft-4 | `pattern` present since draft-4, same ECMA-262 intent. Patterns using backtracking constructs (lookaround/backreferences) or inline flags need a rewrite to the regular subset or await wider support; `\s`/`\S` and `$` are handled automatically by normalization. |
 | Swagger 2.0 | Same as OAS 3.0. |
 
-The known cross-engine divergences are now all handled — the compile gate
+The cross-engine divergences enumerated here are handled; rules 7 and 8 name the ones that are not — the compile gate
 + `regex-syntax` AST checks **reject** the non-portable constructs
 (lookaround/backref, inline flags, and the narrow `\S`-in-multi-member-class
 case) and **normalize** `\s`/`\S` (→ explicit ASCII class) and `$` (→ per-

@@ -235,10 +235,10 @@ results.
 
 So **P13.2's "preserved verbatim" holds for TypeScript with one stated
 exception**: an undeclared numeric value outside IEEE-754 double range
-round-trips to the nearest double. Object keys, key order, strings,
-booleans, `null`, nested structure and every number representable as a
-double are preserved; object-member order is not guaranteed or part of JSON
-identity under **P1**. An author whose payload carries integers past
+round-trips to the nearest double. Object keys, strings, booleans, `null`,
+nested structure and every number representable as a double are preserved.
+Object-member **order** is neither guaranteed nor part of JSON identity under
+**P1**. An author whose payload carries integers past
 2^53 must not rely on the catch-all to ferry them; note that *declaring*
 the field does not rescue the value either — the cross-language integer
 cap is `±(2^53−1)` and a literal past it is a validation reject, not a

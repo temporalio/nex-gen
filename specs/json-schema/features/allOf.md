@@ -114,6 +114,9 @@ implicit merge. Purely inert siblings (`$comment`, `examples`, and
 `deprecated: false`) likewise remain attached to the reference and are dropped
 without cloning its target into a new type. (This supersedes [[ref]]'s former
 sibling-reject rule, which existed only because `allOf` was rejected.)
+*(Status: unimplemented for the inert set — the fold gate admits only the four
+`x-<lang>-name` keywords, and the inert-stripping step runs one statement after
+the merge decision it should precede.)*
 
 **Keywords sibling to `allOf` fold in the same way** — the `$ref` case is
 just its most common instance. A node may carry keywords *alongside* its
