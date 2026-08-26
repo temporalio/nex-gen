@@ -183,9 +183,10 @@ export enum UserCapability {
 
 ### Variants
 
-WIT variants become target-native discriminated unions. Python variants use
-tagged tuples unless they back protobuf `oneof` fields, as described under
-[`@nexus.proto`](#nexusproto).
+Python represents WIT variants as tagged tuples. A variant backed by a protobuf
+`oneof` uses case dataclasses, as described under
+[`@nexus.proto`](#nexusproto). TypeScript represents variants as tagged object
+unions.
 
 ```wit
 variant notification-target {
@@ -1274,13 +1275,11 @@ record response {
 }
 ```
 
-Python generates one slotted dataclass per case for variants that back protobuf
-oneofs, plus a union alias over those classes. Each case contains only its
-payload `value` field. For example, the variant above generates
-`OutcomeSuccess(value)` and `OutcomeFailure(value)`. Generated oneof conversion
-constructs and matches those classes. It does not register a separate transfer
-type converter for the variant itself. Python variants that do not back
-protobuf oneofs remain tagged tuples.
+Python represents a protobuf oneof-backed variant as a union of slotted case
+dataclasses. Each case contains its payload in a `value` field. For example, the
+variant above generates `OutcomeSuccess(value)` and `OutcomeFailure(value)`.
+The containing record's protobuf conversion constructs and matches those case
+classes.
 
 Other targets reject a reachable model containing a oneof they cannot convert.
 Unreachable declarations and omitted oneofs remain valid.
@@ -1328,11 +1327,11 @@ type converter registration cannot instantiate an open generic converter. The
 generator reports this explicitly rather than emitting a model that cannot be
 serialized through the SDK.
 
-Generic variants retain each target's normal representation. Python uses tagged
-tuples except for protobuf-backed variants, which use generic case dataclasses.
-TypeScript uses tagged object unions, Go uses sealed interfaces and case structs,
-and .NET uses nested records. References to generic variants are closed
-automatically wherever they occur.
+Python represents generic variants as tagged tuples and protobuf oneof-backed
+generic variants as unions of generic case dataclasses. TypeScript uses tagged
+object unions, Go uses sealed interfaces and case structs, and .NET uses nested
+records. References to generic variants are closed automatically wherever they
+occur.
 
 ---
 
