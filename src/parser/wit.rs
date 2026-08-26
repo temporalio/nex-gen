@@ -1074,10 +1074,10 @@ fn build_type_source(
     type_def: &TypeDef,
     path: &Path,
     interface_name: &str,
-) -> Result<Option<TypeSourceSpec>> {
+) -> Result<Option<ExternalTypeSourceSpec>> {
     build_native_proto_source(type_def, path, interface_name).map(|source| {
         source.map(|source| {
-            TypeSourceSpec::Proto(ProtoTypeSpec {
+            ExternalTypeSourceSpec::Proto(ProtoTypeSpec {
                 proto: source.message,
                 reference: source.reference,
                 type_name: source.type_name,
@@ -1090,7 +1090,7 @@ fn build_variant_source(
     type_def: &TypeDef,
     path: &Path,
     interface_name: &str,
-) -> Result<Option<VariantSourceSpec>> {
+) -> Result<Option<ExternalVariantSourceSpec>> {
     let Some(source) = build_native_proto_source(type_def, path, interface_name)? else {
         return Ok(None);
     };
@@ -1105,10 +1105,12 @@ fn build_variant_source(
             reason: "protobuf variants must identify a oneof as `<message>.<oneof>`".to_string(),
         });
     };
-    Ok(Some(VariantSourceSpec::ProtoOneof(ProtoOneofSpec {
-        message: source.message,
-        name,
-    })))
+    Ok(Some(ExternalVariantSourceSpec::ProtoOneof(
+        ProtoOneofSpec {
+            message: source.message,
+            name,
+        },
+    )))
 }
 
 struct NativeProtoSource {
@@ -3655,8 +3657,8 @@ mod tests {
     use crate::error::Error;
     use crate::language::Language;
     use crate::spec::{
-        CompilerPass, LanguageStringSpec, ProtoOneofSpec, ProtoTypeSpec, TypeSourceSpec,
-        VariantSourceSpec,
+        CompilerPass, ExternalTypeSourceSpec, ExternalVariantSourceSpec, LanguageStringSpec,
+        ProtoOneofSpec, ProtoTypeSpec,
     };
 
     use super::{
@@ -4548,7 +4550,7 @@ interface models {
         let variant = spec.variant("models.choice").unwrap();
         assert!(matches!(
             variant.source.as_ref(),
-            Some(VariantSourceSpec::ProtoOneof(ProtoOneofSpec { name, .. }))
+            Some(ExternalVariantSourceSpec::ProtoOneof(ProtoOneofSpec { name, .. }))
                 if name == "value"
         ));
         for proto_name in [
@@ -4632,7 +4634,7 @@ interface user-service {
                 .unwrap()
                 .source
                 .as_ref(),
-            Some(&TypeSourceSpec::Proto(ProtoTypeSpec {
+            Some(&ExternalTypeSourceSpec::Proto(ProtoTypeSpec {
                 proto: Symbol::new("acme.users.v1.ProtoRequest"),
                 reference: LanguageStringSpec {
                     default: Some("acme.users.v1.ProtoRequest".to_string()),

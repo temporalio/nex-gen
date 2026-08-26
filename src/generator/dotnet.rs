@@ -15,9 +15,9 @@ use crate::planning::{
 };
 use crate::planning::{RequestPlan, RequestPlanSource, ResolvedResourceBindingSource};
 use crate::spec::{
-    AliasTypeSpec, EnumSpec, ExternalTypeSpec, FlagsSpec, FunctionFieldSpec, IntSpec,
-    OperationSpec, RecordFieldSpec, RecordSpec, ServiceSpec, SupportFragmentSpec, TypeSourceSpec,
-    TypeSpec, VariantSpec,
+    AliasTypeSpec, EnumSpec, ExternalTypeSourceSpec, ExternalTypeSpec, FlagsSpec,
+    FunctionFieldSpec, IntSpec, OperationSpec, RecordFieldSpec, RecordSpec, ServiceSpec,
+    SupportFragmentSpec, TypeSpec, VariantSpec,
 };
 use crate::spec::{ApiSpecBranch, ApiSpecNode};
 
@@ -3747,7 +3747,7 @@ fn api_plan_record_for_request_name<'a>(
         let name = name.trim_start_matches('.');
         api_plan.records().map(|(_, record)| record).find(|record| {
             matches!(
-                record.source.as_ref().and_then(TypeSourceSpec::proto_type),
+                record.source.as_ref().and_then(ExternalTypeSourceSpec::proto_type),
                 Some(PlannedProtoType::Message(message))
                     if message.proto.full_name == name
             )

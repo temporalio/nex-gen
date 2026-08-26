@@ -204,14 +204,14 @@ fn collect_external_type_module_imports(
 
 fn collect_type_source_module_imports(
     source_module: &ModulePath,
-    source: &TypeSourceSpec<OperationLoweredFamily>,
+    source: &ExternalTypeSourceSpec<OperationLoweredFamily>,
     imports: &mut BTreeMap<ModulePath, BTreeMap<ModulePath, BTreeSet<String>>>,
 ) {
     match source {
-        TypeSourceSpec::Proto(proto) => {
+        ExternalTypeSourceSpec::Proto(proto) => {
             collect_symbol_module_import(source_module, &proto.proto, imports)
         }
-        TypeSourceSpec::Alias(alias) => {
+        ExternalTypeSourceSpec::Alias(alias) => {
             collect_symbol_module_import(source_module, &alias.name, imports);
             collect_type_module_imports(source_module, Some(&alias.target), imports);
         }
@@ -220,14 +220,14 @@ fn collect_type_source_module_imports(
 
 fn collect_variant_source_module_imports(
     source_module: &ModulePath,
-    source: &VariantSourceSpec<OperationLoweredFamily>,
+    source: &ExternalVariantSourceSpec<OperationLoweredFamily>,
     imports: &mut BTreeMap<ModulePath, BTreeMap<ModulePath, BTreeSet<String>>>,
 ) {
     match source {
-        VariantSourceSpec::ProtoOneof(oneof) => {
+        ExternalVariantSourceSpec::ProtoOneof(oneof) => {
             collect_symbol_module_import(source_module, &oneof.message, imports)
         }
-        VariantSourceSpec::Alias(alias) => {
+        ExternalVariantSourceSpec::Alias(alias) => {
             collect_symbol_module_import(source_module, &alias.name, imports);
             collect_type_module_imports(source_module, Some(&alias.target), imports);
         }
@@ -1379,8 +1379,8 @@ mod tests {
     use crate::language::Language;
     use crate::spec::{ApiSpecLeaf, ApiSpecNode, ApiSpecTree, CompilerPass};
     use crate::spec::{
-        ExternalTypeSpec, LanguageStringSpec, ModulePath, ProtoOneofSpec, SupportSpec,
-        VariantSourceSpec,
+        ExternalTypeSpec, ExternalVariantSourceSpec, LanguageStringSpec, ModulePath,
+        ProtoOneofSpec, SupportSpec,
     };
 
     #[test]
@@ -1438,7 +1438,7 @@ mod tests {
         let Some(source) = &variant.source else {
             panic!("oneof variant should retain its protobuf source");
         };
-        let VariantSourceSpec::ProtoOneof(ProtoOneofSpec {
+        let ExternalVariantSourceSpec::ProtoOneof(ProtoOneofSpec {
             message: PlannedProtoType::Message(message),
             name,
         }) = source
@@ -1490,7 +1490,7 @@ mod tests {
         for entry in spec.types.values_mut() {
             match &mut entry.declaration {
                 TypeDeclSpec::Record(record) if record.name == "Outcome" => {
-                    if let Some(TypeSourceSpec::Proto(source)) = &mut record.source {
+                    if let Some(ExternalTypeSourceSpec::Proto(source)) = &mut record.source {
                         source.reference.default_import = Some("record.module".to_string());
                     }
                 }

@@ -19,10 +19,10 @@ use crate::planning::{
 };
 use crate::planning::{RequestPlan, ResolvedResourceBindingSource};
 use crate::spec::{
-    AliasTypeSpec, EnumSpec, ExternalTypeSpec, FlagsSpec, FunctionArgsSpec, FunctionFieldSpec,
-    FunctionResultSpec, LanguageImportSpec, LanguageImportStyle, LanguageStringSpec, ModulePath,
-    OperationSpec, RecordFieldSpec, RecordFieldVisibility, RecordSpec, SupportFragmentSpec,
-    TypeDeclSpec, TypeReplacementSpec, TypeSourceSpec, TypeSpec, VariantSpec,
+    AliasTypeSpec, EnumSpec, ExternalTypeSourceSpec, ExternalTypeSpec, FlagsSpec, FunctionArgsSpec,
+    FunctionFieldSpec, FunctionResultSpec, LanguageImportSpec, LanguageImportStyle,
+    LanguageStringSpec, ModulePath, OperationSpec, RecordFieldSpec, RecordFieldVisibility,
+    RecordSpec, SupportFragmentSpec, TypeDeclSpec, TypeReplacementSpec, TypeSpec, VariantSpec,
 };
 use crate::spec::{ApiSpecBranch, ApiSpecNode};
 
@@ -6561,7 +6561,7 @@ fn planned_record_for_external_source<'a>(
         record
             .source
             .as_ref()
-            .and_then(TypeSourceSpec::proto_type)
+            .and_then(ExternalTypeSourceSpec::proto_type)
             .is_some_and(|source_proto| source_proto == external_proto)
     })
 }

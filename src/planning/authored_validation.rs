@@ -14,8 +14,8 @@ use crate::generator::proto::typescript as typescript_proto;
 use crate::generator::python;
 use crate::language::Language;
 use crate::spec::{
-    ApiSpec, AuthoredFamily, ExternalTypeBindingSpec, ExternalTypeSpec, FunctionArgsSpec,
-    FunctionResultSpec, RecordFieldVisibility, RecordSpec, ServiceSpec, TypeSourceSpec, TypeSpec,
+    ApiSpec, AuthoredFamily, ExternalTypeBindingSpec, ExternalTypeSourceSpec, ExternalTypeSpec,
+    FunctionArgsSpec, FunctionResultSpec, RecordFieldVisibility, RecordSpec, ServiceSpec, TypeSpec,
 };
 use crate::spec::{ApiSpecLeaf, CompilerPass};
 
@@ -225,7 +225,11 @@ fn validate_external_type_bindings(
     }
 
     for (_, record) in spec.records() {
-        let Some(proto_name) = record.source.as_ref().and_then(TypeSourceSpec::proto_type) else {
+        let Some(proto_name) = record
+            .source
+            .as_ref()
+            .and_then(ExternalTypeSourceSpec::proto_type)
+        else {
             continue;
         };
         let Some(message) = descriptors.message(proto_name.as_str()) else {
@@ -251,7 +255,7 @@ fn validate_external_type_bindings(
         let Some(source) = variant
             .source
             .as_ref()
-            .and_then(crate::spec::VariantSourceSpec::proto_oneof)
+            .and_then(crate::spec::ExternalVariantSourceSpec::proto_oneof)
         else {
             continue;
         };

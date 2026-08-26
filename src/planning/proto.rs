@@ -4,8 +4,8 @@ use prost_types::field_descriptor_proto::{Label, Type};
 
 use crate::descriptors::{DescriptorIndex, EnumMetadata, MessageMetadata, real_oneof_groups};
 use crate::spec::{
-    ApiSpec, ExternalTypeSpec, IntSpec, ProtoTypeSpec, RecordSpec, TypeDeclSpec, TypeSourceSpec,
-    TypeSpec,
+    ApiSpec, ExternalTypeSourceSpec, ExternalTypeSpec, IntSpec, ProtoTypeSpec, RecordSpec,
+    TypeDeclSpec, TypeSpec,
 };
 
 use super::OperationLoweredFamily;
@@ -276,7 +276,7 @@ fn record_proto_name(record: &RecordSpec<OperationLoweredFamily>) -> Option<&str
     record
         .source
         .as_ref()
-        .and_then(TypeSourceSpec::proto_type)
+        .and_then(ExternalTypeSourceSpec::proto_type)
         .map(|symbol| symbol.as_str())
 }
 

@@ -406,7 +406,7 @@ where
                 return None;
             };
             matches!(
-                record.source.as_ref().and_then(TypeSourceSpec::proto_type),
+                record.source.as_ref().and_then(ExternalTypeSourceSpec::proto_type),
                 Some(source_proto)
                     if source_proto.as_ref() == proto_name
             )
@@ -791,7 +791,7 @@ pub struct RecordSpec<F: TypeFamily = AuthoredFamily> {
     pub name: String,
     pub full_name: String,
     pub doc: F::Text,
-    pub source: Option<TypeSourceSpec<F>>,
+    pub source: Option<ExternalTypeSourceSpec<F>>,
     pub experimental: bool,
     pub flatten_in_api: bool,
     pub fields: IndexMap<String, RecordFieldSpec<F>>,
@@ -829,7 +829,7 @@ pub struct EnumSpec<F: TypeFamily = AuthoredFamily> {
     pub name: String,
     pub full_name: String,
     pub values: Vec<EnumValueSpec>,
-    pub source: Option<TypeSourceSpec<F>>,
+    pub source: Option<ExternalTypeSourceSpec<F>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -844,7 +844,7 @@ pub struct FlagsSpec<F: TypeFamily = AuthoredFamily> {
     pub name: String,
     pub full_name: String,
     pub flags: Vec<FlagSpec>,
-    pub source: Option<TypeSourceSpec<F>>,
+    pub source: Option<ExternalTypeSourceSpec<F>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -858,7 +858,7 @@ pub struct VariantSpec<F: TypeFamily = AuthoredFamily> {
     pub name: String,
     pub full_name: String,
     pub cases: Vec<VariantCaseSpec<F>>,
-    pub source: Option<VariantSourceSpec<F>>,
+    pub source: Option<ExternalVariantSourceSpec<F>>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1220,7 +1220,7 @@ pub struct ProtoOneofSpec<F: TypeFamily = AuthoredFamily> {
 
 /// External backing for declarations represented by complete value types.
 #[derive(Debug, Clone, PartialEq)]
-pub enum TypeSourceSpec<F: TypeFamily = AuthoredFamily> {
+pub enum ExternalTypeSourceSpec<F: TypeFamily = AuthoredFamily> {
     Proto(ProtoTypeSpec<F>),
     Alias(AliasTypeSpec<F>),
 }
@@ -1228,12 +1228,12 @@ pub enum TypeSourceSpec<F: TypeFamily = AuthoredFamily> {
 /// External backing for variants, including protobuf oneofs that are not
 /// independently usable value types.
 #[derive(Debug, Clone, PartialEq)]
-pub enum VariantSourceSpec<F: TypeFamily = AuthoredFamily> {
+pub enum ExternalVariantSourceSpec<F: TypeFamily = AuthoredFamily> {
     ProtoOneof(ProtoOneofSpec<F>),
     Alias(AliasTypeSpec<F>),
 }
 
-impl<F: TypeFamily> TypeSourceSpec<F> {
+impl<F: TypeFamily> ExternalTypeSourceSpec<F> {
     pub fn proto_type(&self) -> Option<&F::Proto> {
         match self {
             Self::Proto(proto) => Some(&proto.proto),
@@ -1248,19 +1248,19 @@ impl<F: TypeFamily> TypeSourceSpec<F> {
         }
     }
 
-    fn map_names_with<G, M>(self, map: &mut M) -> TypeSourceSpec<G>
+    fn map_names_with<G, M>(self, map: &mut M) -> ExternalTypeSourceSpec<G>
     where
         G: TypeFamily,
         M: ApiSpecTransform<F, G>,
     {
         match self {
-            Self::Proto(proto) => TypeSourceSpec::Proto(proto.map_names_with(map)),
-            Self::Alias(alias) => TypeSourceSpec::Alias(alias.map_names_with(map)),
+            Self::Proto(proto) => ExternalTypeSourceSpec::Proto(proto.map_names_with(map)),
+            Self::Alias(alias) => ExternalTypeSourceSpec::Alias(alias.map_names_with(map)),
         }
     }
 }
 
-impl<F: TypeFamily> VariantSourceSpec<F> {
+impl<F: TypeFamily> ExternalVariantSourceSpec<F> {
     pub fn proto_oneof(&self) -> Option<&ProtoOneofSpec<F>> {
         match self {
             Self::ProtoOneof(oneof) => Some(oneof),
@@ -1268,14 +1268,16 @@ impl<F: TypeFamily> VariantSourceSpec<F> {
         }
     }
 
-    fn map_names_with<G, M>(self, map: &mut M) -> VariantSourceSpec<G>
+    fn map_names_with<G, M>(self, map: &mut M) -> ExternalVariantSourceSpec<G>
     where
         G: TypeFamily,
         M: ApiSpecTransform<F, G>,
     {
         match self {
-            Self::ProtoOneof(oneof) => VariantSourceSpec::ProtoOneof(oneof.map_names_with(map)),
-            Self::Alias(alias) => VariantSourceSpec::Alias(alias.map_names_with(map)),
+            Self::ProtoOneof(oneof) => {
+                ExternalVariantSourceSpec::ProtoOneof(oneof.map_names_with(map))
+            }
+            Self::Alias(alias) => ExternalVariantSourceSpec::Alias(alias.map_names_with(map)),
         }
     }
 }

@@ -8,12 +8,12 @@ use crate::descriptors::DescriptorIndex;
 use crate::error::{Error, Result};
 use crate::language::Language;
 use crate::spec::{
-    AliasTypeSpec, ApiSpec, ApiSpecTransform, AuthoredResourceType, ExternalTypeSpec,
-    FunctionArgSpec, FunctionArgsSpec, FunctionFieldSpec, FunctionResultSpec, JsonModelSpec,
-    LanguageStringSpec, ModulePath, OperationSpec, RecordFieldVisibility, RecordSpec,
-    ResourceFieldSpec, SelectedFamily, SelectedSupportSpec, SelectedTextSpec, ServiceSpec,
-    SupportSpec, Symbol, TypeDeclSpec, TypeFamily, TypeReplacementSpec, TypeSourceSpec, TypeSpec,
-    VariantSourceSpec,
+    AliasTypeSpec, ApiSpec, ApiSpecTransform, AuthoredResourceType, ExternalTypeSourceSpec,
+    ExternalTypeSpec, ExternalVariantSourceSpec, FunctionArgSpec, FunctionArgsSpec,
+    FunctionFieldSpec, FunctionResultSpec, JsonModelSpec, LanguageStringSpec, ModulePath,
+    OperationSpec, RecordFieldVisibility, RecordSpec, ResourceFieldSpec, SelectedFamily,
+    SelectedSupportSpec, SelectedTextSpec, ServiceSpec, SupportSpec, Symbol, TypeDeclSpec,
+    TypeFamily, TypeReplacementSpec, TypeSpec,
 };
 use crate::spec::{ApiSpecLeaf, ApiSpecNode, ApiSpecTree, CompilerPass};
 
