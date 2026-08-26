@@ -406,8 +406,9 @@ where
                 return None;
             };
             matches!(
-                record.source.as_ref().map(|source| &source.external_type),
-                Some(ExternalTypeSpec::Proto(source_proto)) if source_proto.as_ref() == proto_name
+                record.source.as_ref().and_then(ExternalSourceSpec::proto_type),
+                Some(source_proto)
+                    if source_proto.as_ref() == proto_name
             )
             .then_some(record)
         })
@@ -1200,21 +1201,77 @@ impl TextSpec for SelectedTextSpec {
 /// External wire metadata owned by a native WIT declaration.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ExternalSourceSpec<F: TypeFamily = AuthoredFamily> {
-    pub external_type: ExternalTypeSpec<F>,
+    pub target: ProtoSourceTarget<F>,
     pub reference: F::Text,
     pub type_name: F::Text,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum ProtoSourceTarget<F: TypeFamily = AuthoredFamily> {
+    Type(F::Proto),
+    Oneof { message: F::Proto, name: String },
+}
+
+impl<F: TypeFamily> ProtoSourceTarget<F> {
+    pub fn message(&self) -> &F::Proto {
+        match self {
+            Self::Type(message) | Self::Oneof { message, .. } => message,
+        }
+    }
+
+    pub fn oneof(&self) -> Option<&str> {
+        match self {
+            Self::Type(_) => None,
+            Self::Oneof { name, .. } => Some(name),
+        }
+    }
+}
+
 impl<F: TypeFamily> ExternalSourceSpec<F> {
+    pub fn proto_target(&self) -> &ProtoSourceTarget<F> {
+        &self.target
+    }
+
+    pub fn proto_type(&self) -> Option<&F::Proto> {
+        match self.proto_target() {
+            ProtoSourceTarget::Type(proto) => Some(proto),
+            ProtoSourceTarget::Oneof { .. } => None,
+        }
+    }
+
+    pub fn reference(&self) -> &F::Text {
+        &self.reference
+    }
+
+    pub fn type_name(&self) -> &F::Text {
+        &self.type_name
+    }
+
     fn map_names_with<G, M>(self, map: &mut M) -> ExternalSourceSpec<G>
     where
         G: TypeFamily,
         M: ApiSpecTransform<F, G>,
     {
         ExternalSourceSpec {
-            external_type: self.external_type.map_names_with(map),
+            target: self.target.map_names_with(map),
             reference: map.map_text(self.reference),
             type_name: map.map_text(self.type_name),
+        }
+    }
+}
+
+impl<F: TypeFamily> ProtoSourceTarget<F> {
+    fn map_names_with<G, M>(self, map: &mut M) -> ProtoSourceTarget<G>
+    where
+        G: TypeFamily,
+        M: ApiSpecTransform<F, G>,
+    {
+        match self {
+            Self::Type(message) => ProtoSourceTarget::Type(map.map_proto(message)),
+            Self::Oneof { message, name } => ProtoSourceTarget::Oneof {
+                message: map.map_proto(message),
+                name,
+            },
         }
     }
 }

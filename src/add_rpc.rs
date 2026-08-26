@@ -30,7 +30,12 @@ const LINKED_WIT_ROOT_PATH: &str = "add-rpc-linked-root.wit";
 struct LinkedTypeMetadata {
     wit_name: String,
     record_fields: Option<BTreeMap<String, LinkedRecordFieldMetadata>>,
-    is_variant: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ProtoOneofSource {
+    message: String,
+    name: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -44,6 +49,7 @@ struct LinkedRecordFieldMetadata {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct LinkedWitMetadata {
     proto_types: BTreeMap<String, LinkedTypeMetadata>,
+    oneof_sources_by_variant: BTreeMap<String, ProtoOneofSource>,
     type_compatibility: BTreeMap<String, BTreeSet<String>>,
     type_covered_fields: BTreeMap<String, BTreeSet<String>>,
     type_use_paths: BTreeMap<String, String>,
@@ -177,6 +183,7 @@ fn load_linked_wit_metadata_from_inputs(input_paths: &[PathBuf]) -> Result<Linke
         input_paths,
     )?;
     let mut proto_types = BTreeMap::new();
+    let mut oneof_sources_by_variant = BTreeMap::new();
     let mut type_compatibility = BTreeMap::<String, BTreeSet<String>>::new();
     let mut type_covered_fields = BTreeMap::<String, BTreeSet<String>>::new();
     let mut type_use_paths = BTreeMap::new();
@@ -290,6 +297,14 @@ fn load_linked_wit_metadata_from_inputs(input_paths: &[PathBuf]) -> Result<Linke
                     continue;
                 };
 
+                if matches!(type_def.kind, TypeDefKind::Variant(_)) {
+                    oneof_sources_by_variant.insert(
+                        type_name.to_string(),
+                        parse_proto_oneof_source(&proto_name, &origin_path, &context)?,
+                    );
+                    continue;
+                }
+
                 let record_fields = if let TypeDefKind::Record(record) = &type_def.kind {
                     let mut fields = BTreeMap::new();
                     for field in &record.fields {
@@ -335,7 +350,6 @@ fn load_linked_wit_metadata_from_inputs(input_paths: &[PathBuf]) -> Result<Linke
                     LinkedTypeMetadata {
                         wit_name: type_name.to_string(),
                         record_fields,
-                        is_variant: matches!(type_def.kind, TypeDefKind::Variant(_)),
                     },
                 ) {
                     return Err(Error::InvalidWit {
@@ -352,6 +366,7 @@ fn load_linked_wit_metadata_from_inputs(input_paths: &[PathBuf]) -> Result<Linke
 
     Ok(LinkedWitMetadata {
         proto_types,
+        oneof_sources_by_variant,
         type_compatibility,
         type_covered_fields,
         type_use_paths,
@@ -492,7 +507,7 @@ struct ExistingInterface {
     function_names_by_wire_name: BTreeMap<String, String>,
     functions: BTreeMap<String, ExistingFunction>,
     records_by_proto: BTreeMap<String, ExistingRecord>,
-    variant_proto_names: BTreeSet<String>,
+    oneof_sources_by_variant: BTreeMap<String, ProtoOneofSource>,
     type_names_by_proto: BTreeMap<String, String>,
     type_names_in_scope: BTreeSet<String>,
 }
@@ -511,7 +526,7 @@ impl ExistingInterface {
         let mut type_names_by_proto = BTreeMap::new();
         let mut type_names_in_scope = BTreeSet::new();
         let mut records_by_proto = BTreeMap::new();
-        let mut variant_proto_names = BTreeSet::new();
+        let mut oneof_sources_by_variant = BTreeMap::new();
 
         for (function_name, function) in &interface.functions {
             let context = format!("interface `{export_name}` function `{function_name}`");
@@ -527,14 +542,19 @@ impl ExistingInterface {
             let Some(proto_name) = find_proto_name_for_type_def(type_def, path, &context)? else {
                 continue;
             };
+            if matches!(type_def.kind, TypeDefKind::Variant(_)) {
+                oneof_sources_by_variant.insert(
+                    type_name.clone(),
+                    parse_proto_oneof_source(&proto_name, path, &context)?,
+                );
+                continue;
+            }
             type_names_by_proto.insert(proto_name.clone(), type_name.clone());
             if let TypeDefKind::Record(record) = &type_def.kind {
                 records_by_proto.insert(
                     proto_name,
                     ExistingRecord::from_resolve(resolve, type_name, record),
                 );
-            } else if matches!(type_def.kind, TypeDefKind::Variant(_)) {
-                variant_proto_names.insert(proto_name);
             }
         }
         if let Some(interface_source) = interface_source {
@@ -547,7 +567,7 @@ impl ExistingInterface {
             function_names_by_wire_name,
             functions,
             records_by_proto,
-            variant_proto_names,
+            oneof_sources_by_variant,
             type_names_by_proto,
             type_names_in_scope,
         })
@@ -665,7 +685,7 @@ struct AddRpcBuilder<'a> {
     linked_uses: BTreeMap<String, BTreeSet<String>>,
     available_type_names: BTreeMap<String, String>,
     existing_records_by_proto: BTreeMap<String, ExistingRecord>,
-    existing_variant_proto_names: BTreeSet<String>,
+    existing_oneof_sources_by_variant: BTreeMap<String, ProtoOneofSource>,
     reserved_type_names: BTreeSet<String>,
     rendered_types: BTreeSet<String>,
     rendered_definitions: Vec<String>,
@@ -699,7 +719,7 @@ impl<'a> AddRpcBuilder<'a> {
             linked_uses: BTreeMap::new(),
             available_type_names: BTreeMap::new(),
             existing_records_by_proto: BTreeMap::new(),
-            existing_variant_proto_names: BTreeSet::new(),
+            existing_oneof_sources_by_variant: BTreeMap::new(),
             reserved_type_names: BTreeSet::new(),
             rendered_types: BTreeSet::new(),
             rendered_definitions: Vec::new(),
@@ -719,7 +739,7 @@ impl<'a> AddRpcBuilder<'a> {
             linked_uses: BTreeMap::new(),
             available_type_names: BTreeMap::new(),
             existing_records_by_proto: BTreeMap::new(),
-            existing_variant_proto_names: BTreeSet::new(),
+            existing_oneof_sources_by_variant: BTreeMap::new(),
             reserved_type_names: BTreeSet::new(),
             rendered_types: BTreeSet::new(),
             rendered_definitions: Vec::new(),
@@ -729,7 +749,7 @@ impl<'a> AddRpcBuilder<'a> {
     fn with_existing_interface(mut self, interface: &ExistingInterface) -> Self {
         self.available_type_names = interface.type_names_by_proto.clone();
         self.existing_records_by_proto = interface.records_by_proto.clone();
-        self.existing_variant_proto_names = interface.variant_proto_names.clone();
+        self.existing_oneof_sources_by_variant = interface.oneof_sources_by_variant.clone();
         self.reserved_type_names = interface.type_names_in_scope.clone();
         self
     }
@@ -1006,7 +1026,7 @@ impl<'a> AddRpcBuilder<'a> {
         let proto_name = proto_name.trim_start_matches('.');
         if let Some(existing_name) = self.available_type_names.get(proto_name).cloned() {
             let record = self.existing_records_by_proto.get(proto_name).cloned();
-            if record.is_some() || self.existing_variant_proto_names.contains(proto_name) {
+            if record.is_some() {
                 self.validate_reused_oneofs(proto_name, &existing_name, record.as_ref(), context)?;
             }
             return Ok(existing_name);
@@ -1030,7 +1050,7 @@ impl<'a> AddRpcBuilder<'a> {
                     })
                     .collect(),
             });
-            if record.is_some() || linked_type.is_variant {
+            if record.is_some() {
                 self.validate_reused_oneofs(
                     proto_name,
                     &linked_type.wit_name,
@@ -1138,8 +1158,35 @@ impl<'a> AddRpcBuilder<'a> {
                     ),
                 ));
             }
+            let variant_name = base_type_expr(&grouped.type_expr);
+            let Some(source) = self.oneof_source_for_variant(variant_name) else {
+                return Err(self.unsupported(
+                    format!("{}.{}", message.full_name, oneof.name),
+                    format!(
+                        "existing WIT variant `{variant_name}` must declare `@nexus.proto \"{}.{}\"`",
+                        message.full_name, oneof.name
+                    ),
+                ));
+            };
+            if source.message.trim_start_matches('.') != message.full_name
+                || source.name != oneof.name
+            {
+                return Err(self.unsupported(
+                    format!("{}.{}", message.full_name, oneof.name),
+                    format!(
+                        "existing WIT variant `{variant_name}` binds to protobuf oneof `{}.{}`",
+                        source.message, source.name
+                    ),
+                ));
+            }
         }
         Ok(())
+    }
+
+    fn oneof_source_for_variant(&self, variant_name: &str) -> Option<&ProtoOneofSource> {
+        self.existing_oneof_sources_by_variant
+            .get(variant_name)
+            .or_else(|| self.linked_wit.oneof_sources_by_variant.get(variant_name))
     }
 
     fn render_message(&mut self, message: &MessageMetadata, wit_name: &str) -> Result<String> {
@@ -1262,7 +1309,7 @@ impl<'a> AddRpcBuilder<'a> {
 
         let mut rendered = String::new();
         rendered.push_str(&format!(
-            "  /// Protobuf oneof `{}.{}`.\n",
+            "  /// @nexus.proto \"{}.{}\"\n",
             message.full_name, oneof.name
         ));
         rendered.push_str(&format!("  variant {wit_name} {{\n"));
@@ -1968,6 +2015,29 @@ fn render_wit_identifier(name: &str) -> String {
 
 fn base_type_expr(type_expr: &str) -> &str {
     option_inner_type(type_expr).unwrap_or(type_expr)
+}
+
+fn parse_proto_oneof_source(value: &str, path: &Path, context: &str) -> Result<ProtoOneofSource> {
+    let Some((message, name)) = value.rsplit_once('.') else {
+        return Err(Error::InvalidWitDirective {
+            path: path.to_path_buf(),
+            context: context.to_string(),
+            directive: "@nexus.proto".to_string(),
+            reason: "protobuf variants must identify a oneof as `<message>.<oneof>`".to_string(),
+        });
+    };
+    if message.is_empty() || name.is_empty() {
+        return Err(Error::InvalidWitDirective {
+            path: path.to_path_buf(),
+            context: context.to_string(),
+            directive: "@nexus.proto".to_string(),
+            reason: "protobuf variants must identify a oneof as `<message>.<oneof>`".to_string(),
+        });
+    }
+    Ok(ProtoOneofSource {
+        message: message.to_string(),
+        name: name.to_string(),
+    })
 }
 
 fn field_name<'a>(field: &'a FieldDescriptorProto, parent_type: &str) -> Result<&'a str> {

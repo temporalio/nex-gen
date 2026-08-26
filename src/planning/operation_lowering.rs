@@ -11,8 +11,8 @@ use crate::error::{Error, Result};
 use crate::spec::{ApiSpecLeaf, CompilerPass};
 use crate::spec::{
     ApiSpecTransform, AuthoredResourceType, ExternalSourceSpec, ExternalTypeSpec, JsonModelSpec,
-    RecordFieldSpec, RecordFieldVisibility, RecordSpec, Symbol, TypeDeclEntry, TypeDeclSpec,
-    TypeSpec,
+    ProtoSourceTarget, RecordFieldSpec, RecordFieldVisibility, RecordSpec, Symbol, TypeDeclEntry,
+    TypeDeclSpec, TypeSpec,
 };
 
 use super::{
@@ -92,7 +92,7 @@ impl CompilerPass<OperationBoundFamily, OperationLoweredFamily> for OperationLow
                         full_name: record_full_name.clone(),
                         doc: SelectedTextSpec::default(),
                         source: Some(ExternalSourceSpec {
-                            external_type: ExternalTypeSpec::Proto(Symbol::new(
+                            target: ProtoSourceTarget::Type(Symbol::new(
                                 resource_return.output_message_name.clone(),
                             )),
                             reference: Default::default(),

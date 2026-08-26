@@ -15,6 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Breaking Changes
 
+- Protobuf-backed native WIT variants must now bind directly to their oneof with
+  `@nexus.proto "<message>.<oneof>"`. A message-only `@nexus.proto` directive
+  remains valid for records, enums, and flags.
+
 ### Fixed
 
 ### Security

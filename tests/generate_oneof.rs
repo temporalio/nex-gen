@@ -42,6 +42,7 @@ world system {{
 }}
 
 interface api {{
+  /// @nexus.proto "temporal.api.workflowservice.v1.PauseActivityRequest.activity"
   variant activity-selection {{
     id(string),
     %type(string),

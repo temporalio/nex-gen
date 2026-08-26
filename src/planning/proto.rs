@@ -4,7 +4,8 @@ use prost_types::field_descriptor_proto::{Label, Type};
 
 use crate::descriptors::{DescriptorIndex, EnumMetadata, MessageMetadata, real_oneof_groups};
 use crate::spec::{
-    ApiSpec, ExternalSourceSpec, ExternalTypeSpec, IntSpec, RecordSpec, TypeDeclSpec, TypeSpec,
+    ApiSpec, ExternalSourceSpec, ExternalTypeSpec, IntSpec, ProtoSourceTarget, RecordSpec,
+    TypeDeclSpec, TypeSpec,
 };
 
 use super::OperationLoweredFamily;
@@ -53,11 +54,10 @@ fn native_source_for_proto<'a>(
             TypeDeclSpec::Variant(variant) => variant.source.as_ref(),
             TypeDeclSpec::External(_) => None,
         }?;
-        matches!(
-            &source.external_type,
-            ExternalTypeSpec::Proto(source_proto) if source_proto.as_ref() == proto_name
-        )
-        .then_some(source)
+        source
+            .proto_type()
+            .is_some_and(|source_proto| source_proto.as_ref() == proto_name)
+            .then_some(source)
     })
 }
 
@@ -70,7 +70,7 @@ fn proto_reference(
         .map(materialize_selected_text)
         .or_else(|| {
             native_source_for_proto(spec, proto_name)
-                .map(|source| materialize_selected_text(&source.reference))
+                .map(|source| materialize_selected_text(source.reference()))
         })
         .unwrap_or_default()
 }
@@ -83,7 +83,7 @@ fn proto_type_name(
         .map(|binding| materialize_selected_text(binding.type_name()))
         .or_else(|| {
             native_source_for_proto(spec, proto_name)
-                .map(|source| materialize_selected_text(&source.type_name))
+                .map(|source| materialize_selected_text(source.type_name()))
         })
         .unwrap_or_default()
 }
@@ -275,7 +275,7 @@ pub(super) fn planned_record_field_type(
 
 fn record_proto_name(record: &RecordSpec<OperationLoweredFamily>) -> Option<&str> {
     let Some(ExternalSourceSpec {
-        external_type: ExternalTypeSpec::Proto(proto_name),
+        target: ProtoSourceTarget::Type(proto_name),
         ..
     }) = record.source.as_ref()
     else {

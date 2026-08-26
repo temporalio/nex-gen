@@ -77,11 +77,7 @@ fn collect_spec_module_imports(
             }
             TypeDeclSpec::Record(record) => {
                 if let Some(source) = &record.source {
-                    collect_external_type_module_imports(
-                        &spec.module_path,
-                        &source.external_type,
-                        imports,
-                    );
+                    collect_external_source_module_imports(&spec.module_path, source, imports);
                 }
                 for field in record.fields.values() {
                     collect_type_module_imports(
@@ -110,11 +106,7 @@ fn collect_spec_module_imports(
             }
             TypeDeclSpec::Variant(variant) => {
                 if let Some(source) = &variant.source {
-                    collect_external_type_module_imports(
-                        &spec.module_path,
-                        &source.external_type,
-                        imports,
-                    );
+                    collect_external_source_module_imports(&spec.module_path, source, imports);
                 }
                 for case in &variant.cases {
                     if let Some(payload) = &case.payload {
@@ -124,20 +116,12 @@ fn collect_spec_module_imports(
             }
             TypeDeclSpec::Enum(enumeration) => {
                 if let Some(source) = &enumeration.source {
-                    collect_external_type_module_imports(
-                        &spec.module_path,
-                        &source.external_type,
-                        imports,
-                    );
+                    collect_external_source_module_imports(&spec.module_path, source, imports);
                 }
             }
             TypeDeclSpec::Flags(flags) => {
                 if let Some(source) = &flags.source {
-                    collect_external_type_module_imports(
-                        &spec.module_path,
-                        &source.external_type,
-                        imports,
-                    );
+                    collect_external_source_module_imports(&spec.module_path, source, imports);
                 }
             }
         }
@@ -216,6 +200,14 @@ fn collect_external_type_module_imports(
             collect_type_module_imports(source_module, Some(target), imports);
         }
     }
+}
+
+fn collect_external_source_module_imports(
+    source_module: &ModulePath,
+    source: &ExternalSourceSpec<OperationLoweredFamily>,
+    imports: &mut BTreeMap<ModulePath, BTreeMap<ModulePath, BTreeSet<String>>>,
+) {
+    collect_symbol_module_import(source_module, source.proto_target().message(), imports);
 }
 
 fn collect_resource_symbol_module_import(
@@ -1362,7 +1354,9 @@ mod tests {
     use super::*;
     use crate::language::Language;
     use crate::spec::{ApiSpecLeaf, ApiSpecNode, ApiSpecTree, CompilerPass};
-    use crate::spec::{ExternalTypeSpec, LanguageStringSpec, ModulePath, SupportSpec};
+    use crate::spec::{
+        ExternalTypeSpec, LanguageStringSpec, ModulePath, ProtoSourceTarget, SupportSpec,
+    };
 
     #[test]
     fn descriptor_proto_refs_remain_external_models() {
@@ -1419,17 +1413,17 @@ mod tests {
         let Some(source) = &variant.source else {
             panic!("oneof variant should retain its protobuf source");
         };
-        let ExternalTypeSpec::Proto(PlannedProtoType::Message(message)) = &source.external_type
+        let ProtoSourceTarget::Oneof {
+            message: PlannedProtoType::Message(message),
+            name,
+        } = source.proto_target()
         else {
-            panic!("oneof variant source should resolve to a protobuf message");
+            panic!("oneof variant source should resolve to a protobuf oneof");
         };
         assert_eq!(message.proto.full_name, "temporal.api.update.v1.Outcome");
+        assert_eq!(name, "value");
         let field = record.fields.get("value").expect("grouped field");
-        assert!(
-            matches!(field.field_type, PlannedType::Variant(_)),
-            "{:#?}",
-            field.field_type
-        );
+        assert!(matches!(field.field_type, PlannedType::Variant(_)));
         assert_eq!(field.data.has_presence, Some(true));
         let Some(super::PlannedWireFieldBinding::VariantMembers { wire_name, members }) =
             &field.data.wire_binding
@@ -1455,6 +1449,49 @@ mod tests {
             };
             assert_eq!(message.proto.full_name, expected_type);
         }
+    }
+
+    #[test]
+    fn oneof_sources_do_not_supply_whole_message_metadata() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let mut spec = crate::parser::load_api_spec_from_wit_for_language_with_inputs(
+            Language::Python,
+            &[
+                root.join("advanced/samples/inputs/proto-oneof.wit"),
+                root.join("advanced/samples/inputs/deps"),
+            ],
+        )
+        .unwrap();
+        for entry in spec.types.values_mut() {
+            match &mut entry.declaration {
+                TypeDeclSpec::Variant(variant) if variant.name == "OutcomeValue" => {
+                    if let Some(source) = &mut variant.source {
+                        source.reference.default_import = Some("variant.module".to_string());
+                    }
+                }
+                TypeDeclSpec::Record(record) if record.name == "Outcome" => {
+                    if let Some(source) = &mut record.source {
+                        source.reference.default_import = Some("record.module".to_string());
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        let plan = plan_single_leaf(spec);
+        let outcome = plan
+            .records()
+            .map(|(_, record)| record)
+            .find(|record| record.name == "Outcome")
+            .expect("outcome record should be planned");
+        assert_eq!(
+            outcome
+                .data
+                .proto
+                .as_ref()
+                .and_then(|proto| proto.reference.default_import.as_deref()),
+            Some("record.module")
+        );
     }
 
     fn plan_single_leaf(spec: ApiSpec) -> PlannedSpec {

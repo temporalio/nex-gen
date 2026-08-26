@@ -16,8 +16,7 @@ interface outcome {
   /// @nexus.type-parameter
   type output-t = placeholder;
 
-  /// Protobuf oneof `temporal.api.update.v1.Outcome.value`.
-  /// @nexus.proto "temporal.api.update.v1.Outcome"
+  /// @nexus.proto "temporal.api.update.v1.Outcome.value"
   variant outcome-value {
     success(output-t),
     failure(failure),
@@ -29,7 +28,7 @@ interface outcome {
   }
 
   /// Selects an activity by ID or activity type.
-  /// @nexus.proto "temporal.api.workflowservice.v1.PauseActivityRequest"
+  /// @nexus.proto "temporal.api.workflowservice.v1.PauseActivityRequest.activity"
   variant activity-selection {
     id(string),
     %type(string),

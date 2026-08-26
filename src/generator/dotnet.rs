@@ -16,8 +16,9 @@ use crate::planning::{
 use crate::planning::{RequestPlan, RequestPlanSource, ResolvedResourceBindingSource};
 use crate::spec::{ApiSpecBranch, ApiSpecNode};
 use crate::spec::{
-    EnumSpec, ExternalTypeSpec, FlagsSpec, FunctionFieldSpec, IntSpec, OperationSpec,
-    RecordFieldSpec, RecordSpec, ServiceSpec, SupportFragmentSpec, TypeSpec, VariantSpec,
+    EnumSpec, ExternalSourceSpec, ExternalTypeSpec, FlagsSpec, FunctionFieldSpec, IntSpec,
+    OperationSpec, ProtoSourceTarget, RecordFieldSpec, RecordSpec, ServiceSpec,
+    SupportFragmentSpec, TypeSpec, VariantSpec,
 };
 
 const GENERATED_HEADER: &str = concat!(
@@ -3745,8 +3746,8 @@ fn api_plan_record_for_request_name<'a>(
         let name = name.trim_start_matches('.');
         api_plan.records().map(|(_, record)| record).find(|record| {
             matches!(
-                record.source.as_ref().map(|source| &source.external_type),
-                Some(ExternalTypeSpec::Proto(PlannedProtoType::Message(message)))
+                record.source.as_ref().map(ExternalSourceSpec::proto_target),
+                Some(ProtoSourceTarget::Type(PlannedProtoType::Message(message)))
                     if message.proto.full_name == name
             )
         })

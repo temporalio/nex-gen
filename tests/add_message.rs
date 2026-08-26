@@ -7,7 +7,11 @@ use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use nexgen::{add_message_to_string, add_rpc_to_string};
+use nexgen::descriptors::DescriptorIndex;
+use nexgen::generator::generate_source;
+use nexgen::language::Language;
+use nexgen::parser::load_api_spec_from_wit_for_language_with_inputs;
+use nexgen::{SupportFiles, add_message_to_string, add_rpc_to_string};
 use prost::Message;
 use prost_types::field_descriptor_proto::{Label, Type};
 use prost_types::{
@@ -289,6 +293,7 @@ fn add_message_renders_real_oneofs_as_variants() {
 
     assert!(rendered.contains(
         r#"/// Protobuf oneof `acme.oneof.v1.Root.Outcome.result`.
+  /// @nexus.proto "acme.oneof.v1.Root.Outcome.result"
   variant root-outcome-result {
     success(string),
     failure(failure-detail),
@@ -343,7 +348,7 @@ world system {
 }
 
 interface test-service {
-  /// @nexus.proto "acme.oneof.v1.Root.Outcome"
+  /// @nexus.proto "acme.oneof.v1.Root.Outcome.result"
   variant root-outcome {
     success(string),
     failure(failure-detail),
@@ -364,15 +369,19 @@ interface test-service {
         &[input_path.clone()],
     )
     .unwrap_err();
-    assert!(error.to_string().contains(
-        "is not a record, but protobuf message `acme.oneof.v1.Root.Outcome` contains a oneof"
-    ));
+    assert!(
+        error
+            .to_string()
+            .contains("generated type name `root-outcome` would collide with an existing WIT type")
+    );
 
     let error = add_message_to_string(&[descriptor], "acme.oneof.v1.Root.Outcome", &[input_path])
         .unwrap_err();
-    assert!(error.to_string().contains(
-        "is not a record, but protobuf message `acme.oneof.v1.Root.Outcome` contains a oneof"
-    ));
+    assert!(
+        error
+            .to_string()
+            .contains("generated type name `root-outcome` would collide with an existing WIT type")
+    );
 }
 
 #[test]
@@ -385,6 +394,7 @@ world system {
 }
 
 interface test-service {
+  /// @nexus.proto "acme.oneof.v1.Mixed.choice"
   variant mixed-choice {
     text(string),
     count(s32),
@@ -411,6 +421,7 @@ world system {
 }
 
 interface test-service {
+  /// @nexus.proto "acme.oneof.v1.Root.Outcome.result"
   variant root-outcome-result {
     success(string),
     failure(failure-detail),
@@ -432,6 +443,59 @@ interface test-service {
     let rendered =
         add_rpc_to_string(&[descriptor], "TestService.Complete", &[single_group_path]).unwrap();
     assert_eq!(rendered, single_group);
+}
+
+#[test]
+fn add_rpc_rejects_a_grouped_oneof_variant_without_its_source() {
+    let descriptor = write_oneof_descriptor();
+    let grouped = r#"package temporal:nexus@1.0.0;
+
+world system {
+  export test-service;
+}
+
+interface test-service {
+  variant mixed-choice {
+    text(string),
+    count(s32),
+  }
+
+  /// @nexus.proto "acme.oneof.v1.Mixed"
+  record mixed {
+    id: string,
+    choice: option<mixed-choice>,
+  }
+
+  choose: func(request: mixed) -> mixed;
+}
+"#;
+    let grouped_path = write_temp_wit("grouped-oneof-without-source", grouped);
+    let error =
+        add_rpc_to_string(&[descriptor], "TestService.Choose", &[grouped_path]).unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("must declare `@nexus.proto \"acme.oneof.v1.Mixed.choice\"`")
+    );
+}
+
+#[test]
+fn scaffolded_oneof_wit_passes_compiler_planning() {
+    let descriptor_path = write_oneof_descriptor();
+    let rendered =
+        add_message_to_string(&[descriptor_path.clone()], "acme.oneof.v1.Mixed", &[]).unwrap();
+    let wit_path = write_temp_wit("planned-scaffolded-oneof", &rendered);
+    let spec =
+        load_api_spec_from_wit_for_language_with_inputs(Language::Python, &[wit_path]).unwrap();
+    let descriptors = DescriptorIndex::load(&descriptor_path).unwrap();
+
+    generate_source(
+        Language::Python,
+        spec,
+        &descriptors,
+        &SupportFiles::default(),
+    )
+    .unwrap();
 }
 
 #[test]

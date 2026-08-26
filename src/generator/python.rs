@@ -20,10 +20,10 @@ use crate::planning::{
 use crate::planning::{RequestPlan, ResolvedResourceBindingSource};
 use crate::spec::{ApiSpecBranch, ApiSpecNode};
 use crate::spec::{
-    EnumSpec, ExternalTypeSpec, FlagsSpec, FunctionArgsSpec, FunctionFieldSpec, FunctionResultSpec,
-    LanguageImportSpec, LanguageImportStyle, LanguageStringSpec, ModulePath, OperationSpec,
-    RecordFieldSpec, RecordFieldVisibility, RecordSpec, SupportFragmentSpec, TypeDeclSpec,
-    TypeReplacementSpec, TypeSpec, VariantSpec,
+    EnumSpec, ExternalSourceSpec, ExternalTypeSpec, FlagsSpec, FunctionArgsSpec, FunctionFieldSpec,
+    FunctionResultSpec, LanguageImportSpec, LanguageImportStyle, LanguageStringSpec, ModulePath,
+    OperationSpec, RecordFieldSpec, RecordFieldVisibility, RecordSpec, SupportFragmentSpec,
+    TypeDeclSpec, TypeReplacementSpec, TypeSpec, VariantSpec,
 };
 
 pub(in crate::generator) const GENERATED_HEADER: &str = concat!(
@@ -329,11 +329,10 @@ impl PythonExternalModels {
         let mut fragments = RenderedModelFragments::default();
         fragments.extend(render_record_models(models, api_plan, self)?);
         fragments.extend(self.json.render_models()?);
-        let declared_type_parameters = rendered_type_parameters(&fragments.body);
         fragments.extend(self.proto.render_variant_models(
             api_plan,
             variants,
-            &declared_type_parameters,
+            &fragments.declared_type_parameters,
         ));
         Ok(fragments)
     }
@@ -2188,6 +2187,7 @@ fn render_record_models(
         module_exported_names: BTreeSet::new(),
         generated_names: Vec::new(),
         export_sort_keys: BTreeMap::new(),
+        declared_type_parameters: type_parameters,
         allows_private_wire_access: false,
     })
 }
@@ -2836,6 +2836,7 @@ pub(in crate::generator) struct RenderedModelFragments {
     pub(in crate::generator) module_exported_names: BTreeSet<String>,
     pub(in crate::generator) generated_names: Vec<PythonGeneratedName>,
     pub(in crate::generator) export_sort_keys: BTreeMap<String, (String, usize)>,
+    pub(in crate::generator) declared_type_parameters: BTreeSet<String>,
     pub(in crate::generator) allows_private_wire_access: bool,
 }
 
@@ -2868,16 +2869,9 @@ impl RenderedModelFragments {
             .extend(other.module_exported_names);
         self.generated_names.extend(other.generated_names);
         self.export_sort_keys.extend(other.export_sort_keys);
+        self.declared_type_parameters
+            .extend(other.declared_type_parameters);
     }
-}
-
-fn rendered_type_parameters(body: &str) -> BTreeSet<String> {
-    body.lines()
-        .filter_map(|line| {
-            line.split_once(" = typing.TypeVar(")
-                .map(|(name, _)| name.to_string())
-        })
-        .collect()
 }
 
 pub(crate) fn render_tree_support_files(
@@ -3938,11 +3932,14 @@ fn render_models_module(
         if !body.is_empty() {
             body.push_str("\n\n");
         }
-        let record_type_parameters = rendered_type_parameters(&model_fragments.body);
         let variant_only_type_parameters = variants
             .iter()
             .flat_map(|variant| variant.type_parameters.iter())
-            .filter(|parameter| !record_type_parameters.contains(parameter.as_str()))
+            .filter(|parameter| {
+                !model_fragments
+                    .declared_type_parameters
+                    .contains(parameter.as_str())
+            })
             .cloned()
             .collect::<BTreeSet<_>>();
         for parameter in &variant_only_type_parameters {
@@ -6555,40 +6552,16 @@ fn planned_record_for_external_source<'a>(
     api_plan: &'a PlannedSpec,
     external: &ExternalTypeSpec<PlannedFamily>,
 ) -> Option<&'a RecordSpec<PlannedFamily>> {
+    let ExternalTypeSpec::Proto(external_proto) = external else {
+        return None;
+    };
     api_plan.records().map(|(_, record)| record).find(|record| {
         record
             .source
             .as_ref()
-            .is_some_and(|source| planned_external_sources_match(&source.external_type, external))
+            .and_then(ExternalSourceSpec::proto_type)
+            .is_some_and(|source_proto| source_proto == external_proto)
     })
-}
-
-fn planned_external_sources_match(
-    left: &ExternalTypeSpec<PlannedFamily>,
-    right: &ExternalTypeSpec<PlannedFamily>,
-) -> bool {
-    match (left, right) {
-        (
-            ExternalTypeSpec::Proto(PlannedProtoType::Message(left)),
-            ExternalTypeSpec::Proto(PlannedProtoType::Message(right)),
-        ) => left.proto.full_name == right.proto.full_name,
-        (
-            ExternalTypeSpec::Proto(PlannedProtoType::Enum(left)),
-            ExternalTypeSpec::Proto(PlannedProtoType::Enum(right)),
-        ) => left.proto.full_name == right.proto.full_name,
-        (ExternalTypeSpec::Json(left), ExternalTypeSpec::Json(right)) => {
-            left.full_name == right.full_name
-        }
-        (
-            ExternalTypeSpec::Alias {
-                name: left_name, ..
-            },
-            ExternalTypeSpec::Alias {
-                name: right_name, ..
-            },
-        ) => left_name == right_name,
-        _ => false,
-    }
 }
 
 fn planned_record_type(record: &RecordSpec<PlannedFamily>) -> PlannedType {

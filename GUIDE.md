@@ -1237,6 +1237,8 @@ package nexus:temporal-types@1.0.0;
 **Placement:** Type alias, record, variant, enum, or flags
 **Syntax:** `@nexus.proto "<fully.qualified.proto.MessageName>"`
 
+For variants, use `@nexus.proto "<fully.qualified.proto.MessageName>.<oneof>"`.
+
 Maps a WIT type to a protobuf message or enum. The generator emits
 target-specific transfer-type conversion code and validates field mappings
 against the proto descriptor. Requires `--descriptors` on the CLI.
@@ -1253,13 +1255,14 @@ record activity-options { ... }
 ```
 
 Protobuf `oneof` groups are authored as a single record field whose name
-matches the oneof and whose type is a WIT variant. Each variant case must match
-a protobuf member name (with kebab-case WIT naming) and carry the corresponding
-member value. Use `option<variant>` when the protobuf oneof may be unset, or a
+matches the oneof and whose type is a WIT variant. The variant's directive
+identifies that same message and oneof. Each variant case must match a protobuf
+member name (with kebab-case WIT naming) and carry the corresponding member
+value. Use `option<variant>` when the protobuf oneof may be unset, or a
 required `variant` when an unset value should be rejected during conversion.
 
 ```wit
-/// @nexus.proto "example.v1.Response"
+/// @nexus.proto "example.v1.Response.result"
 variant outcome {
   success(list<u8>),
   failure(string),

@@ -1121,13 +1121,42 @@ fn build_native_source(
             reason: "missing required proto type name".to_string(),
         });
     };
+    let (proto_name, oneof) = if matches!(type_def.kind, TypeDefKind::Variant(_)) {
+        let Some((message_name, oneof)) = proto_name.rsplit_once('.') else {
+            return Err(Error::InvalidWitDirective {
+                path: path.to_path_buf(),
+                context,
+                directive: "@nexus.proto".to_string(),
+                reason: "protobuf variants must identify a oneof as `<message>.<oneof>`"
+                    .to_string(),
+            });
+        };
+        if message_name.is_empty() || oneof.is_empty() {
+            return Err(Error::InvalidWitDirective {
+                path: path.to_path_buf(),
+                context,
+                directive: "@nexus.proto".to_string(),
+                reason: "protobuf variants must identify a oneof as `<message>.<oneof>`"
+                    .to_string(),
+            });
+        }
+        (message_name, Some(oneof.to_string()))
+    } else {
+        (proto_name, None)
+    };
     let mut reference = LanguageStringSpec {
         default: Some(proto_name.to_string()),
         ..Default::default()
     };
     apply_directive_imports(&mut reference, proto_directive);
     Ok(Some(ExternalSourceSpec {
-        external_type: ExternalTypeSpec::Proto(Symbol::new(proto_name.to_string())),
+        target: match oneof {
+            Some(name) => ProtoSourceTarget::Oneof {
+                message: Symbol::new(proto_name.to_string()),
+                name,
+            },
+            None => ProtoSourceTarget::Type(Symbol::new(proto_name.to_string())),
+        },
         reference,
         type_name: directive_prefixed_language_string(proto_directive, "type"),
     }))
@@ -3582,7 +3611,7 @@ mod tests {
     use crate::descriptors::DescriptorIndex;
     use crate::error::Error;
     use crate::language::Language;
-    use crate::spec::{CompilerPass, ExternalSourceSpec, LanguageStringSpec};
+    use crate::spec::{CompilerPass, ExternalSourceSpec, LanguageStringSpec, ProtoSourceTarget};
 
     use super::{
         ApiSpec, AuthoredResourceType, DeclaredTypeName, ExternalTypeSpec, FunctionArgSpec,
@@ -4461,7 +4490,7 @@ interface models {
   /// @nexus.proto "acme.v1.Features"
   flags features { fast }
 
-  /// @nexus.proto "acme.v1.Choice"
+  /// @nexus.proto "acme.v1.Choice.value"
   variant choice { value(string) }
 }
 "#;
@@ -4470,7 +4499,12 @@ interface models {
         assert!(spec.record("models.record-model").unwrap().source.is_some());
         assert!(spec.enum_decl("models.state").unwrap().source.is_some());
         assert!(spec.flags_decl("models.features").unwrap().source.is_some());
-        assert!(spec.variant("models.choice").unwrap().source.is_some());
+        let variant = spec.variant("models.choice").unwrap();
+        assert!(matches!(
+            variant.source.as_ref().map(ExternalSourceSpec::proto_target),
+            Some(ProtoSourceTarget::Oneof { name, .. })
+                if name == "value"
+        ));
         for proto_name in [
             "acme.v1.Record",
             "acme.v1.State",
@@ -4553,7 +4587,7 @@ interface user-service {
                 .source
                 .as_ref(),
             Some(&ExternalSourceSpec {
-                external_type: ExternalTypeSpec::Proto(Symbol::new("acme.users.v1.ProtoRequest")),
+                target: ProtoSourceTarget::Type(Symbol::new("acme.users.v1.ProtoRequest",)),
                 reference: LanguageStringSpec {
                     default: Some("acme.users.v1.ProtoRequest".to_string()),
                     ..Default::default()
