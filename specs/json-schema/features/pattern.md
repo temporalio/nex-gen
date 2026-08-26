@@ -278,6 +278,24 @@ bytes) the decoded value is not a `string`, so the regex matches the
 the encode adapter's re-serialized wire string on serialize, **before
 emit**. Still one predicate, identical in both directions; the wire string
 is projected from the native value on the encode side.
+**Which string, precisely — and it is *not* the incoming one.** "Canonical wire
+string" means the form the encode adapter produces for that value, and the
+assertion measures **that** form at both boundaries. On parse this means the
+predicate runs **after** the value has been parsed and re-canonicalized, not
+against the bytes as they arrived. The distinction is invisible for a format
+with a single spelling and decisive for one without: `PT90M` and `PT1H30M` are
+the same [[format]] `duration`, they canonicalize to `PT1H30M`, and they differ
+in length and in what a regex matches.
+
+Measuring the incoming form on parse and the canonical form on serialize would
+make "identical in both directions" false — a payload could be admitted and then
+be unre-emittable, which is a **P1** accept-set defect, not a rounding of it.
+
+The same rule governs a **literal** ([[const]], [[enum]], [[default]]) on a
+materialized node: the literal is canonicalized first, and the assertion is
+checked against the canonical form. A load-time check that compares the authored
+spelling against the pattern while the emitted constant carries the canonical
+one can both accept an unsatisfiable schema and reject a satisfiable one.
 
 ## Property-testing matrix
 
@@ -372,8 +390,7 @@ The known cross-engine divergences are now all handled — the compile gate
 (lookaround/backref, inline flags, and the narrow `\S`-in-multi-member-class
 case) and **normalize** `\s`/`\S` (→ explicit ASCII class) and `$` (→ per-
 target end-anchor), which is what makes the four runtimes agree
-value-for-value. The **residual risk** is an edge the corpus does not yet cover
-(for example a `\b` word-boundary or `.`-newline corner). Every accepted row the
+value-for-value. The **residual risk** is not `\b` or the `.`-newline corner — both are covered by the corpus (`wordbound-*`, `notwordbound`, `dot-no-newline`, `dot-carriage-return`, `dot-next-line`, `dot-line-separator`, `dot-paragraph-separator`), and `.` is now rewritten to `[^\n]` by rule 4 above. The edges actually open are: **lone-surrogate wire strings**, and any divergence that only appears past the corpus's length ceiling — **no corpus instance exceeds 31 characters**, so an input-length-dependent difference such as a backtracking blow-up on a quantified alternation is structurally invisible to it.`-newline corner). Every accepted row the
 corpus does contain is executed in all four current runtimes; every rejected
 row is rechecked by the Rust loader gate. New acceptance edges belong in that
 corpus before the gate is widened.

@@ -51,8 +51,20 @@ into one coherent, satisfiable schema; it rejects an `allOf` whose branches
 contradict or cannot be represented as a single type.
 
 Concretely, `allOf` is a rewrite that runs after a raw branch-grammar gate and
-before the ordinary post-merge keyword lowering. Checks that merging could
-discard or override run in that raw gate. Its own merge logic is narrow:
+before the ordinary post-merge keyword lowering. The raw gate owns exactly the
+checks a merge could **silently discard** and that are decidable on one branch
+alone: keyword allowlists, raw value shapes (`required` grammar,
+`dependentRequired` grammar, raw property counts, same-axis redundancy), and
+per-branch malformations no merge can repair.
+
+**Naming and satisfiability checks are *not* in that gate.** A P15
+identifier-collision or value-constant encodability check is a property of the
+*merged* result — a branch may declare `enum: [user, USER]` that the merge
+intersects away — so running it per authored branch over-rejects schemas whose
+merged form is clean. Those belong to step 3 below, and the delegation in the
+"Hand back" bullet and in *Interactions* is normative for them.
+
+The merge logic itself is narrow:
 
 1. **Flatten** — recursively inline nested `allOf`, resolve `$ref`
    branches (below), and drop identity branches (`true`/`{}`).

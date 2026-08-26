@@ -187,6 +187,41 @@ sibling keyword recognized for that `type`:
 ]}
 ```
 
+### Which node owns a keyword — the wrapper or the branch
+
+The wrapper is a `oneOf`, so [[oneOf]]'s sibling rule governs it, and this spec
+fixes the one case [[oneOf]] leaves open. **Constraints belong on the non-null
+branch; `default` belongs on the wrapper.** Precisely:
+
+* **Every shape and constraint keyword** — `type`, [[format]],
+  [[contentEncoding]], [[const]]/[[enum]], [[pattern]], the string, numeric,
+  array and object bounds — is authored **on the non-null branch**. On the
+  wrapper it is a load reject, with a fix-it naming the branch. A wrapper-level
+  `const`/`enum` is the shape that currently produces four mutually incompatible
+  runtimes — Go and Java drop the closed check, Python emits a `Literal`
+  annotation it never enforces, and TypeScript enforces membership while losing
+  the `null` branch entirely, so it rejects a wire `null` the other three
+  accept — which is a **P1** accept-set divergence, not a cosmetic difference.
+
+* **[[default]] is authored on the wrapper**, never on a branch. The loader
+  pushes a wrapper default down into the resolved non-null branch and validates
+  it there against that branch's `type`, `enum`, `format` and
+  `contentEncoding`; that push-down is the specified behaviour. A `default` on a
+  **branch** is a load reject. Two reasons: all four backends silently discard
+  it, and — because the presence check reads the property node's keyword map,
+  which for a nullable member is the wrapper — a branch default also slips
+  [[default]]'s mandated "`default` on a **required** member → reject", which
+  the wrapper spelling correctly enforces.
+
+  A consequence for emitters, stated because it has been got wrong: the type a
+  wrapper `default` is lowered against is the **branch's**, not the wrapper's.
+  The wrapper carries no scalar `type`, so inferring one from the default
+  literal produces a value of the wrong type — an integral default under a
+  `number` branch must lower as the branch's floating-point type.
+
+* **Annotations and `x-<lang>-name`** may sit on either node and mean what
+  [[oneOf]] says they mean there.
+
 This two-branch form is the **degenerate type-token case** of the general
 `oneOf` rule (the `null` token is the selector); [[oneOf]] owns the
 general treatment, and this doc owns this specific shape.

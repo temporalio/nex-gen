@@ -173,11 +173,9 @@ public final class UserEventKind {
     @JsonCreator                              // standalone / interop decode
     public static UserEventKind fromString(String v) {
         if (v == null) return null;
-        return switch (v) {
-            case "user" -> USER;
-            default -> throw new IllegalArgumentException(
-                "must equal \"user\", got \"" + v + "\"");
-        };
+        if ("user".equals(v)) return USER;
+        throw new IllegalArgumentException(
+            "must equal \"user\", got \"" + v + "\"");
     }
     @JsonValue public String getValue() { return value; }
     // equals/hashCode/toString by value (omitted)

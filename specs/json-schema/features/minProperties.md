@@ -42,6 +42,34 @@ Loader behavior:
   ever have — i.e. a closed object ([[additionalProperties]] `false`)
   with fewer declared [[properties]] than `minProperties` → reject
   (unsatisfiable). Diagnostic names the gap.
+- **The count keywords own reconciliation against every keyword that bounds
+  the key space**, not only the closed-object case above. A `minProperties`
+  above the largest inhabitable key count is a load reject whatever imposes the
+  ceiling — including a [[propertyNames]] whose key language is finite (an
+  `enum`, or a `maxLength: 0`), which closes the key space to a countable set
+  exactly as a declared member list does. The mirror duty for the upper bound,
+  including [[dependentRequired]]'s forced closure, is in [[maxProperties]].
+  This duty sits with the count keywords because the count is what makes the
+  combination decidable; the bounding keyword's own spec need not restate it.
+
+**Which object is counted, in both directions.** The count is always over the
+**wire object at the boundary being validated** — on parse the raw decoded
+object, on serialize the object the encoder is about to emit. It is never the
+count of non-`null` in-memory fields. This keeps the keyword a wire contract
+under **P1** and satisfies **P12**'s "identical in both directions": the same
+predicate over the same *kind* of operand at each boundary.
+
+One consequence must be stated rather than discovered. Under P1's
+optional+nullable collapse an explicit `null` for an optional nullable member
+reads back as absent, so `{"a": null}` is a **one-key** object inbound and a
+**zero-key** object outbound. A schema with a count floor therefore accepts that
+payload on parse and rejects the model it just produced on re-serialize. That is
+a real consequence of the collapse, not an implementation defect, and it is the
+reason a count bound and an optional nullable member are a poor combination:
+authors who need the floor should make the member required, or non-nullable, or
+drop the bound. An implementation must not "fix" the asymmetry by counting
+in-memory fields on one side — that would make the keyword mean two different
+things and break the wire contract.
 
 ## Type mapping
 
