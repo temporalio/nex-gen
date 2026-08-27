@@ -65,7 +65,8 @@ def test_closed_items_precede_array_level_violations() -> None:
     assert violation_pairs(parsed.value) == expected
 
     with pytest.raises(temporalio.exceptions.ApplicationError) as serialized:
-        converter.to_transfer_type(ItemRules(values=["bad", "bad"]))
+        invalid_values = typing.cast(list[typing.Literal["fixed"]], ["bad", "bad"])
+        converter.to_transfer_type(ItemRules(values=invalid_values))
     assert violation_pairs(serialized.value) == expected
 
 
