@@ -13,6 +13,7 @@ from showcase import (
     Circle,
     ContactPy,
     Extras,
+    ItemRules,
     Labels,
     LinkNote,
     Metrics,
@@ -49,6 +50,23 @@ def test_validation_types_are_exported_from_the_package() -> None:
         non_retryable=True,
     )
     assert violation_pairs(error) == [("name", "required")]
+
+
+def test_closed_items_precede_array_level_violations() -> None:
+    expected = [
+        ("values[0]", 'must equal "fixed"'),
+        ("values[1]", 'must equal "fixed"'),
+        ("values", "must have at least 3 items, got 2"),
+        ("values", "duplicate items: element at index 1 equals index 0"),
+    ]
+    converter = converter_for(ItemRules)
+    with pytest.raises(temporalio.exceptions.ApplicationError) as parsed:
+        converter.from_transfer_type({"values": ["bad", "bad"]}, ItemRules)
+    assert violation_pairs(parsed.value) == expected
+
+    with pytest.raises(temporalio.exceptions.ApplicationError) as serialized:
+        converter.to_transfer_type(ItemRules(values=["bad", "bad"]))
+    assert violation_pairs(serialized.value) == expected
 
 
 # The ten required members of Showcase; every negative payload starts here so the

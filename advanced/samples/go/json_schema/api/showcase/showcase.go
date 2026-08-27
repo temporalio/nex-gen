@@ -319,12 +319,12 @@ func (ShowcaseAddressListOrLabelArray) isShowcaseAddressListOrLabel() {}
 // listing any violations.
 func (v ShowcaseAddressListOrLabelArray) Validate() error {
 	var errs []Violation
-	if n := len([]Address(v)); n < 1 {
-		errs = append(errs, Violation{"", fmt.Sprintf("must have at least 1 items, got %d", n)})
-	}
 	for i0, v0 := range []Address(v) {
 		p0 := fmt.Sprintf("%s[%d]", "", i0)
 		mergeNested(&errs, p0, v0.Validate())
+	}
+	if n := len([]Address(v)); n < 1 {
+		errs = append(errs, Violation{"", fmt.Sprintf("must have at least 1 items, got %d", n)})
 	}
 	if len(errs) > 0 {
 		return newPayloadValidationError(errs)
@@ -378,20 +378,20 @@ func unmarshalShowcaseAddressListOrLabel(raw json.RawMessage, path string, errs 
 					arr = append(arr, value0)
 				}
 			}
+			{
+				unionErrs := errs
+				errs := *unionErrs
+				for i0, v0 := range arr {
+					p0 := fmt.Sprintf("%s[%d]", path, i0)
+					mergeNested(&errs, p0, v0.Validate())
+				}
+				*unionErrs = errs
+			}
 			if n := len(elems0); n < 1 {
 				*errs = append(*errs, Violation{path, fmt.Sprintf("must have at least 1 items, got %d", n)})
 			}
 		}
 		v := ShowcaseAddressListOrLabelArray(arr)
-		{
-			unionErrs := errs
-			errs := *unionErrs
-			for i0, v0 := range arr {
-				p0 := fmt.Sprintf("%s[%d]", path, i0)
-				mergeNested(&errs, p0, v0.Validate())
-			}
-			*unionErrs = errs
-		}
 		return v, true
 	case '"':
 		var s string
@@ -553,6 +553,12 @@ func (ShowcaseMeasurementsArray) isShowcaseMeasurements() {}
 // listing any violations.
 func (v ShowcaseMeasurementsArray) Validate() error {
 	var errs []Violation
+	for i0, v0 := range []float64(v) {
+		p0 := fmt.Sprintf("%s[%d]", "", i0)
+		if math.IsNaN(v0) || math.IsInf(v0, 0) {
+			errs = append(errs, Violation{p0, fmt.Sprintf("must be a finite number, got %v", v0)})
+		}
+	}
 	if n := len([]float64(v)); n < 1 {
 		errs = append(errs, Violation{"", fmt.Sprintf("must have at least 1 items, got %d", n)})
 	}
@@ -564,12 +570,6 @@ func (v ShowcaseMeasurementsArray) Validate() error {
 			} else {
 				seen[e] = i
 			}
-		}
-	}
-	for i0, v0 := range []float64(v) {
-		p0 := fmt.Sprintf("%s[%d]", "", i0)
-		if math.IsNaN(v0) || math.IsInf(v0, 0) {
-			errs = append(errs, Violation{p0, fmt.Sprintf("must be a finite number, got %v", v0)})
 		}
 	}
 	if len(errs) > 0 {
@@ -623,6 +623,17 @@ func unmarshalShowcaseMeasurements(raw json.RawMessage, path string, errs *[]Vio
 					arr = append(arr, value0)
 				}
 			}
+			{
+				unionErrs := errs
+				errs := *unionErrs
+				for i0, v0 := range arr {
+					p0 := fmt.Sprintf("%s[%d]", path, i0)
+					if math.IsNaN(v0) || math.IsInf(v0, 0) {
+						errs = append(errs, Violation{p0, fmt.Sprintf("must be a finite number, got %v", v0)})
+					}
+				}
+				*unionErrs = errs
+			}
 			if n := len(elems0); n < 1 {
 				*errs = append(*errs, Violation{path, fmt.Sprintf("must have at least 1 items, got %d", n)})
 			}
@@ -647,17 +658,6 @@ func unmarshalShowcaseMeasurements(raw json.RawMessage, path string, errs *[]Vio
 			}
 		}
 		v := ShowcaseMeasurementsArray(arr)
-		{
-			unionErrs := errs
-			errs := *unionErrs
-			for i0, v0 := range arr {
-				p0 := fmt.Sprintf("%s[%d]", path, i0)
-				if math.IsNaN(v0) || math.IsInf(v0, 0) {
-					errs = append(errs, Violation{p0, fmt.Sprintf("must be a finite number, got %v", v0)})
-				}
-			}
-			*unionErrs = errs
-		}
 		return v, true
 	case '"':
 		var s string
@@ -2123,6 +2123,134 @@ func (m Extras) MarshalJSON() ([]byte, error) {
 	return json.Marshal(out)
 }
 
+// ItemRules Closed array elements are enforced before the array-level predicates, so
+// indexed violations precede minItems and uniqueItems deterministically.
+type ItemRules struct {
+	// Values corresponds to the "values" JSON property.
+	Values []string `json:"values"`
+}
+
+// Validate checks m against every constraint and returns a PayloadValidationError
+// listing any violations.
+func (m ItemRules) Validate() error {
+	var errs []Violation
+	for i0, v0 := range m.Values {
+		p0 := fmt.Sprintf("%s[%d]", "values", i0)
+		if v0 != "fixed" {
+			errs = append(errs, Violation{p0, "must equal \"fixed\""})
+		}
+	}
+	if n := len(m.Values); n < 3 {
+		errs = append(errs, Violation{"values", fmt.Sprintf("must have at least 3 items, got %d", n)})
+	}
+	{
+		seen := make(map[string]int, len(m.Values))
+		for i, e := range m.Values {
+			if j, ok := seen[e]; ok {
+				errs = append(errs, Violation{"values", fmt.Sprintf("duplicate items: element at index %d equals index %d", i, j)})
+			} else {
+				seen[e] = i
+			}
+		}
+	}
+	if len(errs) > 0 {
+		return newPayloadValidationError(errs)
+	}
+	return nil
+}
+
+// UnmarshalJSON parses data into m and validates it, returning a
+// PayloadValidationError listing any violations.
+func (m *ItemRules) UnmarshalJSON(data []byte) error {
+	var all map[string]json.RawMessage
+	if err := json.Unmarshal(data, &all); err != nil {
+		return err
+	}
+	var errs []Violation
+	for k := range all {
+		switch k {
+		case "values":
+		default:
+			errs = append(errs, Violation{memberPath(k), "unknown field"})
+		}
+	}
+	get := func(k string) *json.RawMessage {
+		if v, ok := all[k]; ok {
+			return &v
+		}
+		return nil
+	}
+	_ = get
+	if raw := get("values"); raw == nil {
+		errs = append(errs, Violation{"values", "required"})
+	} else if isNull(*raw) {
+		errs = append(errs, Violation{"values", "explicit null not allowed"})
+	} else {
+		var elems0 []json.RawMessage
+		if err := json.Unmarshal(*raw, &elems0); err != nil {
+			errs = append(errs, Violation{"values", "expected array"})
+		} else {
+			m.Values = make([]string, 0, len(elems0))
+			for i0, e0 := range elems0 {
+				p0 := fmt.Sprintf("%s[%d]", "values", i0)
+				if isNull(e0) {
+					errs = append(errs, Violation{p0, "explicit null not allowed"})
+					continue
+				}
+				if value0, ok := parseStringField(&e0, p0, true, false, &errs); ok {
+					if value0 != "fixed" {
+						errs = append(errs, Violation{p0, "must equal \"fixed\""})
+					}
+					m.Values = append(m.Values, value0)
+				}
+			}
+			if n := len(elems0); n < 3 {
+				errs = append(errs, Violation{"values", fmt.Sprintf("must have at least 3 items, got %d", n)})
+			}
+			{
+				rawSeen0 := make(map[string]int, len(elems0))
+				for rawIndex0, rawElement0 := range elems0 {
+					var rawValue0 any
+					if err := json.Unmarshal(rawElement0, &rawValue0); err != nil {
+						continue
+					}
+					if rawNumber0, ok := rawValue0.(float64); ok && rawNumber0 == 0 {
+						rawValue0 = float64(0)
+					}
+					rawKeyBytes0, _ := json.Marshal(rawValue0)
+					rawKey0 := string(rawKeyBytes0)
+					if priorIndex0, ok := rawSeen0[rawKey0]; ok {
+						errs = append(errs, Violation{"values", fmt.Sprintf("duplicate items: element at index %d equals index %d", rawIndex0, priorIndex0)})
+					} else {
+						rawSeen0[rawKey0] = rawIndex0
+					}
+				}
+			}
+		}
+	}
+	if len(errs) > 0 {
+		return newPayloadValidationError(errs)
+	}
+	return nil
+}
+
+// MarshalJSON validates m, then serializes it to JSON, returning a
+// PayloadValidationError if validation fails.
+func (m ItemRules) MarshalJSON() ([]byte, error) {
+	var errs []Violation
+	addViolations(&errs, m.Validate())
+	out := map[string]json.RawMessage{}
+	if m.Values == nil {
+		out["values"] = json.RawMessage("[]")
+	} else {
+		marshalField(out, "values", m.Values, &errs)
+	}
+	if len(errs) > 0 {
+		return nil, newPayloadValidationError(errs)
+	}
+	return json.Marshal(out)
+}
+
 // Labels Arbitrary string key/value labels (typed map).
 type Labels struct {
 	// AdditionalProperties holds every member of this map-shaped object.
@@ -3226,6 +3354,12 @@ func (m Showcase) Validate() error {
 			errs = append(errs, Violation{"nullableMode", fmt.Sprintf("must be one of [\"auto\",\"manual\"], got %q", (*m.NullableMode))})
 		}
 	}
+	for i0, v0 := range m.IntegralMeasurements {
+		p0 := fmt.Sprintf("%s[%d]", "integralMeasurements", i0)
+		if math.IsNaN(v0) || math.IsInf(v0, 0) {
+			errs = append(errs, Violation{p0, fmt.Sprintf("must be a finite number, got %v", v0)})
+		}
+	}
 	if m.IntegralMeasurements != nil {
 		{
 			matchCount := 0
@@ -3237,12 +3371,6 @@ func (m Showcase) Validate() error {
 			if matchCount < 1 {
 				errs = append(errs, Violation{"integralMeasurements", "no element matches the required schema"})
 			}
-		}
-	}
-	for i0, v0 := range m.IntegralMeasurements {
-		p0 := fmt.Sprintf("%s[%d]", "integralMeasurements", i0)
-		if math.IsNaN(v0) || math.IsInf(v0, 0) {
-			errs = append(errs, Violation{p0, fmt.Sprintf("must be a finite number, got %v", v0)})
 		}
 	}
 	if m.ByFive != nil {

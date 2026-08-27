@@ -168,7 +168,6 @@ properties:
     enum: [true]
 additionalProperties:
   $ref: "#/$defs/Extra"
-minProperties: 1
 $defs:
   Extra:
     type: object

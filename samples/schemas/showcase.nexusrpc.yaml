@@ -663,6 +663,19 @@ $defs:
     description: A typed map of materialized base64 byte strings.
     type: object
     additionalProperties: { type: string, contentEncoding: base64 }
+  ItemRules:
+    description: >-
+      Closed array elements are enforced before the array-level predicates, so
+      indexed violations precede minItems and uniqueItems deterministically.
+    type: object
+    additionalProperties: false
+    required: [values]
+    properties:
+      values:
+        type: array
+        minItems: 3
+        uniqueItems: true
+        items: { type: string, const: fixed }
   Metrics:
     description: A typed map of finite numbers.
     type: object

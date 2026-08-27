@@ -132,7 +132,6 @@ title: Java conformance
 description: Mixed declared and typed catch-all object.
 deprecated: true
 type: object
-minProperties: 1
 maxProperties: 4
 properties:
   id:

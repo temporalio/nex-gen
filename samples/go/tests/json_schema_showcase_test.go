@@ -3,6 +3,7 @@ package tests
 import (
 	"encoding/json"
 	"math"
+	"strings"
 	"testing"
 
 	showcase "samples/go/showcase"
@@ -83,6 +84,25 @@ func TestJSONSchemaShowcaseRuntime(t *testing.T) {
 	settings := roundTripJSONEq[showcase.Settings](t, dc, "showcase", "settings.json")
 	require.NotNil(t, settings.Theme)
 	require.Equal(t, "dark", *settings.Theme)
+}
+
+func TestJSONSchemaClosedItemsPrecedeArrayViolations(t *testing.T) {
+	assertOrder := func(err error) {
+		t.Helper()
+		text := validationText(err)
+		parts := []string{"values[0]", "values[1]", "must have at least 3 items", "duplicate items"}
+		prior := -1
+		for _, part := range parts {
+			index := strings.Index(text, part)
+			require.Greater(t, index, prior, text)
+			prior = index
+		}
+	}
+
+	var parsed showcase.ItemRules
+	assertOrder(json.Unmarshal([]byte(`{"values":["bad","bad"]}`), &parsed))
+	_, err := json.Marshal(showcase.ItemRules{Values: []string{"bad", "bad"}})
+	assertOrder(err)
 }
 
 // TestJSONSchemaShowcaseNumericConstraints round-trips the numeric-constrained

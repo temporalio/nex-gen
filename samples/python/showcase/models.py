@@ -955,6 +955,131 @@ class Extras:
     )
 
 
+class _ItemRulesTransferTypeConverter(
+    temporalio.converter.TransferTypeConverter["ItemRules", typing.Any]
+):
+    @typing_extensions.override
+    def from_transfer_type(
+        self, value: typing.Any, type_hint: type["ItemRules"]
+    ) -> "ItemRules":
+        violations: list[Violation] = []
+        if not isinstance(value, dict):
+            raise temporalio.converter.create_payload_validation_error(
+                [Violation(path="", reason="expected object")]
+            )
+        raw = typing.cast("dict[str, typing.Any]", value)
+
+        values_value: list[typing.Literal["fixed"]] = typing.cast("typing.Any", None)
+        if "values" not in raw or raw["values"] is None:
+            violations.append(Violation(path="values", reason="required"))
+        else:
+            values_value_raw = raw["values"]
+            if not isinstance(values_value_raw, list):
+                violations.append(Violation(path="values", reason="expected array"))
+            else:
+                values_value_list: list[typing.Literal["fixed"]] = []
+                for values_value_index, values_value_element in enumerate(
+                    typing.cast("list[typing.Any]", values_value_raw)
+                ):
+                    values_value_item_path = f"values[{values_value_index}]"
+                    values_value_item_violation_count = len(violations)
+                    values_value_item: typing.Literal["fixed"] = typing.cast(
+                        "typing.Any", None
+                    )
+                    if not isinstance(values_value_element, str):
+                        violations.append(
+                            Violation(
+                                path=values_value_item_path, reason="expected string"
+                            )
+                        )
+                    elif values_value_element not in ("fixed",):
+                        violations.append(
+                            Violation(
+                                path=values_value_item_path, reason='must equal "fixed"'
+                            )
+                        )
+                    else:
+                        values_value_item = values_value_element
+                    if len(violations) == values_value_item_violation_count:
+                        values_value_list.append(values_value_item)
+                if len(typing.cast("list[typing.Any]", values_value_raw)) < 3:
+                    violations.append(
+                        Violation(
+                            path="values",
+                            reason=f"must have at least 3 items, got {len(typing.cast('list[typing.Any]', values_value_raw))}",
+                        )
+                    )
+                _check_unique_items(
+                    typing.cast("list[typing.Any]", values_value_raw),
+                    "values",
+                    violations,
+                )
+                values_value = values_value_list
+
+        for key in raw:
+            if key != "values":
+                violations.append(
+                    Violation(path=_member_path(key), reason="unknown field")
+                )
+        if violations:
+            raise temporalio.converter.create_payload_validation_error(violations)
+        return ItemRules(
+            values=values_value,
+        )
+
+    @typing_extensions.override
+    def to_transfer_type(self, value: "ItemRules") -> typing.Any:
+        if not isinstance(value, ItemRules):
+            raise temporalio.converter.create_payload_validation_error(
+                [Violation(path="", reason="expected object")]
+            )
+        violations: list[Violation] = []
+        out: dict[str, typing.Any] = {}
+        if value.values is None:
+            violations.append(Violation(path="values", reason="required"))
+        else:
+            if not (isinstance(value.values, list)):
+                violations.append(Violation(path="values", reason="expected array"))
+            else:
+                for item_index_8, item_element_8 in enumerate(value.values):
+                    if not (isinstance(item_element_8, str)):
+                        violations.append(
+                            Violation(
+                                path=f"values[{item_index_8}]", reason="expected string"
+                            )
+                        )
+                    else:
+                        if typing.cast("object", item_element_8) not in ("fixed",):
+                            violations.append(
+                                Violation(
+                                    path=f"values[{item_index_8}]",
+                                    reason='must equal "fixed"',
+                                )
+                            )
+                if len(value.values) < 3:
+                    violations.append(
+                        Violation(
+                            path="values",
+                            reason=f"must have at least 3 items, got {len(value.values)}",
+                        )
+                    )
+                _check_unique_items(value.values, "values", violations)
+            out["values"] = value.values
+        if violations:
+            raise temporalio.converter.create_payload_validation_error(violations)
+        return out
+
+
+@_transfer_type_convertible(_ItemRulesTransferTypeConverter)
+@dataclasses.dataclass(slots=True, kw_only=True)
+class ItemRules:
+    """Closed array elements are enforced before the array-level predicates, so indexed
+    violations precede minItems and uniqueItems deterministically.
+    """
+
+    values: list[typing.Literal["fixed"]]
+
+
 class _LabelsTransferTypeConverter(
     temporalio.converter.TransferTypeConverter["Labels", typing.Any]
 ):
@@ -4059,6 +4184,13 @@ class _ShowcaseTransferTypeConverter(
             if not (isinstance(value.tags, list)):
                 violations.append(Violation(path="tags", reason="expected array"))
             else:
+                for item_index_8, item_element_8 in enumerate(value.tags):
+                    if not (isinstance(item_element_8, str)):
+                        violations.append(
+                            Violation(
+                                path=f"tags[{item_index_8}]", reason="expected string"
+                            )
+                        )
                 if len(value.tags) < 1:
                     violations.append(
                         Violation(
@@ -4073,19 +4205,11 @@ class _ShowcaseTransferTypeConverter(
                             reason=f"must have at most 5 items, got {len(value.tags)}",
                         )
                     )
-                for item_index_8, item_element_8 in enumerate(value.tags):
-                    if not (isinstance(item_element_8, str)):
-                        violations.append(
-                            Violation(
-                                path=f"tags[{item_index_8}]", reason="expected string"
-                            )
-                        )
             out["tags"] = value.tags
         if value.aliases is not None:
             if not (isinstance(value.aliases, list)):
                 violations.append(Violation(path="aliases", reason="expected array"))
             else:
-                _check_unique_items(value.aliases, "aliases", violations)
                 for item_index_8, item_element_8 in enumerate(value.aliases):
                     if not (isinstance(item_element_8, str)):
                         violations.append(
@@ -4094,11 +4218,19 @@ class _ShowcaseTransferTypeConverter(
                                 reason="expected string",
                             )
                         )
+                _check_unique_items(value.aliases, "aliases", violations)
             out["aliases"] = value.aliases
         if value.roles is not None:
             if not (isinstance(value.roles, list)):
                 violations.append(Violation(path="roles", reason="expected array"))
             else:
+                for item_index_8, item_element_8 in enumerate(value.roles):
+                    if not (isinstance(item_element_8, str)):
+                        violations.append(
+                            Violation(
+                                path=f"roles[{item_index_8}]", reason="expected string"
+                            )
+                        )
                 _check_contains(
                     value.roles,
                     lambda element: (
@@ -4111,13 +4243,6 @@ class _ShowcaseTransferTypeConverter(
                     "roles",
                     violations,
                 )
-                for item_index_8, item_element_8 in enumerate(value.roles):
-                    if not (isinstance(item_element_8, str)):
-                        violations.append(
-                            Violation(
-                                path=f"roles[{item_index_8}]", reason="expected string"
-                            )
-                        )
             out["roles"] = value.roles
         if value.id_or_name is not None:
             if isinstance(value.id_or_name, str):
@@ -4252,14 +4377,6 @@ class _ShowcaseTransferTypeConverter(
                         Violation(path="measurements", reason="expected array")
                     )
                 else:
-                    if len(value.measurements) < 1:
-                        violations.append(
-                            Violation(
-                                path="measurements",
-                                reason=f"must have at least 1 items, got {len(value.measurements)}",
-                            )
-                        )
-                    _check_unique_items(value.measurements, "measurements", violations)
                     for item_index_12, item_element_12 in enumerate(value.measurements):
                         if not (
                             not isinstance(item_element_12, bool)
@@ -4283,6 +4400,14 @@ class _ShowcaseTransferTypeConverter(
                                         reason=f"must be a finite number, got {item_element_12}",
                                     )
                                 )
+                    if len(value.measurements) < 1:
+                        violations.append(
+                            Violation(
+                                path="measurements",
+                                reason=f"must have at least 1 items, got {len(value.measurements)}",
+                            )
+                        )
+                    _check_unique_items(value.measurements, "measurements", violations)
             if isinstance(value.measurements, str):
                 if not (isinstance(value.measurements, str)):
                     violations.append(
@@ -4879,14 +5004,6 @@ class _ShowcaseTransferTypeConverter(
                     Violation(path="nullableTags", reason="expected array")
                 )
             else:
-                if len(value.nullable_tags) < 1:
-                    violations.append(
-                        Violation(
-                            path="nullableTags",
-                            reason=f"must have at least 1 items, got {len(value.nullable_tags)}",
-                        )
-                    )
-                _check_unique_items(value.nullable_tags, "nullableTags", violations)
                 for item_index_8, item_element_8 in enumerate(value.nullable_tags):
                     if not (isinstance(item_element_8, str)):
                         violations.append(
@@ -4895,6 +5012,14 @@ class _ShowcaseTransferTypeConverter(
                                 reason="expected string",
                             )
                         )
+                if len(value.nullable_tags) < 1:
+                    violations.append(
+                        Violation(
+                            path="nullableTags",
+                            reason=f"must have at least 1 items, got {len(value.nullable_tags)}",
+                        )
+                    )
+                _check_unique_items(value.nullable_tags, "nullableTags", violations)
             out["nullableTags"] = value.nullable_tags
         if value.nullable_mode is not None:
             if not (isinstance(value.nullable_mode, str)):
@@ -4917,20 +5042,6 @@ class _ShowcaseTransferTypeConverter(
                     Violation(path="integralMeasurements", reason="expected array")
                 )
             else:
-                _check_contains(
-                    value.integral_measurements,
-                    lambda element: (
-                        not isinstance(element, bool)
-                        and isinstance(element, (int, float))
-                        and abs(element) <= 9007199254740991
-                        and float(element).is_integer()
-                    ),
-                    1,
-                    None,
-                    False,
-                    "integralMeasurements",
-                    violations,
-                )
                 for item_index_8, item_element_8 in enumerate(
                     value.integral_measurements
                 ):
@@ -4956,6 +5067,20 @@ class _ShowcaseTransferTypeConverter(
                                     reason=f"must be a finite number, got {item_element_8}",
                                 )
                             )
+                _check_contains(
+                    value.integral_measurements,
+                    lambda element: (
+                        not isinstance(element, bool)
+                        and isinstance(element, (int, float))
+                        and abs(element) <= 9007199254740991
+                        and float(element).is_integer()
+                    ),
+                    1,
+                    None,
+                    False,
+                    "integralMeasurements",
+                    violations,
+                )
             if len(violations) == integral_measurements_violation_count:
                 out["integralMeasurements"] = [
                     _binary64(element) for element in value.integral_measurements

@@ -438,17 +438,6 @@ fn render_java_recursive_value_checks(
         }
         JavaType::List(element_ty) => {
             let constraints = ArrayConstraints::from_schema(schema);
-            if !constraints.is_empty() {
-                render_java_array_checks(
-                    output,
-                    value_expr,
-                    path_expr,
-                    element_ty,
-                    &constraints,
-                    None,
-                    indent,
-                );
-            }
             if let Some(item_schema) = element_shape(schema) {
                 let item_nullable = schema.items.as_deref().is_some_and(allows_null);
                 let index = format!("validationIndex{depth}");
@@ -476,6 +465,17 @@ fn render_java_recursive_value_checks(
                     depth + 1,
                 );
                 output.push_str(&format!("{indent}    }}\n{indent}}}\n"));
+            }
+            if !constraints.is_empty() {
+                render_java_array_checks(
+                    output,
+                    value_expr,
+                    path_expr,
+                    element_ty,
+                    &constraints,
+                    None,
+                    indent,
+                );
             }
         }
         JavaType::Ref { .. } | JavaType::Union { .. } | JavaType::ClosedValue { .. } => {}
@@ -3607,17 +3607,6 @@ fn render_java_serialize_field_check(output: &mut String, field: &FieldPlan, ind
                 &inner,
             ),
             JavaType::List(element_ty) => {
-                if !field.array.is_empty() {
-                    render_java_array_checks(
-                        &mut body,
-                        &accessor,
-                        &json,
-                        element_ty,
-                        &field.array,
-                        Some(&field.java_name),
-                        &inner,
-                    );
-                }
                 if let Some(item_schema) = element_shape(&field.schema) {
                     let item_nullable = field.schema.items.as_deref().is_some_and(allows_null);
                     let index = "validationIndex0";
@@ -3645,6 +3634,17 @@ fn render_java_serialize_field_check(output: &mut String, field: &FieldPlan, ind
                         1,
                     );
                     body.push_str(&format!("{inner}    }}\n{inner}}}\n"));
+                }
+                if !field.array.is_empty() {
+                    render_java_array_checks(
+                        &mut body,
+                        &accessor,
+                        &json,
+                        element_ty,
+                        &field.array,
+                        Some(&field.java_name),
+                        &inner,
+                    );
                 }
             }
             JavaType::Temporal(kind)
@@ -5344,17 +5344,6 @@ fn render_java_member_checks(
         Some("array") => {
             let constraints = ArrayConstraints::from_schema(member);
             if let JavaType::List(element) = ty {
-                if !constraints.is_empty() {
-                    render_java_array_checks(
-                        output,
-                        value_expr,
-                        key_expr,
-                        element,
-                        &constraints,
-                        Some(position),
-                        indent,
-                    );
-                }
                 if let Some(item_schema) = element_shape(member)
                     && schema_has_recursive_value_checks(item_schema)
                 {
@@ -5375,6 +5364,17 @@ fn render_java_member_checks(
                         1,
                     );
                     output.push_str(&format!("{indent}    }}\n{indent}}}\n"));
+                }
+                if !constraints.is_empty() {
+                    render_java_array_checks(
+                        output,
+                        value_expr,
+                        key_expr,
+                        element,
+                        &constraints,
+                        Some(position),
+                        indent,
+                    );
                 }
             }
         }
