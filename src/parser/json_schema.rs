@@ -10,7 +10,7 @@ use serde_json::Value;
 use crate::error::{Error, Result};
 // The P15 collision pass names every synthesized identifier through the emitter's
 // own naming helpers, so the load-time check cannot drift from what is emitted.
-use crate::generator::json_schema::{go, java, python, typescript};
+use crate::generator::json_schema::{java, python, typescript};
 use crate::language::Language;
 use crate::spec::{
     ApiSpec, ExternalTypeBindingSpec, ExternalTypeSpec, JsonModelBindingSpec, JsonModelSpec,
@@ -9341,7 +9341,6 @@ fn collect_synthesized_top_level(
             top,
         )?;
     }
-    collect_go_constraint_vars(model_full_name, type_ident, schema, top)?;
     let Some(properties) = &schema.properties else {
         return Ok(());
     };
@@ -9626,13 +9625,6 @@ fn collect_go_union_top_level(
             format!("{union_ident}{suffix}"),
             format!("{origin} `{suffix}` variant wrapper"),
         )?;
-        collect_go_string_constraint_vars(
-            origin,
-            &format!("{union_ident}{suffix}"),
-            "",
-            branch,
-            top,
-        )?;
     }
     // The dispatcher is package-scoped too. It is lower-camel, so it can only
     // ever coincide with another union's dispatcher — but registering it keeps
@@ -9643,171 +9635,6 @@ fn collect_go_union_top_level(
         format!("unmarshal{union_ident}"),
         format!("{origin} dispatch function"),
     )?;
-    Ok(())
-}
-
-/// Registers every package-level compiled-regex variable emitted for one Go
-/// model. Position names deliberately start from the emitted member identifier
-/// (`x-go-name` included), then append the fixed `Item` / `Contains` suffixes.
-/// The naming functions themselves live in the Go backend so planning and
-/// rendering cannot disagree about a collision.
-fn collect_go_constraint_vars(
-    model_full_name: &str,
-    type_ident: &str,
-    schema: &Schema,
-    top: &mut Namespace,
-) -> Result<()> {
-    if let Some(Value::Object(value)) = &schema.additional_properties
-        && let Ok(member) = serde_json::from_value::<Schema>(Value::Object(value.clone()))
-    {
-        collect_go_string_constraint_vars(
-            &format!("{model_full_name}.additionalProperties"),
-            type_ident,
-            "value",
-            &member,
-            top,
-        )?;
-    }
-    if let Some(Value::Object(value)) = schema.extra.get("propertyNames")
-        && let Ok(names) = serde_json::from_value::<Schema>(Value::Object(value.clone()))
-    {
-        collect_go_string_constraint_names(
-            &format!("{model_full_name}.propertyNames"),
-            type_ident,
-            "propertyName",
-            &names,
-            top,
-        )?;
-    }
-    for (json_name, property) in schema.properties.iter().flatten() {
-        let position = member_identifier(Language::Go, json_name, property);
-        collect_go_string_constraint_vars(
-            &format!("{model_full_name}.{json_name}"),
-            type_ident,
-            &position,
-            property,
-            top,
-        )?;
-    }
-    Ok(())
-}
-
-fn collect_go_string_constraint_vars(
-    origin: &str,
-    type_ident: &str,
-    position: &str,
-    schema: &Schema,
-    top: &mut Namespace,
-) -> Result<()> {
-    collect_go_string_constraint_names(origin, type_ident, position, schema, top)?;
-    if let Some(Value::Object(value)) = schema.extra.get("contains")
-        && let Ok(matcher) = serde_json::from_value::<Schema>(Value::Object(value.clone()))
-    {
-        collect_go_matcher_constraint_names(
-            &format!("{origin}.contains"),
-            type_ident,
-            &format!("{position}Contains"),
-            &matcher,
-            top,
-        )?;
-    }
-    if let Some(items) = &schema.items {
-        collect_go_string_constraint_vars(
-            &format!("{origin}.items"),
-            type_ident,
-            &format!("{position}Item"),
-            items,
-            top,
-        )?;
-    }
-    Ok(())
-}
-
-fn collect_go_string_constraint_names(
-    origin: &str,
-    type_ident: &str,
-    position: &str,
-    schema: &Schema,
-    top: &mut Namespace,
-) -> Result<()> {
-    let schema = nullable_non_null_schema(schema).unwrap_or(schema);
-    if schema.ty.as_ref().and_then(Value::as_str) != Some("string") {
-        return Ok(());
-    }
-    if schema
-        .extra
-        .get("pattern")
-        .and_then(Value::as_str)
-        .is_some()
-    {
-        top.insert(
-            Language::Go,
-            go::go_pattern_var_name(type_ident, position),
-            format!("`{origin}` `{position}` pattern variable"),
-        )?;
-    }
-    if schema
-        .extra
-        .get("format")
-        .and_then(Value::as_str)
-        .and_then(crate::json_schema::format::check_for)
-        .is_some()
-    {
-        top.insert(
-            Language::Go,
-            go::go_format_var_name(type_ident, position),
-            format!("`{origin}` `{position}` format variable"),
-        )?;
-    }
-    if schema
-        .extra
-        .get("contentEncoding")
-        .and_then(Value::as_str)
-        .and_then(crate::json_schema::content_encoding::Encoding::from_name)
-        .is_some()
-    {
-        top.insert(
-            Language::Go,
-            go::go_content_encoding_var_name(type_ident, position),
-            format!("`{origin}` `{position}` contentEncoding variable"),
-        )?;
-    }
-    Ok(())
-}
-
-fn collect_go_matcher_constraint_names(
-    origin: &str,
-    type_ident: &str,
-    position: &str,
-    schema: &Schema,
-    top: &mut Namespace,
-) -> Result<()> {
-    let schema = nullable_non_null_schema(schema).unwrap_or(schema);
-    if schema
-        .extra
-        .get("pattern")
-        .and_then(Value::as_str)
-        .is_some()
-    {
-        top.insert(
-            Language::Go,
-            go::go_pattern_var_name(type_ident, position),
-            format!("`{origin}` `{position}` contains-pattern variable"),
-        )?;
-    }
-    if schema
-        .extra
-        .get("format")
-        .and_then(Value::as_str)
-        .and_then(crate::json_schema::format::check_for)
-        .is_some()
-    {
-        top.insert(
-            Language::Go,
-            go::go_format_var_name(type_ident, position),
-            format!("`{origin}` `{position}` contains-format variable"),
-        )?;
-    }
     Ok(())
 }
 
@@ -16326,7 +16153,7 @@ $defs:
     }
 
     #[test]
-    fn rejects_position_derived_go_regex_name_collisions() {
+    fn accepts_distinct_semantic_go_regex_helpers() {
         let input = r#"
 $schema: https://json-schema.org/draft/2020-12/schema
 type: object
@@ -16336,23 +16163,8 @@ properties:
     items: { type: string, pattern: "^a" }
   codeItem: { type: string, pattern: "^b" }
 "#;
-        let error = reject_for(Language::Go, input);
-        assert!(
-            error.contains("codeItem")
-                && error.contains("pattern variable")
-                && error.contains("collision"),
-            "{error}"
-        );
-        let renamed = input.replace(
-            "codeItem: { type: string, pattern: \"^b\" }",
-            "codeItem: { type: string, pattern: \"^b\", x-go-name: Other }",
-        );
-        parse_for(Language::Go, &renamed)
-            .expect("x-go-name moves the compiled regex variable with the member");
-        for language in [Language::TypeScript, Language::Python, Language::Java] {
-            parse_for(language, input)
-                .unwrap_or_else(|error| panic!("{language:?} emits no colliding name: {error}"));
-        }
+        parse_for(Language::Go, input)
+            .expect("distinct pattern spellings synthesize distinct semantic helper names");
     }
 
     #[test]
@@ -16380,9 +16192,9 @@ properties:
         );
         parse_for(Language::Java, &renamed)
             .expect("x-java-name moves the compiled Pattern field with the member");
-        // Go has the same flat collision (`apiCodeContainsPattern`); TypeScript
-        // and Python do not synthesize position-derived identifiers here.
-        for language in [Language::TypeScript, Language::Python] {
+        // Go uses semantic helper names; TypeScript and Python do not synthesize
+        // position-derived identifiers here.
+        for language in [Language::Go, Language::TypeScript, Language::Python] {
             parse_for(language, input)
                 .unwrap_or_else(|error| panic!("{language:?} emits no colliding name: {error}"));
         }
