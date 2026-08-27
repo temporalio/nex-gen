@@ -97,7 +97,10 @@ export const categoryTransferTypeConverter =
 
       for (const key of Object.keys(raw)) {
         if (key !== "id" && key !== "name" && key !== "children") {
-          violations.push({ path: key, reason: "unknown field" });
+          violations.push({
+            path: __nexgenDefinitions.memberPath(key),
+            reason: "unknown field",
+          });
         }
       }
 
@@ -179,7 +182,10 @@ export const paletteTransferTypeConverter =
 
       for (const key of Object.keys(raw)) {
         if (key !== "swatches") {
-          violations.push({ path: key, reason: "unknown field" });
+          violations.push({
+            path: __nexgenDefinitions.memberPath(key),
+            reason: "unknown field",
+          });
         }
       }
 

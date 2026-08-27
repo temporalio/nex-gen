@@ -52,3 +52,25 @@ func TestJSONSchemaChatRuntime(t *testing.T) {
 	output := roundTripJSONEq[chat.SendMessageOutput](t, dc, "chat", "send-message-output.json")
 	require.Equal(t, "m1", output.MessageID)
 }
+
+func TestJSONSchemaViolationPathsEscapeArbitraryWireKeys(t *testing.T) {
+	var output chat.SendMessageOutput
+	for _, tc := range []struct {
+		wire string
+		path string
+	}{
+		{`{"messageId":"m1","[0]":1}`, `["[0]"]`},
+		{`{"messageId":"m1","quote\"slash\\":1}`, `["quote\"slash\\"]`},
+	} {
+		err := decodeValidation(jsonPayload([]byte(tc.wire)), &output)
+		require.Error(t, err)
+		require.Contains(t, validationText(err), tc.path)
+	}
+
+	var input chat.SendMessageInput
+	err := decodeValidation(jsonPayload([]byte(
+		`{"roomId":"r1","message":{"kind":"text","body":"hi","a.b":1}}`,
+	)), &input)
+	require.Error(t, err)
+	require.Contains(t, validationText(err), `message["a.b"]`)
+}

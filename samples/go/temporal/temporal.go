@@ -372,7 +372,7 @@ func (m *Temporal) UnmarshalJSON(data []byte) error {
 		switch k {
 		case "createdAt", "birthday", "alarm", "timeout", "updatedAt", "expiresOn", "reminder", "retryDelay", "deletedAt", "archivedOn":
 		default:
-			errs = append(errs, Violation{k, "unknown field"})
+			errs = append(errs, Violation{memberPath(k), "unknown field"})
 		}
 	}
 	get := func(k string) *json.RawMessage {

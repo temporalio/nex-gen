@@ -21,6 +21,7 @@ from ._definitions import (
     _format_base64url,
     _format_date,
     _json_values_equal,
+    _member_path,
     _parse_base64,
     _parse_base64url,
     _parse_date,
@@ -178,10 +179,11 @@ class _AddressTransferTypeConverter(
                 )
             out["zip"] = value.zip
         for key, entry in value.additional_properties.items():
+            path = _member_path(key)
             if key in _ADDRESS_DECLARED:
                 violations.append(
                     Violation(
-                        path=key,
+                        path=path,
                         reason="additional property collides with declared property",
                     )
                 )
@@ -223,6 +225,7 @@ class _AddressBookTransferTypeConverter(
         raw = typing.cast("dict[str, typing.Any]", value)
         additional_properties: dict[str, Address] = {}
         for key in raw:
+            path = _member_path(key)
             member: Address = typing.cast("typing.Any", None)
             member_raw = raw[key]
             try:
@@ -230,7 +233,7 @@ class _AddressBookTransferTypeConverter(
                     member_raw, Address
                 )
             except temporalio.exceptions.ApplicationError as error:
-                _collect(violations, key, error)
+                _collect(violations, path, error)
             additional_properties[key] = member
         if violations:
             raise temporalio.converter.create_payload_validation_error(violations)
@@ -241,10 +244,11 @@ class _AddressBookTransferTypeConverter(
         violations: list[Violation] = []
         out: dict[str, typing.Any] = {}
         for key, entry in value.additional_properties.items():
+            path = _member_path(key)
             try:
                 out[key] = _AddressTransferTypeConverter().to_transfer_type(entry)
             except temporalio.exceptions.ApplicationError as error:
-                _collect(violations, key, error)
+                _collect(violations, path, error)
         if violations:
             raise temporalio.converter.create_payload_validation_error(violations)
         return out
@@ -287,16 +291,17 @@ class _AttributesTransferTypeConverter(
             if len(key) > 8:
                 violations.append(
                     Violation(
-                        path=key,
+                        path=_member_path(key),
                         reason=f"invalid property name {_quote(key)}: must have length <= 8, got {len(key)}",
                     )
                 )
         additional_properties: dict[str, str] = {}
         for key in raw:
+            path = _member_path(key)
             member: str = typing.cast("typing.Any", None)
             member_raw = raw[key]
             if not isinstance(member_raw, str):
-                violations.append(Violation(path=key, reason="expected string"))
+                violations.append(Violation(path=path, reason="expected string"))
             else:
                 member = member_raw
             additional_properties[key] = member
@@ -309,6 +314,7 @@ class _AttributesTransferTypeConverter(
         violations: list[Violation] = []
         out: dict[str, typing.Any] = {}
         for key, entry in value.additional_properties.items():
+            path = _member_path(key)
             out[key] = entry
         if len(out) < 1:
             violations.append(
@@ -326,7 +332,7 @@ class _AttributesTransferTypeConverter(
             if len(key) > 8:
                 violations.append(
                     Violation(
-                        path=key,
+                        path=_member_path(key),
                         reason=f"invalid property name {_quote(key)}: must have length <= 8, got {len(key)}",
                     )
                 )
@@ -361,12 +367,13 @@ class _BlobIndexTransferTypeConverter(
         raw = typing.cast("dict[str, typing.Any]", value)
         additional_properties: dict[str, bytes] = {}
         for key in raw:
+            path = _member_path(key)
             member: bytes = typing.cast("typing.Any", None)
             member_raw = raw[key]
             if not isinstance(member_raw, str):
-                violations.append(Violation(path=key, reason="expected string"))
+                violations.append(Violation(path=path, reason="expected string"))
             else:
-                member_parsed = _parse_base64(member_raw, key, violations)
+                member_parsed = _parse_base64(member_raw, path, violations)
                 if member_parsed is not None:
                     member = member_parsed
             additional_properties[key] = member
@@ -378,6 +385,7 @@ class _BlobIndexTransferTypeConverter(
     def to_transfer_type(self, value: "BlobIndex") -> typing.Any:
         out: dict[str, typing.Any] = {}
         for key, entry in value.additional_properties.items():
+            path = _member_path(key)
             out[key] = _format_base64(entry)
         return out
 
@@ -405,10 +413,11 @@ class _ChoicesTransferTypeConverter(
         raw = typing.cast("dict[str, typing.Any]", value)
         additional_properties: dict[str, ChoicesValue] = {}
         for key in raw:
+            path = _member_path(key)
             member: ChoicesValue = typing.cast("typing.Any", None)
             member_raw = raw[key]
             member_parsed = _choices_value_from_transfer_type(
-                member_raw, key, violations
+                member_raw, path, violations
             )
             if member_parsed is not None:
                 member = member_parsed
@@ -422,10 +431,11 @@ class _ChoicesTransferTypeConverter(
         violations: list[Violation] = []
         out: dict[str, typing.Any] = {}
         for key, entry in value.additional_properties.items():
+            path = _member_path(key)
             try:
                 out[key] = _choices_value_to_transfer_type(entry)
             except temporalio.exceptions.ApplicationError as error:
-                _collect(violations, key, error)
+                _collect(violations, path, error)
         if violations:
             raise temporalio.converter.create_payload_validation_error(violations)
         return out
@@ -522,10 +532,11 @@ class _CircleTransferTypeConverter(
             )
         out["radius"] = _binary64(value.radius)
         for key, entry in value.additional_properties.items():
+            path = _member_path(key)
             if key in _CIRCLE_DECLARED:
                 violations.append(
                     Violation(
-                        path=key,
+                        path=path,
                         reason="additional property collides with declared property",
                     )
                 )
@@ -651,10 +662,11 @@ class _ContactPyTransferTypeConverter(
         if value.shipping_zip is not None:
             out["shippingZip"] = value.shipping_zip
         for key, entry in value.additional_properties.items():
+            path = _member_path(key)
             if key in _CONTACT_PY_DECLARED:
                 violations.append(
                     Violation(
-                        path=key,
+                        path=path,
                         reason="additional property collides with declared property",
                     )
                 )
@@ -723,12 +735,13 @@ class _DateIndexTransferTypeConverter(
         raw = typing.cast("dict[str, typing.Any]", value)
         additional_properties: dict[str, datetime.date] = {}
         for key in raw:
+            path = _member_path(key)
             member: datetime.date = typing.cast("typing.Any", None)
             member_raw = raw[key]
             if not isinstance(member_raw, str):
-                violations.append(Violation(path=key, reason="expected string"))
+                violations.append(Violation(path=path, reason="expected string"))
             else:
-                member_parsed = _parse_date(member_raw, key, violations)
+                member_parsed = _parse_date(member_raw, path, violations)
                 if member_parsed is not None:
                     member = member_parsed
             additional_properties[key] = member
@@ -741,6 +754,7 @@ class _DateIndexTransferTypeConverter(
         violations: list[Violation] = []
         out: dict[str, typing.Any] = {}
         for key, entry in value.additional_properties.items():
+            path = _member_path(key)
             out[key] = _format_date(entry)
         if violations:
             raise temporalio.converter.create_payload_validation_error(violations)
@@ -834,10 +848,11 @@ class _LabelsTransferTypeConverter(
             )
         additional_properties: dict[str, str] = {}
         for key in raw:
+            path = _member_path(key)
             member: str = typing.cast("typing.Any", None)
             member_raw = raw[key]
             if not isinstance(member_raw, str):
-                violations.append(Violation(path=key, reason="expected string"))
+                violations.append(Violation(path=path, reason="expected string"))
             else:
                 member = member_raw
             additional_properties[key] = member
@@ -850,6 +865,7 @@ class _LabelsTransferTypeConverter(
         violations: list[Violation] = []
         out: dict[str, typing.Any] = {}
         for key, entry in value.additional_properties.items():
+            path = _member_path(key)
             out[key] = entry
         if len(out) > 50:
             violations.append(
@@ -940,10 +956,11 @@ class _LinkNoteTransferTypeConverter(
             )
         out["href"] = value.href
         for key, entry in value.additional_properties.items():
+            path = _member_path(key)
             if key in _LINK_NOTE_DECLARED:
                 violations.append(
                     Violation(
-                        path=key,
+                        path=path,
                         reason="additional property collides with declared property",
                     )
                 )
@@ -983,13 +1000,14 @@ class _MetricsTransferTypeConverter(
         raw = typing.cast("dict[str, typing.Any]", value)
         additional_properties: dict[str, float] = {}
         for key in raw:
+            path = _member_path(key)
             member: float = typing.cast("typing.Any", None)
             member_raw = raw[key]
             if not (
                 not isinstance(member_raw, bool)
                 and isinstance(member_raw, (int, float))
             ):
-                violations.append(Violation(path=key, reason="expected number"))
+                violations.append(Violation(path=path, reason="expected number"))
             else:
                 member = _binary64(member_raw)
                 if not (
@@ -997,7 +1015,7 @@ class _MetricsTransferTypeConverter(
                 ):
                     violations.append(
                         Violation(
-                            path=key,
+                            path=path,
                             reason=f"must be a finite number, got {member_raw}",
                         )
                     )
@@ -1011,9 +1029,10 @@ class _MetricsTransferTypeConverter(
         violations: list[Violation] = []
         out: dict[str, typing.Any] = {}
         for key, entry in value.additional_properties.items():
+            path = _member_path(key)
             if not (-1.7976931348623157e308 <= entry <= 1.7976931348623157e308):
                 violations.append(
-                    Violation(path=key, reason=f"must be a finite number, got {entry}")
+                    Violation(path=path, reason=f"must be a finite number, got {entry}")
                 )
             out[key] = _binary64(entry)
         if violations:
@@ -1044,19 +1063,20 @@ class _NicknamesTransferTypeConverter(
         raw = typing.cast("dict[str, typing.Any]", value)
         additional_properties: dict[str, str | None] = {}
         for key in raw:
+            path = _member_path(key)
             member: str | None = None
             member_raw = raw[key]
             if member_raw is None:
                 member = None
             else:
                 if not isinstance(member_raw, str):
-                    violations.append(Violation(path=key, reason="expected string"))
+                    violations.append(Violation(path=path, reason="expected string"))
                 else:
                     member = member_raw
                     if len(member_raw) < 2:
                         violations.append(
                             Violation(
-                                path=key,
+                                path=path,
                                 reason=f"must have length >= 2, got {len(member_raw)}",
                             )
                         )
@@ -1070,11 +1090,12 @@ class _NicknamesTransferTypeConverter(
         violations: list[Violation] = []
         out: dict[str, typing.Any] = {}
         for key, entry in value.additional_properties.items():
+            path = _member_path(key)
             if entry is not None:
                 if len(entry) < 2:
                     violations.append(
                         Violation(
-                            path=key, reason=f"must have length >= 2, got {len(entry)}"
+                            path=path, reason=f"must have length >= 2, got {len(entry)}"
                         )
                     )
             out[key] = entry
@@ -1111,23 +1132,24 @@ class _QuotasTransferTypeConverter(
         raw = typing.cast("dict[str, typing.Any]", value)
         additional_properties: dict[str, int] = {}
         for key in raw:
+            path = _member_path(key)
             member: int = typing.cast("typing.Any", None)
             member_raw = raw[key]
-            member_parsed = _parse_spec_integer(member_raw, key, violations)
+            member_parsed = _parse_spec_integer(member_raw, path, violations)
             if member_parsed is not None:
                 member = member_parsed
                 if member < 0:
                     violations.append(
-                        Violation(path=key, reason=f"must be >= 0, got {member}")
+                        Violation(path=path, reason=f"must be >= 0, got {member}")
                     )
                 if member > 100:
                     violations.append(
-                        Violation(path=key, reason=f"must be <= 100, got {member}")
+                        Violation(path=path, reason=f"must be <= 100, got {member}")
                     )
                 if member % 5 != 0:
                     violations.append(
                         Violation(
-                            path=key, reason=f"must be a multiple of 5, got {member}"
+                            path=path, reason=f"must be a multiple of 5, got {member}"
                         )
                     )
             additional_properties[key] = member
@@ -1140,21 +1162,22 @@ class _QuotasTransferTypeConverter(
         violations: list[Violation] = []
         out: dict[str, typing.Any] = {}
         for key, entry in value.additional_properties.items():
+            path = _member_path(key)
             if abs(entry) > 9007199254740991:
                 violations.append(
-                    Violation(path=key, reason="exceeds ±(2^53-1) integer cap")
+                    Violation(path=path, reason="exceeds ±(2^53-1) integer cap")
                 )
             if entry < 0:
                 violations.append(
-                    Violation(path=key, reason=f"must be >= 0, got {entry}")
+                    Violation(path=path, reason=f"must be >= 0, got {entry}")
                 )
             if entry > 100:
                 violations.append(
-                    Violation(path=key, reason=f"must be <= 100, got {entry}")
+                    Violation(path=path, reason=f"must be <= 100, got {entry}")
                 )
             if entry % 5 != 0:
                 violations.append(
-                    Violation(path=key, reason=f"must be a multiple of 5, got {entry}")
+                    Violation(path=path, reason=f"must be a multiple of 5, got {entry}")
                 )
             out[key] = entry
         if violations:
@@ -1217,7 +1240,9 @@ class _SettingsTransferTypeConverter(
 
         for key in raw:
             if key != "theme" and key != "fontSize":
-                violations.append(Violation(path=key, reason="unknown field"))
+                violations.append(
+                    Violation(path=_member_path(key), reason="unknown field")
+                )
         if violations:
             raise temporalio.converter.create_payload_validation_error(violations)
         return Settings(
@@ -3261,7 +3286,9 @@ class _ShowcaseTransferTypeConverter(
                 and key != "wildcard"
                 and key != "quoted"
             ):
-                violations.append(Violation(path=key, reason="unknown field"))
+                violations.append(
+                    Violation(path=_member_path(key), reason="unknown field")
+                )
         if violations:
             raise temporalio.converter.create_payload_validation_error(violations)
         return Showcase(
@@ -4827,10 +4854,11 @@ class _ShowcaseAuditTransferTypeConverter(
             )
         out["by"] = value.by
         for key, entry in value.additional_properties.items():
+            path = _member_path(key)
             if key in _SHOWCASE_AUDIT_DECLARED:
                 violations.append(
                     Violation(
-                        path=key,
+                        path=path,
                         reason="additional property collides with declared property",
                     )
                 )
@@ -4921,10 +4949,11 @@ class _ShowcaseDetailObjectTransferTypeConverter(
         if value.hint is not None:
             out["hint"] = value.hint
         for key, entry in value.additional_properties.items():
+            path = _member_path(key)
             if key in _SHOWCASE_DETAIL_OBJECT_DECLARED:
                 violations.append(
                     Violation(
-                        path=key,
+                        path=path,
                         reason="additional property collides with declared property",
                     )
                 )
@@ -4962,6 +4991,7 @@ class _ShowcaseLedgerTransferTypeConverter(
         raw = typing.cast("dict[str, typing.Any]", value)
         additional_properties: dict[str, ShowcaseLedgerValue] = {}
         for key in raw:
+            path = _member_path(key)
             member: ShowcaseLedgerValue = typing.cast("typing.Any", None)
             member_raw = raw[key]
             try:
@@ -4969,7 +4999,7 @@ class _ShowcaseLedgerTransferTypeConverter(
                     member_raw, ShowcaseLedgerValue
                 )
             except temporalio.exceptions.ApplicationError as error:
-                _collect(violations, key, error)
+                _collect(violations, path, error)
             additional_properties[key] = member
         if violations:
             raise temporalio.converter.create_payload_validation_error(violations)
@@ -4980,12 +5010,13 @@ class _ShowcaseLedgerTransferTypeConverter(
         violations: list[Violation] = []
         out: dict[str, typing.Any] = {}
         for key, entry in value.additional_properties.items():
+            path = _member_path(key)
             try:
                 out[key] = _ShowcaseLedgerValueTransferTypeConverter().to_transfer_type(
                     entry
                 )
             except temporalio.exceptions.ApplicationError as error:
-                _collect(violations, key, error)
+                _collect(violations, path, error)
         if violations:
             raise temporalio.converter.create_payload_validation_error(violations)
         return out
@@ -5063,10 +5094,11 @@ class _ShowcaseLedgerValueTransferTypeConverter(
             )
         out["amount"] = value.amount
         for key, entry in value.additional_properties.items():
+            path = _member_path(key)
             if key in _SHOWCASE_LEDGER_VALUE_DECLARED:
                 violations.append(
                     Violation(
-                        path=key,
+                        path=path,
                         reason="additional property collides with declared property",
                     )
                 )
@@ -5168,10 +5200,11 @@ class _ShowcaseLocationTransferTypeConverter(
             except temporalio.exceptions.ApplicationError as error:
                 _collect(violations, "geo", error)
         for key, entry in value.additional_properties.items():
+            path = _member_path(key)
             if key in _SHOWCASE_LOCATION_DECLARED:
                 violations.append(
                     Violation(
-                        path=key,
+                        path=path,
                         reason="additional property collides with declared property",
                     )
                 )
@@ -5303,10 +5336,11 @@ class _ShowcaseLocationGeoTransferTypeConverter(
                 )
             out["lon"] = _binary64(value.lon)
         for key, entry in value.additional_properties.items():
+            path = _member_path(key)
             if key in _SHOWCASE_LOCATION_GEO_DECLARED:
                 violations.append(
                     Violation(
-                        path=key,
+                        path=path,
                         reason="additional property collides with declared property",
                     )
                 )
@@ -5440,10 +5474,11 @@ class _ShowcaseRowsItemTransferTypeConverter(
             )
         out["cell"] = value.cell
         for key, entry in value.additional_properties.items():
+            path = _member_path(key)
             if key in _SHOWCASE_ROWS_ITEM_DECLARED:
                 violations.append(
                     Violation(
-                        path=key,
+                        path=path,
                         reason="additional property collides with declared property",
                     )
                 )
@@ -5490,7 +5525,9 @@ class _GetShowcaseInputTransferTypeConverter(
 
         for key in raw:
             if key != "id":
-                violations.append(Violation(path=key, reason="unknown field"))
+                violations.append(
+                    Violation(path=_member_path(key), reason="unknown field")
+                )
         if violations:
             raise temporalio.converter.create_payload_validation_error(violations)
         return GetShowcaseInput(
@@ -5585,10 +5622,11 @@ class _SquareTransferTypeConverter(
             )
         out["side"] = _binary64(value.side)
         for key, entry in value.additional_properties.items():
+            path = _member_path(key)
             if key in _SQUARE_DECLARED:
                 violations.append(
                     Violation(
-                        path=key,
+                        path=path,
                         reason="additional property collides with declared property",
                     )
                 )
@@ -5683,10 +5721,11 @@ class _TextNoteTransferTypeConverter(
             )
         out["body"] = value.body
         for key, entry in value.additional_properties.items():
+            path = _member_path(key)
             if key in _TEXT_NOTE_DECLARED:
                 violations.append(
                     Violation(
-                        path=key,
+                        path=path,
                         reason="additional property collides with declared property",
                     )
                 )
@@ -5726,30 +5765,31 @@ class _TokensTransferTypeConverter(
         raw = typing.cast("dict[str, typing.Any]", value)
         additional_properties: dict[str, str] = {}
         for key in raw:
+            path = _member_path(key)
             member: str = typing.cast("typing.Any", None)
             member_raw = raw[key]
             if not isinstance(member_raw, str):
-                violations.append(Violation(path=key, reason="expected string"))
+                violations.append(Violation(path=path, reason="expected string"))
             else:
                 member = member_raw
                 if len(member_raw) < 2:
                     violations.append(
                         Violation(
-                            path=key,
+                            path=path,
                             reason=f"must have length >= 2, got {len(member_raw)}",
                         )
                     )
                 if len(member_raw) > 8:
                     violations.append(
                         Violation(
-                            path=key,
+                            path=path,
                             reason=f"must have length <= 8, got {len(member_raw)}",
                         )
                     )
                 if _PATTERN_F242E3A159C2422C.search(member_raw) is None:
                     violations.append(
                         Violation(
-                            path=key,
+                            path=path,
                             reason=f"must match pattern {_PATTERN_F242E3A159C2422C.pattern}, got {_quote(member_raw)}",
                         )
                     )
@@ -5763,22 +5803,23 @@ class _TokensTransferTypeConverter(
         violations: list[Violation] = []
         out: dict[str, typing.Any] = {}
         for key, entry in value.additional_properties.items():
+            path = _member_path(key)
             if len(entry) < 2:
                 violations.append(
                     Violation(
-                        path=key, reason=f"must have length >= 2, got {len(entry)}"
+                        path=path, reason=f"must have length >= 2, got {len(entry)}"
                     )
                 )
             if len(entry) > 8:
                 violations.append(
                     Violation(
-                        path=key, reason=f"must have length <= 8, got {len(entry)}"
+                        path=path, reason=f"must have length <= 8, got {len(entry)}"
                     )
                 )
             if _PATTERN_F242E3A159C2422C.search(entry) is None:
                 violations.append(
                     Violation(
-                        path=key,
+                        path=path,
                         reason=f"must match pattern {_PATTERN_F242E3A159C2422C.pattern}, got {_quote(entry)}",
                     )
                 )
@@ -5908,10 +5949,11 @@ class _WidgetTransferTypeConverter(
                 )
             out["size"] = value.size
         for key, entry in value.additional_properties.items():
+            path = _member_path(key)
             if key in _WIDGET_DECLARED:
                 violations.append(
                     Violation(
-                        path=key,
+                        path=path,
                         reason="additional property collides with declared property",
                     )
                 )
@@ -6003,10 +6045,11 @@ class _WidgetBaseTransferTypeConverter(
         if value.kind is not None:
             out["kind"] = value.kind
         for key, entry in value.additional_properties.items():
+            path = _member_path(key)
             if key in _WIDGET_BASE_DECLARED:
                 violations.append(
                     Violation(
-                        path=key,
+                        path=path,
                         reason="additional property collides with declared property",
                     )
                 )

@@ -187,6 +187,19 @@ final class JsonSchemaRoundTripTest {
                         SendMessageOutput.class));
         assertTrue(messageChain(unknown).contains("unknown field"), messageChain(unknown));
 
+        RuntimeException escapedPaths = assertThrows(RuntimeException.class, () ->
+                CONVERTER.fromPayload(
+                        jsonPayload(("{\"roomId\":\"r1\",\"message\":{"
+                                + "\"kind\":\"text\",\"body\":\"hi\",\"a.b\":1},"
+                                + "\"[0]\":1,\"quote\\\"slash\\\\\":1}")
+                                .getBytes(java.nio.charset.StandardCharsets.UTF_8)),
+                        SendMessageInput.class,
+                        SendMessageInput.class));
+        String escapedText = messageChain(escapedPaths);
+        assertTrue(escapedText.contains("[\"[0]\"]"), escapedText);
+        assertTrue(escapedText.contains("[\"quote\\\"slash\\\\\"]"), escapedText);
+        assertTrue(escapedText.contains("message[\"a.b\"]"), escapedText);
+
         // A fractional value for an integer field is rejected.
         RuntimeException fractional = assertThrows(RuntimeException.class, () ->
                 CONVERTER.fromPayload(

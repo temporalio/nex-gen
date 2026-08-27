@@ -63,7 +63,7 @@ public final class Metrics {
             List<Violation> violations = new ArrayList<>();
             for (Map.Entry<String, Double> entry : value.additionalProperties.entrySet()) {
                 if (!Double.isFinite(entry.getValue())) {
-                    violations.add(new Violation(entry.getKey(), "must be a finite number, got " + entry.getValue()));
+                    violations.add(new Violation(Violation.memberPath(entry.getKey()), "must be a finite number, got " + entry.getValue()));
                 }
             }
             if (!violations.isEmpty()) {
@@ -92,15 +92,16 @@ public final class Metrics {
             Iterator<String> fieldNames = node.fieldNames();
             while (fieldNames.hasNext()) {
                 String key = fieldNames.next();
+                String path = Violation.memberPath(key);
                 JsonNode element = node.get(key);
                 if (element.isNull()) {
-                    violations.add(new Violation(key, "explicit null not allowed"));
+                    violations.add(new Violation(path, "explicit null not allowed"));
                     continue;
                 }
-                Double value = SpecNumbers.specDouble(element, key, violations);
+                Double value = SpecNumbers.specDouble(element, path, violations);
                 if (value != null) {
                     if (!Double.isFinite(value)) {
-                        violations.add(new Violation(key, "must be a finite number, got " + value));
+                        violations.add(new Violation(path, "must be a finite number, got " + value));
                     }
                     additionalProperties.put(key, value);
                 }

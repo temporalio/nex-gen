@@ -126,7 +126,10 @@ export const blockTransferTypeConverter =
           key !== "style" &&
           key !== "page"
         ) {
-          violations.push({ path: key, reason: "unknown field" });
+          violations.push({
+            path: __nexgenDefinitions.memberPath(key),
+            reason: "unknown field",
+          });
         }
       }
 
@@ -240,7 +243,10 @@ export const blockStyleTransferTypeConverter =
 
       for (const key of Object.keys(raw)) {
         if (key !== "bold" && key !== "indent") {
-          violations.push({ path: key, reason: "unknown field" });
+          violations.push({
+            path: __nexgenDefinitions.memberPath(key),
+            reason: "unknown field",
+          });
         }
       }
 

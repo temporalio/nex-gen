@@ -533,7 +533,7 @@ fn java_json_rejects_non_finite_numbers_in_every_serialize_position() {
     for expected in [
         "for (Map.Entry<String, List<Double>> entry : value.additionalProperties.entrySet()) {",
         "for (int finiteIndex0 = 0; finiteIndex0 < entry.getValue().size(); finiteIndex0++) {",
-        "new Violation(entry.getKey() + \"[\" + finiteIndex0 + \"]\", \"must be a finite number, got \" + finiteValue0)",
+        "new Violation(Violation.memberPath(entry.getKey()) + \"[\" + finiteIndex0 + \"]\", \"must be a finite number, got \" + finiteValue0)",
     ] {
         assert!(map.contains(expected), "{expected}\n{map}");
     }
@@ -694,7 +694,7 @@ fn java_json_emits_wave2_object_and_matcher_contracts() {
     let native_extras = &rendered[&PathBuf::from("NativeExtras.java")];
     for expected in [
         "Map<String, LocalDate> additionalProperties",
-        "TemporalSupport.parseDate(element.textValue(), key, violations)",
+        "TemporalSupport.parseDate(element.textValue(), path, violations)",
         "TemporalSupport.formatDate(entry.getValue())",
         "declared property key collision",
         "wireKeys.size() < 1",
@@ -826,7 +826,7 @@ fn java_json_decodes_element_position_unions() {
     let map = &rendered[&PathBuf::from("Entries.java")];
     for expected in [
         "Map<String, EntriesValue> additionalProperties",
-        "EntriesValue parsedAdditionalProperties = EntriesValue.fromNode(element, key, violations, context);",
+        "EntriesValue parsedAdditionalProperties = EntriesValue.fromNode(element, path, violations, context);",
     ] {
         assert!(map.contains(expected), "{expected}\n{map}");
     }

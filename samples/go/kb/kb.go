@@ -52,7 +52,7 @@ func (m *GetCategoryTreeInput) UnmarshalJSON(data []byte) error {
 		switch k {
 		case "rootId":
 		default:
-			errs = append(errs, Violation{k, "unknown field"})
+			errs = append(errs, Violation{memberPath(k), "unknown field"})
 		}
 	}
 	get := func(k string) *json.RawMessage {
@@ -112,7 +112,7 @@ func (m *GetPageInput) UnmarshalJSON(data []byte) error {
 		switch k {
 		case "pageId":
 		default:
-			errs = append(errs, Violation{k, "unknown field"})
+			errs = append(errs, Violation{memberPath(k), "unknown field"})
 		}
 	}
 	get := func(k string) *json.RawMessage {
@@ -177,7 +177,7 @@ func (m *PutBlockOutput) UnmarshalJSON(data []byte) error {
 		switch k {
 		case "blockId", "revision":
 		default:
-			errs = append(errs, Violation{k, "unknown field"})
+			errs = append(errs, Violation{memberPath(k), "unknown field"})
 		}
 	}
 	get := func(k string) *json.RawMessage {

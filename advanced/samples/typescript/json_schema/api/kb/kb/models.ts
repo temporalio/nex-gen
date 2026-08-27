@@ -53,7 +53,10 @@ export const getCategoryTreeInputTransferTypeConverter =
 
       for (const key of Object.keys(raw)) {
         if (key !== "rootId") {
-          violations.push({ path: key, reason: "unknown field" });
+          violations.push({
+            path: __nexgenDefinitions.memberPath(key),
+            reason: "unknown field",
+          });
         }
       }
 
@@ -100,7 +103,10 @@ export const getPageInputTransferTypeConverter =
 
       for (const key of Object.keys(raw)) {
         if (key !== "pageId") {
-          violations.push({ path: key, reason: "unknown field" });
+          violations.push({
+            path: __nexgenDefinitions.memberPath(key),
+            reason: "unknown field",
+          });
         }
       }
 
@@ -164,7 +170,10 @@ export const putBlockOutputTransferTypeConverter =
 
       for (const key of Object.keys(raw)) {
         if (key !== "blockId" && key !== "revision") {
-          violations.push({ path: key, reason: "unknown field" });
+          violations.push({
+            path: __nexgenDefinitions.memberPath(key),
+            reason: "unknown field",
+          });
         }
       }
 

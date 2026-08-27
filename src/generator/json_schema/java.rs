@@ -9,7 +9,7 @@ use serde_json::Value;
 use crate::error::{Error, Result};
 use crate::generator::ExternalModelBackend;
 use crate::generator::java::render_java_doc_comment;
-use crate::generator::json_schema::bare_ref_target;
+use crate::generator::json_schema::{bare_ref_target, violation_member_segment};
 use crate::language::Language;
 use crate::parser::{ManifestModel, NameManifest, build_name_manifest};
 use crate::planning::{PlannedFamily, PlannedJsonType, PlannedSpec};
@@ -803,13 +803,13 @@ fn render_java_property_name_checks(
         if let Some(min) = constraints.min_length {
             let min_literal = java_count_literal(min);
             output.push_str(&format!(
-                "{indent}    if (pnLength < {min_literal}) {{\n{indent}        violations.add(new Violation(pnKey, \"invalid property name \\\"\" + pnKey + \"\\\": must have length >= {min}, got \" + pnLength));\n{indent}    }}\n"
+                "{indent}    if (pnLength < {min_literal}) {{\n{indent}        violations.add(new Violation(Violation.memberPath(pnKey), \"invalid property name \\\"\" + pnKey + \"\\\": must have length >= {min}, got \" + pnLength));\n{indent}    }}\n"
             ));
         }
         if let Some(max) = constraints.max_length {
             let max_literal = java_count_literal(max);
             output.push_str(&format!(
-                "{indent}    if (pnLength > {max_literal}) {{\n{indent}        violations.add(new Violation(pnKey, \"invalid property name \\\"\" + pnKey + \"\\\": must have length <= {max}, got \" + pnLength));\n{indent}    }}\n"
+                "{indent}    if (pnLength > {max_literal}) {{\n{indent}        violations.add(new Violation(Violation.memberPath(pnKey), \"invalid property name \\\"\" + pnKey + \"\\\": must have length <= {max}, got \" + pnLength));\n{indent}    }}\n"
             ));
         }
     }
@@ -819,7 +819,7 @@ fn render_java_property_name_checks(
     render_java_string_checks(
         output,
         "pnKey",
-        "pnKey",
+        "Violation.memberPath(pnKey)",
         PROPERTY_NAME_POSITION,
         &non_length,
         &format!("{indent}    "),
@@ -827,7 +827,7 @@ fn render_java_property_name_checks(
     render_java_closed_string_checks(
         output,
         "pnKey",
-        "pnKey",
+        "Violation.memberPath(pnKey)",
         subschema,
         &format!("{indent}    "),
     );
@@ -861,7 +861,7 @@ fn render_java_dependent_required(
             output.push_str(&format!(
                 "{indent}    if (!{node_expr}.has({})) {{\n{indent}        violations.add(new Violation({}, {}));\n{indent}    }}\n",
                 java_string_literal(dep),
-                java_string_literal(dep),
+                java_violation_path_literal(dep),
                 java_string_literal(&reason)
             ));
         }
@@ -3143,6 +3143,10 @@ fn java_string_literal(value: &str) -> String {
     output
 }
 
+fn java_violation_path_literal(key: &str) -> String {
+    java_string_literal(&violation_member_segment(key))
+}
+
 fn render_object_class(
     output: &mut String,
     class: &str,
@@ -3560,7 +3564,7 @@ fn object_needs_serialize_validation(schema: &Schema, fields: &[FieldPlan], open
 /// guarded non-null; the check locals live in their own block so the reused
 /// emitters' locals (`length`, `matchCount`, …) never collide across fields.
 fn render_java_serialize_field_check(output: &mut String, field: &FieldPlan, indent: &str) {
-    let json = java_string_literal(&field.json_name);
+    let json = java_violation_path_literal(&field.json_name);
     let accessor = format!("value.{}", field.java_name);
     let inner = format!("{indent}    ");
     let mut body = String::new();
@@ -3797,7 +3801,7 @@ fn render_java_serialize_dependent_required(
             );
             output.push_str(&format!(
                 "{indent}    if (!({dep_present})) {{\n{indent}        violations.add(new Violation({}, {}));\n{indent}    }}\n",
-                java_string_literal(dep),
+                java_violation_path_literal(dep),
                 java_string_literal(&reason)
             ));
         }
@@ -3827,13 +3831,13 @@ fn render_java_serialize_property_name_checks(
         if let Some(min) = constraints.min_length {
             let min_literal = java_count_literal(min);
             output.push_str(&format!(
-                "{indent}    if (pnLength < {min_literal}) {{\n{indent}        violations.add(new Violation(pnKey, \"invalid property name \\\"\" + pnKey + \"\\\": must have length >= {min}, got \" + pnLength));\n{indent}    }}\n"
+                "{indent}    if (pnLength < {min_literal}) {{\n{indent}        violations.add(new Violation(Violation.memberPath(pnKey), \"invalid property name \\\"\" + pnKey + \"\\\": must have length >= {min}, got \" + pnLength));\n{indent}    }}\n"
             ));
         }
         if let Some(max) = constraints.max_length {
             let max_literal = java_count_literal(max);
             output.push_str(&format!(
-                "{indent}    if (pnLength > {max_literal}) {{\n{indent}        violations.add(new Violation(pnKey, \"invalid property name \\\"\" + pnKey + \"\\\": must have length <= {max}, got \" + pnLength));\n{indent}    }}\n"
+                "{indent}    if (pnLength > {max_literal}) {{\n{indent}        violations.add(new Violation(Violation.memberPath(pnKey), \"invalid property name \\\"\" + pnKey + \"\\\": must have length <= {max}, got \" + pnLength));\n{indent}    }}\n"
             ));
         }
     }
@@ -3843,7 +3847,7 @@ fn render_java_serialize_property_name_checks(
     render_java_string_checks(
         output,
         "pnKey",
-        "pnKey",
+        "Violation.memberPath(pnKey)",
         PROPERTY_NAME_POSITION,
         &non_length,
         &format!("{indent}    "),
@@ -3851,7 +3855,7 @@ fn render_java_serialize_property_name_checks(
     render_java_closed_string_checks(
         output,
         "pnKey",
-        "pnKey",
+        "Violation.memberPath(pnKey)",
         subschema,
         &format!("{indent}    "),
     );
@@ -3977,7 +3981,7 @@ fn render_object_serializer(
                 "                for (String key : value.additionalProperties.keySet()) {\n",
             );
             output.push_str("                    if (!wireKeys.add(key)) {\n");
-            output.push_str("                        violations.add(new Violation(key, \"declared property key collision\"));\n");
+            output.push_str("                        violations.add(new Violation(Violation.memberPath(key), \"declared property key collision\"));\n");
             output.push_str("                    }\n                }\n            }\n");
             render_java_property_count_checks(output, "wireKeys.size()", schema, "            ");
             if let Some(subschema) = &schema.property_names {
@@ -3999,7 +4003,7 @@ fn render_object_serializer(
                 render_java_member_checks(
                     output,
                     "entry.getValue()",
-                    "entry.getKey()",
+                    "Violation.memberPath(entry.getKey())",
                     &additional.schema,
                     &additional.ty,
                     ADDITIONAL_PROPERTIES_POSITION,
@@ -4008,7 +4012,7 @@ fn render_object_serializer(
                 render_java_materialized_wire_checks(
                     output,
                     "entry.getValue()",
-                    "entry.getKey()",
+                    "Violation.memberPath(entry.getKey())",
                     &additional.schema,
                     &additional.ty,
                     ADDITIONAL_PROPERTIES_POSITION,
@@ -4019,7 +4023,7 @@ fn render_object_serializer(
                     && java_union_has_checks(union)
                 {
                     output.push_str(&format!(
-                        "                    {interface}.validate(entry.getValue(), entry.getKey(), violations);\n"
+                        "                    {interface}.validate(entry.getValue(), Violation.memberPath(entry.getKey()), violations);\n"
                     ));
                 }
                 output.push_str("                }\n            }\n");
@@ -4152,13 +4156,14 @@ fn render_capturing_value_write(
 
 fn render_field_serialize(output: &mut String, field: &FieldPlan, capture_nested: bool) {
     let json = java_string_literal(&field.json_name);
+    let path = java_violation_path_literal(&field.json_name);
     let accessor = format!("value.{}", field.java_name);
 
     if capture_nested && field_serialize_may_nest(&field.ty) {
         // A nesting member is never a stored primitive.
         output.push_str(&format!("            if ({accessor} != null) {{\n"));
         output.push_str(&format!("                gen.writeFieldName({json});\n"));
-        render_capturing_value_write(output, &field.ty, &json, &accessor, "                ", 0);
+        render_capturing_value_write(output, &field.ty, &path, &accessor, "                ", 0);
         if field.required && field.nullable {
             output.push_str(&format!(
                 "            }} else {{\n                gen.writeNullField({json});\n            }}\n"
@@ -4347,6 +4352,7 @@ fn render_object_deserializer(
         output.push_str("            Iterator<String> fieldNames = node.fieldNames();\n");
         output.push_str("            while (fieldNames.hasNext()) {\n");
         output.push_str("                String key = fieldNames.next();\n");
+        output.push_str("                String path = Violation.memberPath(key);\n");
         output.push_str("                switch (key) {\n");
         for name in &known {
             output.push_str(&format!(
@@ -4364,7 +4370,7 @@ fn render_object_deserializer(
             if additional.nullable {
                 output.push_str("                            additionalProperties.put(key, null);\n                            break;\n");
             } else {
-                output.push_str("                            violations.add(new Violation(key, \"explicit null not allowed\"));\n                            break;\n");
+                output.push_str("                            violations.add(new Violation(path, \"explicit null not allowed\"));\n                            break;\n");
             }
             output.push_str("                        }\n");
             render_parse_map_value(
@@ -4373,6 +4379,7 @@ fn render_object_deserializer(
                 "additionalProperties",
                 "element",
                 "key",
+                "path",
                 Some(&additional.schema),
                 ADDITIONAL_PROPERTIES_POSITION,
                 "                        ",
@@ -4388,6 +4395,7 @@ fn render_object_deserializer(
         output.push_str("            Iterator<String> fieldNames = node.fieldNames();\n");
         output.push_str("            while (fieldNames.hasNext()) {\n");
         output.push_str("                String key = fieldNames.next();\n");
+        output.push_str("                String path = Violation.memberPath(key);\n");
         output.push_str("                switch (key) {\n");
         for name in &known {
             output.push_str(&format!(
@@ -4400,7 +4408,7 @@ fn render_object_deserializer(
         }
         output.push_str("                    default:\n");
         output.push_str(
-            "                        violations.add(new Violation(key, \"unknown field\"));\n",
+            "                        violations.add(new Violation(path, \"unknown field\"));\n",
         );
         output.push_str("                }\n");
         output.push_str("            }\n");
@@ -4432,6 +4440,7 @@ fn render_object_deserializer(
 
 fn render_field_deserialize(output: &mut String, field: &FieldPlan) {
     let json = java_string_literal(&field.json_name);
+    let path = java_violation_path_literal(&field.json_name);
     let name = &field.java_name;
     let indent = "            ";
 
@@ -4456,24 +4465,24 @@ fn render_field_deserialize(output: &mut String, field: &FieldPlan) {
     output.push_str(&format!("{indent}    if (field == null) {{\n"));
     if field.required {
         output.push_str(&format!(
-            "{indent}        violations.add(new Violation({json}, \"required\"));\n"
+            "{indent}        violations.add(new Violation({path}, \"required\"));\n"
         ));
     }
     output.push_str(&format!("{indent}    }} else if (field.isNull()) {{\n"));
     if !field.nullable {
         output.push_str(&format!(
-            "{indent}        violations.add(new Violation({json}, \"explicit null not allowed\"));\n"
+            "{indent}        violations.add(new Violation({path}, \"explicit null not allowed\"));\n"
         ));
     }
     output.push_str(&format!("{indent}    }} else {{\n"));
     if let Some(union) = &field.union {
-        render_union_field_parse(output, union, name, &json, &format!("{indent}        "));
+        render_union_field_parse(output, union, name, &path, &format!("{indent}        "));
     } else {
         render_parse_value(
             output,
             &field.ty,
             name,
-            &json,
+            &path,
             &field.java_name,
             &field.closed_values,
             &field.closed_overrides,
@@ -5033,7 +5042,8 @@ fn render_parse_map_value(
     ty: &JavaType,
     map: &str,
     element: &str,
-    key_var: &str,
+    map_key_var: &str,
+    path_var: &str,
     member: Option<&Schema>,
     position: &str,
     indent: &str,
@@ -5041,7 +5051,7 @@ fn render_parse_map_value(
     // The member's own constraints run over the decoded value, keyed by its key.
     let checks = |output: &mut String, value_expr: &str, indent: &str| {
         if let Some(member) = member {
-            render_java_member_checks(output, value_expr, key_var, member, ty, position, indent);
+            render_java_member_checks(output, value_expr, path_var, member, ty, position, indent);
         }
     };
     // A member with nothing to check needs no local for the decoded value.
@@ -5054,7 +5064,7 @@ fn render_parse_map_value(
         JavaType::String => {
             output.push_str(&format!("{indent}if (!{element}.isTextual()) {{\n"));
             output.push_str(&format!(
-                "{indent}    violations.add(new Violation({key_var}, \"expected string value\"));\n"
+                "{indent}    violations.add(new Violation({path_var}, \"expected string value\"));\n"
             ));
             output.push_str(&format!("{indent}}} else {{\n"));
             if has_checks {
@@ -5062,42 +5072,42 @@ fn render_parse_map_value(
                     "{indent}    String value = {element}.textValue();\n"
                 ));
                 checks(output, "value", &format!("{indent}    "));
-                output.push_str(&format!("{indent}    {map}.put({key_var}, value);\n"));
+                output.push_str(&format!("{indent}    {map}.put({map_key_var}, value);\n"));
             } else {
                 output.push_str(&format!(
-                    "{indent}    {map}.put({key_var}, {element}.textValue());\n"
+                    "{indent}    {map}.put({map_key_var}, {element}.textValue());\n"
                 ));
             }
             output.push_str(&format!("{indent}}}\n"));
         }
         JavaType::Long => {
             output.push_str(&format!(
-                "{indent}Long parsed = SpecNumbers.specLong({element}, {key_var}, violations);\n"
+                "{indent}Long parsed = SpecNumbers.specLong({element}, {path_var}, violations);\n"
             ));
             output.push_str(&format!("{indent}if (parsed != null) {{\n"));
             checks(output, "parsed", &format!("{indent}    "));
-            output.push_str(&format!("{indent}    {map}.put({key_var}, parsed);\n"));
+            output.push_str(&format!("{indent}    {map}.put({map_key_var}, parsed);\n"));
             output.push_str(&format!("{indent}}}\n"));
         }
         JavaType::Double => {
             output.push_str(&format!(
-                "{indent}Double value = SpecNumbers.specDouble({element}, {key_var}, violations);\n"
+                "{indent}Double value = SpecNumbers.specDouble({element}, {path_var}, violations);\n"
             ));
             output.push_str(&format!("{indent}if (value != null) {{\n"));
             if has_checks {
                 checks(output, "value", &format!("{indent}    "));
             }
-            output.push_str(&format!("{indent}    {map}.put({key_var}, value);\n"));
+            output.push_str(&format!("{indent}    {map}.put({map_key_var}, value);\n"));
             output.push_str(&format!("{indent}}}\n"));
         }
         JavaType::Boolean => {
             output.push_str(&format!("{indent}if (!{element}.isBoolean()) {{\n"));
             output.push_str(&format!(
-                "{indent}    violations.add(new Violation({key_var}, \"expected boolean value\"));\n"
+                "{indent}    violations.add(new Violation({path_var}, \"expected boolean value\"));\n"
             ));
             output.push_str(&format!("{indent}}} else {{\n"));
             output.push_str(&format!(
-                "{indent}    {map}.put({key_var}, {element}.booleanValue());\n"
+                "{indent}    {map}.put({map_key_var}, {element}.booleanValue());\n"
             ));
             output.push_str(&format!("{indent}}}\n"));
         }
@@ -5108,16 +5118,18 @@ fn render_parse_map_value(
         } => {
             let parsed = format!("parsed{}", upper_first(map));
             output.push_str(&format!(
-                "{indent}{class} {parsed} = {class}.fromNode({element}, {key_var}, violations, context);\n"
+                "{indent}{class} {parsed} = {class}.fromNode({element}, {path_var}, violations, context);\n"
             ));
             output.push_str(&format!("{indent}if ({parsed} != null) {{\n"));
-            output.push_str(&format!("{indent}    {map}.put({key_var}, {parsed});\n"));
+            output.push_str(&format!(
+                "{indent}    {map}.put({map_key_var}, {parsed});\n"
+            ));
             output.push_str(&format!("{indent}}}\n"));
         }
         JavaType::Ref { class, .. } => {
             output.push_str(&format!("{indent}try {{\n"));
             output.push_str(&format!(
-                "{indent}    {map}.put({key_var}, context.readTreeAsValue({element}, {class}.class));\n"
+                "{indent}    {map}.put({map_key_var}, context.readTreeAsValue({element}, {class}.class));\n"
             ));
             output.push_str(&format!(
                 "{indent}}} catch (ApplicationFailure nested) {{\n"
@@ -5132,12 +5144,12 @@ fn render_parse_map_value(
                 "{indent}    for (Violation violation : nestedViolations) {{\n"
             ));
             output.push_str(&format!(
-                "{indent}        violations.add(violation.withPathPrefix({key_var}));\n"
+                "{indent}        violations.add(violation.withPathPrefix({path_var}));\n"
             ));
             output.push_str(&format!("{indent}    }}\n"));
             output.push_str(&format!("{indent}}} catch (IOException nested) {{\n"));
             output.push_str(&format!(
-                "{indent}    violations.add(new Violation({key_var}, nested.getMessage()));\n"
+                "{indent}    violations.add(new Violation({path_var}, nested.getMessage()));\n"
             ));
             output.push_str(&format!("{indent}}}\n"));
         }
@@ -5147,7 +5159,7 @@ fn render_parse_map_value(
         JavaType::List(inner) => {
             output.push_str(&format!("{indent}if (!{element}.isArray()) {{\n"));
             output.push_str(&format!(
-                "{indent}    violations.add(new Violation({key_var}, \"expected array value\"));\n"
+                "{indent}    violations.add(new Violation({path_var}, \"expected array value\"));\n"
             ));
             output.push_str(&format!("{indent}}} else {{\n"));
             output.push_str(&format!(
@@ -5161,7 +5173,7 @@ fn render_parse_map_value(
                 "{indent}        JsonNode item = {element}.get(index);\n"
             ));
             output.push_str(&format!(
-                "{indent}        String itemPath = {key_var} + \"[\" + index + \"]\";\n"
+                "{indent}        String itemPath = {path_var} + \"[\" + index + \"]\";\n"
             ));
             render_parse_element(
                 output,
@@ -5181,7 +5193,7 @@ fn render_parse_map_value(
                     render_java_raw_array_checks(
                         output,
                         element,
-                        key_var,
+                        path_var,
                         inner,
                         &constraints,
                         Some(position),
@@ -5189,12 +5201,12 @@ fn render_parse_map_value(
                     );
                 }
             }
-            output.push_str(&format!("{indent}    {map}.put({key_var}, items);\n"));
+            output.push_str(&format!("{indent}    {map}.put({map_key_var}, items);\n"));
             output.push_str(&format!("{indent}}}\n"));
         }
         JavaType::Union { .. } => {
             output.push_str(&format!(
-                "{indent}violations.add(new Violation({key_var}, \"unsupported union value\"));\n"
+                "{indent}violations.add(new Violation({path_var}, \"unsupported union value\"));\n"
             ));
         }
         JavaType::Temporal(kind) => {
@@ -5202,7 +5214,7 @@ fn render_parse_map_value(
             let parsed_type = java_temporal_type(*kind);
             output.push_str(&format!("{indent}if (!{element}.isTextual()) {{\n"));
             output.push_str(&format!(
-                "{indent}    violations.add(new Violation({key_var}, \"expected string value\"));\n"
+                "{indent}    violations.add(new Violation({path_var}, \"expected string value\"));\n"
             ));
             output.push_str(&format!("{indent}}} else {{\n"));
             if let Some(member) = member {
@@ -5211,7 +5223,7 @@ fn render_parse_map_value(
                     render_java_string_checks(
                         output,
                         &format!("{element}.textValue()"),
-                        key_var,
+                        path_var,
                         position,
                         &constraints,
                         &format!("{indent}    "),
@@ -5219,16 +5231,16 @@ fn render_parse_map_value(
                 }
             }
             output.push_str(&format!(
-                "{indent}    {parsed_type} parsed = TemporalSupport.{parse_fn}({element}.textValue(), {key_var}, violations);\n"
+                "{indent}    {parsed_type} parsed = TemporalSupport.{parse_fn}({element}.textValue(), {path_var}, violations);\n"
             ));
-            output.push_str(&format!("{indent}    if (parsed != null) {{\n{indent}        {map}.put({key_var}, parsed);\n{indent}    }}\n"));
+            output.push_str(&format!("{indent}    if (parsed != null) {{\n{indent}        {map}.put({map_key_var}, parsed);\n{indent}    }}\n"));
             output.push_str(&format!("{indent}}}\n"));
         }
         JavaType::Bytes(encoding) => {
             let parse_fn = java_content_encoding_parse_fn(*encoding);
             output.push_str(&format!("{indent}if (!{element}.isTextual()) {{\n"));
             output.push_str(&format!(
-                "{indent}    violations.add(new Violation({key_var}, \"expected string value\"));\n"
+                "{indent}    violations.add(new Violation({path_var}, \"expected string value\"));\n"
             ));
             output.push_str(&format!("{indent}}} else {{\n"));
             if let Some(member) = member {
@@ -5237,7 +5249,7 @@ fn render_parse_map_value(
                     render_java_string_checks(
                         output,
                         &format!("{element}.textValue()"),
-                        key_var,
+                        path_var,
                         position,
                         &constraints,
                         &format!("{indent}    "),
@@ -5245,9 +5257,9 @@ fn render_parse_map_value(
                 }
             }
             output.push_str(&format!(
-                "{indent}    byte[] parsed = Base64Support.{parse_fn}({element}.textValue(), {key_var}, violations);\n"
+                "{indent}    byte[] parsed = Base64Support.{parse_fn}({element}.textValue(), {path_var}, violations);\n"
             ));
-            output.push_str(&format!("{indent}    if (parsed != null) {{\n{indent}        {map}.put({key_var}, parsed);\n{indent}    }}\n"));
+            output.push_str(&format!("{indent}    if (parsed != null) {{\n{indent}        {map}.put({map_key_var}, parsed);\n{indent}    }}\n"));
             output.push_str(&format!("{indent}}}\n"));
         }
         // Typed-map values are never a closed value (const/enum lives at the
@@ -5548,7 +5560,7 @@ fn render_typed_map_class(
         render_java_member_checks(
             &mut member_checks,
             "entry.getValue()",
-            "entry.getKey()",
+            "Violation.memberPath(entry.getKey())",
             member,
             value,
             MAP_MEMBER_POSITION,
@@ -5557,7 +5569,7 @@ fn render_typed_map_class(
         render_java_materialized_wire_checks(
             &mut member_checks,
             "entry.getValue()",
-            "entry.getKey()",
+            "Violation.memberPath(entry.getKey())",
             member,
             value,
             MAP_MEMBER_POSITION,
@@ -5571,7 +5583,7 @@ fn render_typed_map_class(
             && java_union_has_checks(union)
         {
             member_checks.push_str(&format!(
-                "                {interface}.validate(entry.getValue(), entry.getKey(), violations);\n"
+                "                {interface}.validate(entry.getValue(), Violation.memberPath(entry.getKey()), violations);\n"
             ));
         }
     }
@@ -5657,6 +5669,7 @@ fn render_typed_map_class(
     output.push_str("            Iterator<String> fieldNames = node.fieldNames();\n");
     output.push_str("            while (fieldNames.hasNext()) {\n");
     output.push_str("                String key = fieldNames.next();\n");
+    output.push_str("                String path = Violation.memberPath(key);\n");
     output.push_str("                JsonNode element = node.get(key);\n");
     output.push_str("                if (element.isNull()) {\n");
     if nullable_members {
@@ -5667,7 +5680,7 @@ fn render_typed_map_class(
         );
     } else {
         output.push_str(
-            "                    violations.add(new Violation(key, \"explicit null not allowed\"));\n                    continue;\n                }\n",
+            "                    violations.add(new Violation(path, \"explicit null not allowed\"));\n                    continue;\n                }\n",
         );
     }
     render_parse_map_value(
@@ -5676,6 +5689,7 @@ fn render_typed_map_class(
         "additionalProperties",
         "element",
         "key",
+        "path",
         member.as_ref(),
         MAP_MEMBER_POSITION,
         "                ",
@@ -5703,7 +5717,7 @@ fn write_map_value(value: &JavaType, capture_nested: bool) -> String {
         render_capturing_value_write(
             &mut output,
             value,
-            "entry.getKey()",
+            "Violation.memberPath(entry.getKey())",
             "entry.getValue()",
             "                ",
             0,
@@ -6159,9 +6173,12 @@ pub(in crate::generator) fn render_violation_file(package: &str) -> String {
     output.push_str("    public Violation(String path, String reason) {\n        this.path = path;\n        this.reason = reason;\n    }\n\n");
     output.push_str("    public String getPath() {\n        return path;\n    }\n\n");
     output.push_str("    public String getReason() {\n        return reason;\n    }\n\n");
+    output.push_str("    public static String memberPath(String key) {\n");
+    output.push_str("        if (key.matches(\"[A-Za-z_][A-Za-z0-9_]*\")) {\n            return key;\n        }\n");
+    output.push_str("        return \"[\\\"\" + key.replace(\"\\\\\", \"\\\\\\\\\").replace(\"\\\"\", \"\\\\\\\"\") + \"\\\"]\";\n    }\n\n");
     output.push_str("    public Violation withPathPrefix(String prefix) {\n");
     output.push_str("        if (path == null || path.isEmpty()) {\n            return new Violation(prefix, reason);\n        }\n");
-    output.push_str("        return new Violation(prefix + \".\" + path, reason);\n    }\n\n");
+    output.push_str("        return new Violation(path.startsWith(\"[\") ? prefix + path : prefix + \".\" + path, reason);\n    }\n\n");
     output.push_str("    @Override\n    public String toString() {\n");
     output.push_str(
         "        if (path == null || path.isEmpty()) {\n            return reason;\n        }\n",

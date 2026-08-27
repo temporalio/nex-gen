@@ -89,7 +89,10 @@ export const getRoomInputTransferTypeConverter =
 
       for (const key of Object.keys(raw)) {
         if (key !== "roomId") {
-          violations.push({ path: key, reason: "unknown field" });
+          violations.push({
+            path: __nexgenDefinitions.memberPath(key),
+            reason: "unknown field",
+          });
         }
       }
 
@@ -131,9 +134,10 @@ export const labelsTransferTypeConverter =
         null,
       ) as Record<string, string>;
       for (const key of keys) {
+        const path = __nexgenDefinitions.memberPath(key);
         let entry: string | undefined = undefined;
         if (typeof raw[key] !== "string") {
-          violations.push({ path: key, reason: "expected string" });
+          violations.push({ path: path, reason: "expected string" });
         } else {
           entry = raw[key];
         }
@@ -154,6 +158,7 @@ export const labelsTransferTypeConverter =
         unknown
       >;
       for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
+        const path = __nexgenDefinitions.memberPath(key);
         out[key] = entry;
       }
       const keys = Object.keys(out);
@@ -244,7 +249,10 @@ export const messageTransferTypeConverter =
           key !== "replyToId" &&
           key !== "priority"
         ) {
-          violations.push({ path: key, reason: "unknown field" });
+          violations.push({
+            path: __nexgenDefinitions.memberPath(key),
+            reason: "unknown field",
+          });
         }
       }
 
@@ -430,9 +438,10 @@ export const roomTransferTypeConverter =
         })();
       }
       for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
+        const path = __nexgenDefinitions.memberPath(key);
         if (ROOM_DECLARED.has(key)) {
           violations.push({
-            path: key,
+            path,
             reason: "catch-all key collides with declared property",
           });
           continue;
@@ -486,7 +495,10 @@ export const sendMessageInputTransferTypeConverter =
 
       for (const key of Object.keys(raw)) {
         if (key !== "roomId" && key !== "message") {
-          violations.push({ path: key, reason: "unknown field" });
+          violations.push({
+            path: __nexgenDefinitions.memberPath(key),
+            reason: "unknown field",
+          });
         }
       }
 
@@ -545,7 +557,10 @@ export const sendMessageOutputTransferTypeConverter =
 
       for (const key of Object.keys(raw)) {
         if (key !== "messageId") {
-          violations.push({ path: key, reason: "unknown field" });
+          violations.push({
+            path: __nexgenDefinitions.memberPath(key),
+            reason: "unknown field",
+          });
         }
       }
 

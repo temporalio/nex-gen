@@ -59,7 +59,7 @@ func (m *GetRoomInput) UnmarshalJSON(data []byte) error {
 		switch k {
 		case "roomId":
 		default:
-			errs = append(errs, Violation{k, "unknown field"})
+			errs = append(errs, Violation{memberPath(k), "unknown field"})
 		}
 	}
 	get := func(k string) *json.RawMessage {
@@ -120,7 +120,8 @@ func (m *Labels) UnmarshalJSON(data []byte) error {
 	var errs []Violation
 	m.AdditionalProperties = make(map[string]string, len(raw))
 	for k, v := range raw {
-		if value, ok := parseStringField(&v, k, true, false, &errs); ok {
+		path := memberPath(k)
+		if value, ok := parseStringField(&v, path, true, false, &errs); ok {
 			m.AdditionalProperties[k] = value
 		}
 	}
@@ -194,7 +195,7 @@ func (m *Message) UnmarshalJSON(data []byte) error {
 		switch k {
 		case "kind", "body", "replyToId", "priority":
 		default:
-			errs = append(errs, Violation{k, "unknown field"})
+			errs = append(errs, Violation{memberPath(k), "unknown field"})
 		}
 	}
 	get := func(k string) *json.RawMessage {
@@ -420,7 +421,7 @@ func (m *SendMessageInput) UnmarshalJSON(data []byte) error {
 		switch k {
 		case "roomId", "message":
 		default:
-			errs = append(errs, Violation{k, "unknown field"})
+			errs = append(errs, Violation{memberPath(k), "unknown field"})
 		}
 	}
 	get := func(k string) *json.RawMessage {
@@ -488,7 +489,7 @@ func (m *SendMessageOutput) UnmarshalJSON(data []byte) error {
 		switch k {
 		case "messageId":
 		default:
-			errs = append(errs, Violation{k, "unknown field"})
+			errs = append(errs, Violation{memberPath(k), "unknown field"})
 		}
 	}
 	get := func(k string) *json.RawMessage {

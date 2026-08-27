@@ -63,7 +63,7 @@ public final class DateIndex {
         public void serialize(DateIndex value, JsonGenerator gen, SerializerProvider serializers) throws IOException {
             List<Violation> violations = new ArrayList<>();
             for (Map.Entry<String, LocalDate> entry : value.additionalProperties.entrySet()) {
-                TemporalSupport.checkDate(entry.getValue(), entry.getKey(), violations);
+                TemporalSupport.checkDate(entry.getValue(), Violation.memberPath(entry.getKey()), violations);
             }
             if (!violations.isEmpty()) {
                 // TODO: Use PayloadValidationException.newPayloadValidationException once it is available in an SDK release.
@@ -91,15 +91,16 @@ public final class DateIndex {
             Iterator<String> fieldNames = node.fieldNames();
             while (fieldNames.hasNext()) {
                 String key = fieldNames.next();
+                String path = Violation.memberPath(key);
                 JsonNode element = node.get(key);
                 if (element.isNull()) {
-                    violations.add(new Violation(key, "explicit null not allowed"));
+                    violations.add(new Violation(path, "explicit null not allowed"));
                     continue;
                 }
                 if (!element.isTextual()) {
-                    violations.add(new Violation(key, "expected string value"));
+                    violations.add(new Violation(path, "expected string value"));
                 } else {
-                    LocalDate parsed = TemporalSupport.parseDate(element.textValue(), key, violations);
+                    LocalDate parsed = TemporalSupport.parseDate(element.textValue(), path, violations);
                     if (parsed != null) {
                         additionalProperties.put(key, parsed);
                     }

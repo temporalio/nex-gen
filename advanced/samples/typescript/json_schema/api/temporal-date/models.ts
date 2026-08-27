@@ -305,7 +305,10 @@ export const temporalTransferTypeConverter =
           key !== "deletedAt" &&
           key !== "archivedOn"
         ) {
-          violations.push({ path: key, reason: "unknown field" });
+          violations.push({
+            path: __nexgenDefinitions.memberPath(key),
+            reason: "unknown field",
+          });
         }
       }
 

@@ -269,6 +269,7 @@ public final class Temporal {
             Iterator<String> fieldNames = node.fieldNames();
             while (fieldNames.hasNext()) {
                 String key = fieldNames.next();
+                String path = Violation.memberPath(key);
                 switch (key) {
                     case "alarm":
                     case "archivedOn":
@@ -282,7 +283,7 @@ public final class Temporal {
                     case "updatedAt":
                         break;
                     default:
-                        violations.add(new Violation(key, "unknown field"));
+                        violations.add(new Violation(path, "unknown field"));
                 }
             }
             OffsetDateTime createdAt = null;

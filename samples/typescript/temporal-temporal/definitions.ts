@@ -22,6 +22,12 @@ export function isPlainObject(value: unknown): value is Record<string, unknown> 
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+export function memberPath(key: string): string {
+  return /^[A-Za-z_][A-Za-z0-9_]*$/u.test(key)
+    ? key
+    : `["${key.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"]`;
+}
+
 export function collect(violations: Violation[], path: string, error: unknown): void {
   if (
     error instanceof ApplicationFailure &&

@@ -72,7 +72,7 @@ public final class Attributes {
             for (String pnKey : value.additionalProperties.keySet()) {
                 int pnLength = pnKey.codePointCount(0, pnKey.length());
                 if (pnLength > 8) {
-                    violations.add(new Violation(pnKey, "invalid property name \"" + pnKey + "\": must have length <= 8, got " + pnLength));
+                    violations.add(new Violation(Violation.memberPath(pnKey), "invalid property name \"" + pnKey + "\": must have length <= 8, got " + pnLength));
                 }
             }
             if (!violations.isEmpty()) {
@@ -101,13 +101,14 @@ public final class Attributes {
             Iterator<String> fieldNames = node.fieldNames();
             while (fieldNames.hasNext()) {
                 String key = fieldNames.next();
+                String path = Violation.memberPath(key);
                 JsonNode element = node.get(key);
                 if (element.isNull()) {
-                    violations.add(new Violation(key, "explicit null not allowed"));
+                    violations.add(new Violation(path, "explicit null not allowed"));
                     continue;
                 }
                 if (!element.isTextual()) {
-                    violations.add(new Violation(key, "expected string value"));
+                    violations.add(new Violation(path, "expected string value"));
                 } else {
                     additionalProperties.put(key, element.textValue());
                 }
@@ -123,7 +124,7 @@ public final class Attributes {
                 String pnKey = propertyNameKeys.next();
                 int pnLength = pnKey.codePointCount(0, pnKey.length());
                 if (pnLength > 8) {
-                    violations.add(new Violation(pnKey, "invalid property name \"" + pnKey + "\": must have length <= 8, got " + pnLength));
+                    violations.add(new Violation(Violation.memberPath(pnKey), "invalid property name \"" + pnKey + "\": must have length <= 8, got " + pnLength));
                 }
             }
             if (!violations.isEmpty()) {

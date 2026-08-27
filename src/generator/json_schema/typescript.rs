@@ -10,7 +10,9 @@ use std::cell::{Cell, RefCell};
 
 use crate::error::{Error, Result};
 use crate::generator::json_schema::build_json_name_manifest;
-use crate::generator::json_schema::{bare_ref_target, register_cross_module_ref_names};
+use crate::generator::json_schema::{
+    bare_ref_target, register_cross_module_ref_names, violation_member_segment,
+};
 use crate::generator::typescript::{
     RenderedExternalModelFragments, WireValueConversion, render_typescript_doc_comment,
     typescript_generated_field_name,
@@ -852,7 +854,7 @@ fn render_ts_property_name_checks(
         output.push_str(&format!("if ({condition}) {{\n"));
         output.push_str(&inner);
         output.push_str(&format!(
-            "  violations.push({{ path: key, reason: `invalid property name \"${{key}}\": {reason}` }});\n"
+            "  violations.push({{ path: {DEFINITIONS_NAMESPACE}.memberPath(key), reason: `invalid property name \"${{key}}\": {reason}` }});\n"
         ));
         output.push_str(&inner);
         output.push_str("}\n");
@@ -899,7 +901,7 @@ fn render_ts_property_name_checks(
         output.push_str(&format!("if (!{const_name}.test(key)) {{\n"));
         output.push_str(&inner);
         output.push_str(&format!(
-            "  violations.push({{ path: key, reason: `invalid property name \"${{key}}\": must match pattern {escaped}, got ${{JSON.stringify(key)}}` }});\n"
+            "  violations.push({{ path: {DEFINITIONS_NAMESPACE}.memberPath(key), reason: `invalid property name \"${{key}}\": must match pattern {escaped}, got ${{JSON.stringify(key)}}` }});\n"
         ));
         output.push_str(&inner);
         output.push_str("}\n");
@@ -919,7 +921,7 @@ fn render_ts_property_name_checks(
         output.push_str(&format!("!{const_name}.test(key)) {{\n"));
         output.push_str(&inner);
         output.push_str(&format!(
-            "  violations.push({{ path: key, reason: `invalid property name \"${{key}}\": must be a valid {}, got ${{JSON.stringify(key)}}` }});\n",
+            "  violations.push({{ path: {DEFINITIONS_NAMESPACE}.memberPath(key), reason: `invalid property name \"${{key}}\": must be a valid {}, got ${{JSON.stringify(key)}}` }});\n",
             check.name
         ));
         output.push_str(&inner);
@@ -1624,7 +1626,7 @@ fn render_ts_serialize_property_check(
 ) {
     let field_name = property.ts_member_name(json_name);
     let value_expr = format!("value.{field_name}");
-    let path_expr = typescript_string_literal(json_name);
+    let path_expr = typescript_violation_path_literal(json_name);
     let guard_null = allows_null(property);
     let body_indent = if guard_null {
         format!("{indent}  ")
@@ -3522,12 +3524,15 @@ fn render_model_serializer_body(
         // Every member is re-checked against `T` before emit (P12), keyed by its
         // own key — the same predicates the parse side ran.
         if let Some(value_schema) = &shape.value_schema {
-            render_ts_member_check(output, value_schema, "entry", "key", "    ");
+            output.push_str(&format!(
+                "    const path = {DEFINITIONS_NAMESPACE}.memberPath(key);\n"
+            ));
+            render_ts_member_check(output, value_schema, "entry", "path", "    ");
         }
         // A typed member re-serializes through its own mapper; an untyped one
         // (`additionalProperties: true`) is carried verbatim (P13).
         let entry = match &shape.value_schema {
-            Some(value_schema) => serialize_expr_collecting(value_schema, "entry", "key"),
+            Some(value_schema) => serialize_expr_collecting(value_schema, "entry", "path"),
             None => "entry".to_string(),
         };
         output.push_str(&format!("    out[key] = {entry};\n"));
@@ -3559,7 +3564,7 @@ fn render_model_serializer_body(
             let value_expr = format!("value.{field_name}");
             // A union whose members need a transform goes through the module's
             // inline-union serializer; everything else is a plain expression.
-            let path_expr = typescript_string_literal(json_name);
+            let path_expr = typescript_violation_path_literal(json_name);
             let assignment =
                 match ts_inline_union_serializer(&model.model_name, json_name, property, models) {
                     Some((name, _)) => {
@@ -3597,15 +3602,18 @@ fn render_model_serializer_body(
         output.push_str(
             "  for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {\n",
         );
+        output.push_str(&format!(
+            "    const path = {DEFINITIONS_NAMESPACE}.memberPath(key);\n"
+        ));
         output.push_str("    if (");
         output.push_str(&declared_fields_const_name(&model.model_name));
         output.push_str(".has(key)) {\n");
-        output.push_str("      violations.push({ path: key, reason: 'catch-all key collides with declared property' });\n");
+        output.push_str("      violations.push({ path, reason: 'catch-all key collides with declared property' });\n");
         output.push_str("      continue;\n");
         output.push_str("    }\n");
         if let Some(value_schema) = additional_properties_value_schema(&schema)? {
-            render_ts_member_check(output, &value_schema, "entry", "key", "    ");
-            let entry = serialize_expr_collecting(&value_schema, "entry", "key");
+            render_ts_member_check(output, &value_schema, "entry", "path", "    ");
+            let entry = serialize_expr_collecting(&value_schema, "entry", "path");
             output.push_str(&format!("    out[key] = {entry};\n"));
         } else {
             output.push_str("    out[key] = entry;\n");
@@ -3646,6 +3654,9 @@ fn render_map_parser_body(output: &mut String, schema: &Schema, shape: &TsMapSha
         // Untyped members are carried verbatim, `null` included (P13).
         None => output.push_str("    additionalProperties[key] = raw[key];\n"),
         Some(value_schema) => {
+            output.push_str(&format!(
+                "    const path = {DEFINITIONS_NAMESPACE}.memberPath(key);\n"
+            ));
             output.push_str("    let entry: ");
             output.push_str(&shape.value_annotation);
             output.push_str(" | undefined = undefined;\n");
@@ -3654,7 +3665,7 @@ fn render_map_parser_body(output: &mut String, schema: &Schema, shape: &TsMapSha
                 value_schema,
                 "raw[key]",
                 "entry",
-                "key",
+                "path",
                 "    ",
                 true,
             );
@@ -3702,9 +3713,9 @@ fn render_property_parser(
         } else {
             output.push_str(&format!("  if (!{has_own} || {raw_access} === null) {{\n"));
         }
-        output.push_str("    violations.push({ path: '");
-        output.push_str(json_name);
-        output.push_str("', reason: 'required' });\n");
+        output.push_str("    violations.push({ path: ");
+        output.push_str(&typescript_violation_path_literal(json_name));
+        output.push_str(", reason: 'required' });\n");
         output.push_str("  } else {\n");
         render_property_value_parser(output, model, models, json_name, property, &field_name)?;
         output.push_str("  }\n");
@@ -3713,9 +3724,9 @@ fn render_property_parser(
             output.push_str(&format!("  if ({has_own}) {{\n"));
         } else {
             output.push_str(&format!("  if ({has_own} && {raw_access} === null) {{\n"));
-            output.push_str("    violations.push({ path: '");
-            output.push_str(json_name);
-            output.push_str("', reason: 'explicit null not allowed' });\n");
+            output.push_str("    violations.push({ path: ");
+            output.push_str(&typescript_violation_path_literal(json_name));
+            output.push_str(", reason: 'explicit null not allowed' });\n");
             output.push_str(&format!("  }} else if ({has_own}) {{\n"));
         }
         render_property_value_parser(output, model, models, json_name, property, &field_name)?;
@@ -3734,7 +3745,7 @@ fn render_property_value_parser(
     field_name: &str,
 ) -> Result<()> {
     let raw_expr = ts_index_access("raw", json_name);
-    let path_expr = typescript_string_literal(json_name);
+    let path_expr = typescript_violation_path_literal(json_name);
     let materialized = is_materialized_property(property);
     if !materialized && let Some(const_value) = &property.const_value {
         let const_name = const_const_name(
@@ -4371,7 +4382,9 @@ fn render_closed_object_unknown_key_check(output: &mut String, fields: &[(String
         // A closed object with no declared properties rejects every member;
         // joining zero `key !== "…"` terms would emit `if () {`, which does not
         // parse (`additionalProperties.md` "Closed empty object" row).
-        output.push_str("    violations.push({ path: key, reason: 'unknown field' });\n");
+        output.push_str(&format!(
+            "    violations.push({{ path: {DEFINITIONS_NAMESPACE}.memberPath(key), reason: 'unknown field' }});\n"
+        ));
         output.push_str("  }\n\n");
         return;
     }
@@ -4384,7 +4397,9 @@ fn render_closed_object_unknown_key_check(output: &mut String, fields: &[(String
             .join(" && "),
     );
     output.push_str(") {\n");
-    output.push_str("      violations.push({ path: key, reason: 'unknown field' });\n");
+    output.push_str(&format!(
+        "      violations.push({{ path: {DEFINITIONS_NAMESPACE}.memberPath(key), reason: 'unknown field' }});\n"
+    ));
     output.push_str("    }\n");
     output.push_str("  }\n\n");
 }
@@ -4428,6 +4443,9 @@ fn render_open_object_collection(
     output.push_str(&declared_fields_const_name(&model.model_name));
     output.push_str(".has(key)) {\n");
     if let Some(value_schema) = &value_schema {
+        output.push_str(&format!(
+            "      const path = {DEFINITIONS_NAMESPACE}.memberPath(key);\n"
+        ));
         output.push_str("      let entry: ");
         output.push_str(&annotation);
         output.push_str(" | undefined = undefined;\n");
@@ -4436,7 +4454,7 @@ fn render_open_object_collection(
             value_schema,
             "raw[key]",
             "entry",
-            "key",
+            "path",
             "      ",
             true,
         );
@@ -4479,6 +4497,12 @@ fn render_code_point_length_helper(output: &mut String) {
 }
 
 fn render_collect_helper(output: &mut String) {
+    output.push_str("export function memberPath(key: string): string {\n");
+    output.push_str(
+        r#"  return /^[A-Za-z_][A-Za-z0-9_]*$/u.test(key) ? key : `["${key.replaceAll('\\', '\\\\').replaceAll('"', '\\"')}"]`;
+"#,
+    );
+    output.push_str("}\n\n");
     output.push_str(
         "export function collect(violations: Violation[], path: string, error: unknown): void {\n",
     );
@@ -5014,6 +5038,10 @@ fn typescript_string_literal(value: &str) -> String {
         .expect("a Rust string is always JSON-serializable")
         .replace('\u{2028}', "\\u2028")
         .replace('\u{2029}', "\\u2029")
+}
+
+fn typescript_violation_path_literal(key: &str) -> String {
+    typescript_string_literal(&violation_member_segment(key))
 }
 
 fn typescript_value_literal(value: &Value) -> Result<String> {

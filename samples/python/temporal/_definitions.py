@@ -23,6 +23,7 @@ __all__ = [
     "_check_unique_items",
     "_collect",
     "_json_values_equal",
+    "_member_path",
     "_format_base64",
     "_format_base64url",
     "_format_date",
@@ -58,6 +59,14 @@ def _quote(value: object) -> str:
         return repr(value)
 
 
+def _member_path(key: str) -> str:
+    """Returns one escaped member segment in the public violation-path grammar."""
+
+    if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key):
+        return key
+    return '["' + key.replace("\\", "\\\\").replace('"', '\\"') + '"]'
+
+
 def _collect(
     violations: list[Violation],
     path: str,
@@ -74,7 +83,13 @@ def _collect(
         # A nested violation about the value *itself* carries no path of its own
         # (a union branch's own constraint, an element-level check), so the
         # prefix is the whole path -- never a dangling separator (P11).
-        nested = f"{path}.{inner.path}" if inner.path else path
+        nested = (
+            path
+            if not inner.path
+            else f"{path}{inner.path}"
+            if inner.path.startswith("[")
+            else f"{path}.{inner.path}"
+        )
         violations.append(Violation(path=nested, reason=inner.reason))
 
 

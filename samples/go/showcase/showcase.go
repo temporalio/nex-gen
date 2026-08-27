@@ -1511,7 +1511,8 @@ type AddressBook struct {
 func (m AddressBook) Validate() error {
 	var errs []Violation
 	for k, v := range m.AdditionalProperties {
-		mergeNested(&errs, k, v.Validate())
+		path := memberPath(k)
+		mergeNested(&errs, path, v.Validate())
 	}
 	if len(errs) > 0 {
 		return newPayloadValidationError(errs)
@@ -1529,13 +1530,14 @@ func (m *AddressBook) UnmarshalJSON(data []byte) error {
 	var errs []Violation
 	m.AdditionalProperties = make(map[string]Address, len(raw))
 	for k, v := range raw {
+		path := memberPath(k)
 		if isNull(v) {
-			errs = append(errs, Violation{k, "explicit null not allowed"})
+			errs = append(errs, Violation{path, "explicit null not allowed"})
 			continue
 		}
 		var value Address
 		if err := json.Unmarshal(v, &value); err != nil {
-			mergeNested(&errs, k, err)
+			mergeNested(&errs, path, err)
 			continue
 		}
 		m.AdditionalProperties[k] = value
@@ -1579,7 +1581,7 @@ func (m Attributes) Validate() error {
 	}
 	for k := range m.AdditionalProperties {
 		if n := utf8.RuneCountInString(k); n > 8 {
-			errs = append(errs, Violation{k, fmt.Sprintf("invalid property name %q: must have length <= 8, got %d", k, n)})
+			errs = append(errs, Violation{memberPath(k), fmt.Sprintf("invalid property name %q: must have length <= 8, got %d", k, n)})
 		}
 	}
 	if len(errs) > 0 {
@@ -1598,7 +1600,8 @@ func (m *Attributes) UnmarshalJSON(data []byte) error {
 	var errs []Violation
 	m.AdditionalProperties = make(map[string]string, len(raw))
 	for k, v := range raw {
-		if value, ok := parseStringField(&v, k, true, false, &errs); ok {
+		path := memberPath(k)
+		if value, ok := parseStringField(&v, path, true, false, &errs); ok {
 			m.AdditionalProperties[k] = value
 		}
 	}
@@ -1610,7 +1613,7 @@ func (m *Attributes) UnmarshalJSON(data []byte) error {
 	}
 	for k := range raw {
 		if n := utf8.RuneCountInString(k); n > 8 {
-			errs = append(errs, Violation{k, fmt.Sprintf("invalid property name %q: must have length <= 8, got %d", k, n)})
+			errs = append(errs, Violation{memberPath(k), fmt.Sprintf("invalid property name %q: must have length <= 8, got %d", k, n)})
 		}
 	}
 	if len(errs) > 0 {
@@ -1660,12 +1663,13 @@ func (m *BlobIndex) UnmarshalJSON(data []byte) error {
 	var errs []Violation
 	m.AdditionalProperties = make(map[string][]byte, len(raw))
 	for k, v := range raw {
+		path := memberPath(k)
 		if isNull(v) {
-			errs = append(errs, Violation{k, "explicit null not allowed"})
+			errs = append(errs, Violation{path, "explicit null not allowed"})
 			continue
 		}
-		if s, ok := parseStringField(&v, k, true, false, &errs); ok {
-			if value, ok := decodeBase64(k, s, blobIndexValueContentEncoding, &errs); ok {
+		if s, ok := parseStringField(&v, path, true, false, &errs); ok {
+			if value, ok := decodeBase64(path, s, blobIndexValueContentEncoding, &errs); ok {
 				m.AdditionalProperties[k] = value
 			}
 		}
@@ -1704,10 +1708,11 @@ type Choices struct {
 func (m Choices) Validate() error {
 	var errs []Violation
 	for k, v := range m.AdditionalProperties {
+		path := memberPath(k)
 		if isNilValue(v) {
-			errs = append(errs, Violation{k, "explicit null not allowed"})
+			errs = append(errs, Violation{path, "explicit null not allowed"})
 		} else {
-			mergeNested(&errs, k, v.Validate())
+			mergeNested(&errs, path, v.Validate())
 		}
 	}
 	if len(errs) > 0 {
@@ -1726,11 +1731,12 @@ func (m *Choices) UnmarshalJSON(data []byte) error {
 	var errs []Violation
 	m.AdditionalProperties = make(map[string]ChoicesValue, len(raw))
 	for k, v := range raw {
+		path := memberPath(k)
 		if isNull(v) {
-			errs = append(errs, Violation{k, "explicit null not allowed"})
+			errs = append(errs, Violation{path, "explicit null not allowed"})
 			continue
 		}
-		if value, ok := unmarshalChoicesValue(v, k, &errs); ok {
+		if value, ok := unmarshalChoicesValue(v, path, &errs); ok {
 			m.AdditionalProperties[k] = value
 		}
 	}
@@ -1987,7 +1993,8 @@ type DateIndex struct {
 func (m DateIndex) Validate() error {
 	var errs []Violation
 	for k, v := range m.AdditionalProperties {
-		checkDate(v, k, &errs)
+		path := memberPath(k)
+		checkDate(v, path, &errs)
 	}
 	if len(errs) > 0 {
 		return newPayloadValidationError(errs)
@@ -2005,12 +2012,13 @@ func (m *DateIndex) UnmarshalJSON(data []byte) error {
 	var errs []Violation
 	m.AdditionalProperties = make(map[string]time.Time, len(raw))
 	for k, v := range raw {
+		path := memberPath(k)
 		if isNull(v) {
-			errs = append(errs, Violation{k, "explicit null not allowed"})
+			errs = append(errs, Violation{path, "explicit null not allowed"})
 			continue
 		}
-		if s, ok := parseStringField(&v, k, true, false, &errs); ok {
-			if value, ok := parseDate(k, s, &errs); ok {
+		if s, ok := parseStringField(&v, path, true, false, &errs); ok {
+			if value, ok := parseDate(path, s, &errs); ok {
 				m.AdditionalProperties[k] = value
 			}
 		}
@@ -2118,7 +2126,8 @@ func (m *Labels) UnmarshalJSON(data []byte) error {
 	var errs []Violation
 	m.AdditionalProperties = make(map[string]string, len(raw))
 	for k, v := range raw {
-		if value, ok := parseStringField(&v, k, true, false, &errs); ok {
+		path := memberPath(k)
+		if value, ok := parseStringField(&v, path, true, false, &errs); ok {
 			m.AdditionalProperties[k] = value
 		}
 	}
@@ -2247,8 +2256,9 @@ type Metrics struct {
 func (m Metrics) Validate() error {
 	var errs []Violation
 	for k, v := range m.AdditionalProperties {
+		path := memberPath(k)
 		if math.IsNaN(v) || math.IsInf(v, 0) {
-			errs = append(errs, Violation{k, fmt.Sprintf("must be a finite number, got %v", v)})
+			errs = append(errs, Violation{path, fmt.Sprintf("must be a finite number, got %v", v)})
 		}
 	}
 	if len(errs) > 0 {
@@ -2267,9 +2277,10 @@ func (m *Metrics) UnmarshalJSON(data []byte) error {
 	var errs []Violation
 	m.AdditionalProperties = make(map[string]float64, len(raw))
 	for k, v := range raw {
-		if value, ok := parseNumberField(&v, k, true, false, &errs); ok {
+		path := memberPath(k)
+		if value, ok := parseNumberField(&v, path, true, false, &errs); ok {
 			if math.IsNaN(value) || math.IsInf(value, 0) {
-				errs = append(errs, Violation{k, fmt.Sprintf("must be a finite number, got %v", value)})
+				errs = append(errs, Violation{path, fmt.Sprintf("must be a finite number, got %v", value)})
 			}
 			m.AdditionalProperties[k] = value
 		}
@@ -2306,11 +2317,12 @@ type Nicknames struct {
 func (m Nicknames) Validate() error {
 	var errs []Violation
 	for k, v := range m.AdditionalProperties {
+		path := memberPath(k)
 		if v == nil {
 			continue
 		}
 		if n := utf8.RuneCountInString((*v)); n < 2 {
-			errs = append(errs, Violation{k, fmt.Sprintf("must have length >= 2, got %d", n)})
+			errs = append(errs, Violation{path, fmt.Sprintf("must have length >= 2, got %d", n)})
 		}
 	}
 	if len(errs) > 0 {
@@ -2329,13 +2341,14 @@ func (m *Nicknames) UnmarshalJSON(data []byte) error {
 	var errs []Violation
 	m.AdditionalProperties = make(map[string]*string, len(raw))
 	for k, v := range raw {
+		path := memberPath(k)
 		if isNull(v) {
 			m.AdditionalProperties[k] = nil
 			continue
 		}
-		if value, ok := parseStringField(&v, k, true, false, &errs); ok {
+		if value, ok := parseStringField(&v, path, true, false, &errs); ok {
 			if n := utf8.RuneCountInString(value); n < 2 {
-				errs = append(errs, Violation{k, fmt.Sprintf("must have length >= 2, got %d", n)})
+				errs = append(errs, Violation{path, fmt.Sprintf("must have length >= 2, got %d", n)})
 			}
 			m.AdditionalProperties[k] = &value
 		}
@@ -2373,17 +2386,18 @@ type Quotas struct {
 func (m Quotas) Validate() error {
 	var errs []Violation
 	for k, v := range m.AdditionalProperties {
+		path := memberPath(k)
 		if v < -integerCap || v > integerCap {
-			errs = append(errs, Violation{k, "exceeds ±(2^53-1) integer cap"})
+			errs = append(errs, Violation{path, "exceeds ±(2^53-1) integer cap"})
 		}
 		if v < 0 {
-			errs = append(errs, Violation{k, fmt.Sprintf("must be >= 0, got %v", v)})
+			errs = append(errs, Violation{path, fmt.Sprintf("must be >= 0, got %v", v)})
 		}
 		if v > 100 {
-			errs = append(errs, Violation{k, fmt.Sprintf("must be <= 100, got %v", v)})
+			errs = append(errs, Violation{path, fmt.Sprintf("must be <= 100, got %v", v)})
 		}
 		if v%5 != 0 {
-			errs = append(errs, Violation{k, fmt.Sprintf("must be a multiple of 5, got %v", v)})
+			errs = append(errs, Violation{path, fmt.Sprintf("must be a multiple of 5, got %v", v)})
 		}
 	}
 	if len(errs) > 0 {
@@ -2402,15 +2416,16 @@ func (m *Quotas) UnmarshalJSON(data []byte) error {
 	var errs []Violation
 	m.AdditionalProperties = make(map[string]int64, len(raw))
 	for k, v := range raw {
-		if value, ok := parseIntegerField(&v, k, true, false, &errs); ok {
+		path := memberPath(k)
+		if value, ok := parseIntegerField(&v, path, true, false, &errs); ok {
 			if value < 0 {
-				errs = append(errs, Violation{k, fmt.Sprintf("must be >= 0, got %v", value)})
+				errs = append(errs, Violation{path, fmt.Sprintf("must be >= 0, got %v", value)})
 			}
 			if value > 100 {
-				errs = append(errs, Violation{k, fmt.Sprintf("must be <= 100, got %v", value)})
+				errs = append(errs, Violation{path, fmt.Sprintf("must be <= 100, got %v", value)})
 			}
 			if value%5 != 0 {
-				errs = append(errs, Violation{k, fmt.Sprintf("must be a multiple of 5, got %v", value)})
+				errs = append(errs, Violation{path, fmt.Sprintf("must be a multiple of 5, got %v", value)})
 			}
 			m.AdditionalProperties[k] = value
 		}
@@ -2467,7 +2482,7 @@ func (m *Settings) UnmarshalJSON(data []byte) error {
 		switch k {
 		case "theme", "fontSize":
 		default:
-			errs = append(errs, Violation{k, "unknown field"})
+			errs = append(errs, Violation{memberPath(k), "unknown field"})
 		}
 	}
 	get := func(k string) *json.RawMessage {
@@ -3237,7 +3252,7 @@ func (m *Showcase) UnmarshalJSON(data []byte) error {
 		switch k {
 		case "kind", "revision", "enabled", "status", "tier", "scale", "name", "count", "active", "nickname", "code", "sku", "phrase", "requestId", "contactEmail", "host", "homepage", "gateway", "blob", "urlBlob", "retries", "verbose", "greeting", "debug", "legacyId", "middleName", "category", "priority", "level", "ratio", "score", "step", "tags", "aliases", "roles", "idOrName", "mode", "payload", "detail", "shapeOrName", "measurements", "shapes", "segments", "slots", "grid", "numberGrid", "links", "addresses", "addressBook", "dates", "dateIndex", "blobs", "blobIndex", "metrics", "metricOrLabel", "addressListOrLabel", "location", "audit", "rows", "ledger", "metadata", "quotas", "tokens", "nicknames", "choices", "extras", "shape", "note", "address", "labels", "settings", "attributes", "contact", "nullableCount", "nullableRatio", "nullableFlag", "nullableTags", "nullableMode", "integralMeasurements", "byFive", "wildcard", "quoted":
 		default:
-			errs = append(errs, Violation{k, "unknown field"})
+			errs = append(errs, Violation{memberPath(k), "unknown field"})
 		}
 	}
 	get := func(k string) *json.RawMessage {
@@ -4608,7 +4623,8 @@ type ShowcaseLedger struct {
 func (m ShowcaseLedger) Validate() error {
 	var errs []Violation
 	for k, v := range m.AdditionalProperties {
-		mergeNested(&errs, k, v.Validate())
+		path := memberPath(k)
+		mergeNested(&errs, path, v.Validate())
 	}
 	if len(errs) > 0 {
 		return newPayloadValidationError(errs)
@@ -4626,13 +4642,14 @@ func (m *ShowcaseLedger) UnmarshalJSON(data []byte) error {
 	var errs []Violation
 	m.AdditionalProperties = make(map[string]ShowcaseLedgerValue, len(raw))
 	for k, v := range raw {
+		path := memberPath(k)
 		if isNull(v) {
-			errs = append(errs, Violation{k, "explicit null not allowed"})
+			errs = append(errs, Violation{path, "explicit null not allowed"})
 			continue
 		}
 		var value ShowcaseLedgerValue
 		if err := json.Unmarshal(v, &value); err != nil {
-			mergeNested(&errs, k, err)
+			mergeNested(&errs, path, err)
 			continue
 		}
 		m.AdditionalProperties[k] = value
@@ -5087,7 +5104,7 @@ func (m *GetShowcaseInput) UnmarshalJSON(data []byte) error {
 		switch k {
 		case "id":
 		default:
-			errs = append(errs, Violation{k, "unknown field"})
+			errs = append(errs, Violation{memberPath(k), "unknown field"})
 		}
 	}
 	get := func(k string) *json.RawMessage {
@@ -5315,14 +5332,15 @@ type Tokens struct {
 func (m Tokens) Validate() error {
 	var errs []Violation
 	for k, v := range m.AdditionalProperties {
+		path := memberPath(k)
 		if n := utf8.RuneCountInString(v); n < 2 {
-			errs = append(errs, Violation{k, fmt.Sprintf("must have length >= 2, got %d", n)})
+			errs = append(errs, Violation{path, fmt.Sprintf("must have length >= 2, got %d", n)})
 		}
 		if n := utf8.RuneCountInString(v); n > 8 {
-			errs = append(errs, Violation{k, fmt.Sprintf("must have length <= 8, got %d", n)})
+			errs = append(errs, Violation{path, fmt.Sprintf("must have length <= 8, got %d", n)})
 		}
 		if !tokensValuePattern.MatchString(v) {
-			errs = append(errs, Violation{k, fmt.Sprintf("must match pattern %q, got %q", "^[a-z]+$", v)})
+			errs = append(errs, Violation{path, fmt.Sprintf("must match pattern %q, got %q", "^[a-z]+$", v)})
 		}
 	}
 	if len(errs) > 0 {
@@ -5341,15 +5359,16 @@ func (m *Tokens) UnmarshalJSON(data []byte) error {
 	var errs []Violation
 	m.AdditionalProperties = make(map[string]string, len(raw))
 	for k, v := range raw {
-		if value, ok := parseStringField(&v, k, true, false, &errs); ok {
+		path := memberPath(k)
+		if value, ok := parseStringField(&v, path, true, false, &errs); ok {
 			if n := utf8.RuneCountInString(value); n < 2 {
-				errs = append(errs, Violation{k, fmt.Sprintf("must have length >= 2, got %d", n)})
+				errs = append(errs, Violation{path, fmt.Sprintf("must have length >= 2, got %d", n)})
 			}
 			if n := utf8.RuneCountInString(value); n > 8 {
-				errs = append(errs, Violation{k, fmt.Sprintf("must have length <= 8, got %d", n)})
+				errs = append(errs, Violation{path, fmt.Sprintf("must have length <= 8, got %d", n)})
 			}
 			if !tokensValuePattern.MatchString(value) {
-				errs = append(errs, Violation{k, fmt.Sprintf("must match pattern %q, got %q", "^[a-z]+$", value)})
+				errs = append(errs, Violation{path, fmt.Sprintf("must match pattern %q, got %q", "^[a-z]+$", value)})
 			}
 			m.AdditionalProperties[k] = value
 		}
