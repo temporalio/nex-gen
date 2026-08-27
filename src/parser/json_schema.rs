@@ -10102,6 +10102,48 @@ properties:
     }
 
     #[test]
+    fn rejects_written_fraction_through_nullable_integer_projection() {
+        let load_property = |field_schema: &str| {
+            let input = format!(
+                "$schema: https://json-schema.org/draft/2020-12/schema\ntype: object\nproperties:\n  value:\n{}",
+                field_schema
+                    .lines()
+                    .map(|line| format!("    {line}"))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            );
+            parse(&input);
+        };
+
+        for branches in [
+            "oneOf:\n  - { type: integer }\n  - { type: \"null\" }",
+            "oneOf:\n  - { type: \"null\" }\n  - { type: integer }",
+        ] {
+            let default = numeric_reject(&format!("{branches}\ndefault: 4503599627370496.5"));
+            assert!(default.contains("incompatible"), "{default}");
+
+            let items = branches
+                .lines()
+                .map(|line| format!("  {line}"))
+                .collect::<Vec<_>>()
+                .join("\n");
+            for matcher in ["const: 4503599627370496.5", "enum: [1, 4503599627370496.5]"] {
+                let contains = numeric_reject(&format!(
+                    "type: array\nitems:\n{items}\ncontains: {{ {matcher} }}"
+                ));
+                assert!(contains.contains("incompatible"), "{matcher}: {contains}");
+            }
+
+            load_property(&format!(
+                "{branches}\ndefault: 4503599627370496.0\nexamples:\n  - {{ type: integer, const: 4503599627370496.5 }}"
+            ));
+            load_property(&format!(
+                "type: array\nitems:\n{items}\ncontains:\n  const: 4503599627370496.0\n  examples:\n    - {{ type: integer, const: 4503599627370496.5 }}"
+            ));
+        }
+    }
+
+    #[test]
     fn integer_domain_cap_participates_in_load_satisfiability() {
         for schema in [
             "type: integer\nminimum: 9007199254740992",
