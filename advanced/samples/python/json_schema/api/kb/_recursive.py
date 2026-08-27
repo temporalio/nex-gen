@@ -166,17 +166,23 @@ class _BlockTransferTypeConverter(
                 violations.append(Violation(path="text", reason="expected string"))
             out["text"] = value.text
         if value.style is not None:
-            try:
-                out["style"] = getattr(
-                    BlockStyle, "__temporal_transfer_type_converter"
-                ).to_transfer_type(value.style)
-            except temporalio.exceptions.ApplicationError as error:
-                _collect(violations, "style", error)
+            style_violation_count = len(violations)
+            if len(violations) == style_violation_count:
+                try:
+                    out["style"] = getattr(
+                        BlockStyle, "__temporal_transfer_type_converter"
+                    ).to_transfer_type(value.style)
+                except temporalio.exceptions.ApplicationError as error:
+                    _collect(violations, "style", error)
         if value.page is not None:
-            try:
-                out["page"] = _PageTransferTypeConverter().to_transfer_type(value.page)
-            except temporalio.exceptions.ApplicationError as error:
-                _collect(violations, "page", error)
+            page_violation_count = len(violations)
+            if len(violations) == page_violation_count:
+                try:
+                    out["page"] = _PageTransferTypeConverter().to_transfer_type(
+                        value.page
+                    )
+                except temporalio.exceptions.ApplicationError as error:
+                    _collect(violations, "page", error)
         if violations:
             raise temporalio.converter.create_payload_validation_error(violations)
         return out
@@ -318,24 +324,30 @@ class _PageTransferTypeConverter(
         if value.meta is None:
             violations.append(Violation(path="meta", reason="required"))
         else:
-            try:
-                out["meta"] = getattr(
-                    PageMeta, "__temporal_transfer_type_converter"
-                ).to_transfer_type(value.meta)
-            except temporalio.exceptions.ApplicationError as error:
-                _collect(violations, "meta", error)
+            meta_violation_count = len(violations)
+            if len(violations) == meta_violation_count:
+                try:
+                    out["meta"] = getattr(
+                        PageMeta, "__temporal_transfer_type_converter"
+                    ).to_transfer_type(value.meta)
+                except temporalio.exceptions.ApplicationError as error:
+                    _collect(violations, "meta", error)
         if value.blocks is not None:
+            blocks_violation_count = len(violations)
             if not (isinstance(value.blocks, list)):
                 violations.append(Violation(path="blocks", reason="expected array"))
-            blocks_out: list[typing.Any] = []
-            for blocks_index, blocks_element in enumerate(value.blocks):
-                try:
-                    blocks_out.append(
-                        _BlockTransferTypeConverter().to_transfer_type(blocks_element)
-                    )
-                except temporalio.exceptions.ApplicationError as error:
-                    _collect(violations, f"blocks[{blocks_index}]", error)
-            out["blocks"] = blocks_out
+            if len(violations) == blocks_violation_count:
+                blocks_out: list[typing.Any] = []
+                for blocks_index, blocks_element in enumerate(value.blocks):
+                    try:
+                        blocks_out.append(
+                            _BlockTransferTypeConverter().to_transfer_type(
+                                blocks_element
+                            )
+                        )
+                    except temporalio.exceptions.ApplicationError as error:
+                        _collect(violations, f"blocks[{blocks_index}]", error)
+                out["blocks"] = blocks_out
         if violations:
             raise temporalio.converter.create_payload_validation_error(violations)
         return out

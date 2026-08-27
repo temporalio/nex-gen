@@ -179,7 +179,12 @@ export const labelsTransferTypeConverter =
         string,
         unknown
       >;
-      for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
+      if (!__nexgenDefinitions.isPlainObject(value.additionalProperties)) {
+        throw __nexgenDefinitions.payloadValidationError([
+          { path: "", reason: "expected object" },
+        ]);
+      }
+      for (const [key, entry] of Object.entries(value.additionalProperties)) {
         const path = __nexgenDefinitions.memberPath(key);
         if (!(typeof entry === "string")) {
           violations.push({ path: path, reason: "expected string" });
@@ -538,14 +543,17 @@ export const roomTransferTypeConverter =
         if (value.labels === null) {
           violations.push({ path: "labels", reason: "explicit null not allowed" });
         } else {
-          out["labels"] = (() => {
-            try {
-              return labelsTransferTypeConverter.toTransferType(value.labels);
-            } catch (error) {
-              __nexgenDefinitions.collect(violations, "labels", error);
-              return undefined;
-            }
-          })();
+          const labelsViolationCount = violations.length;
+          if (violations.length === labelsViolationCount) {
+            out["labels"] = (() => {
+              try {
+                return labelsTransferTypeConverter.toTransferType(value.labels);
+              } catch (error) {
+                __nexgenDefinitions.collect(violations, "labels", error);
+                return undefined;
+              }
+            })();
+          }
         }
       }
       for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
@@ -643,14 +651,17 @@ export const sendMessageInputTransferTypeConverter =
       if (value.message === undefined || value.message === null) {
         violations.push({ path: "message", reason: "required" });
       } else {
-        out["message"] = (() => {
-          try {
-            return messageTransferTypeConverter.toTransferType(value.message);
-          } catch (error) {
-            __nexgenDefinitions.collect(violations, "message", error);
-            return undefined;
-          }
-        })();
+        const messageViolationCount = violations.length;
+        if (violations.length === messageViolationCount) {
+          out["message"] = (() => {
+            try {
+              return messageTransferTypeConverter.toTransferType(value.message);
+            } catch (error) {
+              __nexgenDefinitions.collect(violations, "message", error);
+              return undefined;
+            }
+          })();
+        }
       }
       if (violations.length) {
         throw __nexgenDefinitions.payloadValidationError(violations);

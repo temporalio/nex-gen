@@ -246,38 +246,102 @@ class _TemporalTransferTypeConverter(
         if value.created_at is None:
             violations.append(Violation(path="createdAt", reason="required"))
         else:
-            _check_date_time(value.created_at, "createdAt", violations)
-            out["createdAt"] = _format_date_time(value.created_at)
+            created_at_violation_count = len(violations)
+            if not (isinstance(value.created_at, datetime.datetime)):
+                violations.append(
+                    Violation(path="createdAt", reason="expected date-time")
+                )
+            else:
+                _check_date_time(value.created_at, "createdAt", violations)
+            if len(violations) == created_at_violation_count:
+                out["createdAt"] = _format_date_time(value.created_at)
         if value.birthday is None:
             violations.append(Violation(path="birthday", reason="required"))
         else:
-            out["birthday"] = _format_date(value.birthday)
+            birthday_violation_count = len(violations)
+            if not (
+                isinstance(value.birthday, datetime.date)
+                and not isinstance(value.birthday, datetime.datetime)
+            ):
+                violations.append(Violation(path="birthday", reason="expected date"))
+            if len(violations) == birthday_violation_count:
+                out["birthday"] = _format_date(value.birthday)
         if value.alarm is None:
             violations.append(Violation(path="alarm", reason="required"))
         else:
-            _check_time(value.alarm, "alarm", violations)
-            out["alarm"] = _format_time(value.alarm)
+            alarm_violation_count = len(violations)
+            if not (isinstance(value.alarm, datetime.time)):
+                violations.append(Violation(path="alarm", reason="expected time"))
+            else:
+                _check_time(value.alarm, "alarm", violations)
+            if len(violations) == alarm_violation_count:
+                out["alarm"] = _format_time(value.alarm)
         if value.timeout is None:
             violations.append(Violation(path="timeout", reason="required"))
         else:
-            _check_duration(value.timeout, "timeout", violations)
-            out["timeout"] = _format_duration(value.timeout)
+            timeout_violation_count = len(violations)
+            if not (isinstance(value.timeout, datetime.timedelta)):
+                violations.append(Violation(path="timeout", reason="expected duration"))
+            else:
+                _check_duration(value.timeout, "timeout", violations)
+            if len(violations) == timeout_violation_count:
+                out["timeout"] = _format_duration(value.timeout)
         if value.updated_at is not None:
-            _check_date_time(value.updated_at, "updatedAt", violations)
-            out["updatedAt"] = _format_date_time(value.updated_at)
+            updated_at_violation_count = len(violations)
+            if not (isinstance(value.updated_at, datetime.datetime)):
+                violations.append(
+                    Violation(path="updatedAt", reason="expected date-time")
+                )
+            else:
+                _check_date_time(value.updated_at, "updatedAt", violations)
+            if len(violations) == updated_at_violation_count:
+                out["updatedAt"] = _format_date_time(value.updated_at)
         if value.expires_on is not None:
-            out["expiresOn"] = _format_date(value.expires_on)
+            expires_on_violation_count = len(violations)
+            if not (
+                isinstance(value.expires_on, datetime.date)
+                and not isinstance(value.expires_on, datetime.datetime)
+            ):
+                violations.append(Violation(path="expiresOn", reason="expected date"))
+            if len(violations) == expires_on_violation_count:
+                out["expiresOn"] = _format_date(value.expires_on)
         if value.reminder is not None:
-            _check_time(value.reminder, "reminder", violations)
-            out["reminder"] = _format_time(value.reminder)
+            reminder_violation_count = len(violations)
+            if not (isinstance(value.reminder, datetime.time)):
+                violations.append(Violation(path="reminder", reason="expected time"))
+            else:
+                _check_time(value.reminder, "reminder", violations)
+            if len(violations) == reminder_violation_count:
+                out["reminder"] = _format_time(value.reminder)
         if value.retry_delay is not None:
-            _check_duration(value.retry_delay, "retryDelay", violations)
-            out["retryDelay"] = _format_duration(value.retry_delay)
+            retry_delay_violation_count = len(violations)
+            if not (isinstance(value.retry_delay, datetime.timedelta)):
+                violations.append(
+                    Violation(path="retryDelay", reason="expected duration")
+                )
+            else:
+                _check_duration(value.retry_delay, "retryDelay", violations)
+            if len(violations) == retry_delay_violation_count:
+                out["retryDelay"] = _format_duration(value.retry_delay)
         if value.deleted_at is not None:
-            _check_date_time(value.deleted_at, "deletedAt", violations)
-            out["deletedAt"] = _format_date_time(value.deleted_at)
+            deleted_at_violation_count = len(violations)
+            if not (isinstance(value.deleted_at, datetime.datetime)):
+                violations.append(
+                    Violation(path="deletedAt", reason="expected date-time")
+                )
+            else:
+                _check_date_time(value.deleted_at, "deletedAt", violations)
+            if len(violations) == deleted_at_violation_count:
+                out["deletedAt"] = _format_date_time(value.deleted_at)
         if value.archived_on is not None:
-            out["archivedOn"] = _format_date(value.archived_on)
+            archived_on_violation_count = len(violations)
+            if not (
+                isinstance(value.archived_on, datetime.date)
+                and not isinstance(value.archived_on, datetime.datetime)
+            ):
+                violations.append(Violation(path="archivedOn", reason="expected date"))
+            if len(violations) == archived_on_violation_count:
+                out["archivedOn"] = _format_date(value.archived_on)
         if violations:
             raise temporalio.converter.create_payload_validation_error(violations)
         return out

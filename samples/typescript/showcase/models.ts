@@ -917,16 +917,24 @@ export const addressBookTransferTypeConverter =
         string,
         unknown
       >;
-      for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
+      if (!__nexgenDefinitions.isPlainObject(value.additionalProperties)) {
+        throw __nexgenDefinitions.payloadValidationError([
+          { path: "", reason: "expected object" },
+        ]);
+      }
+      for (const [key, entry] of Object.entries(value.additionalProperties)) {
+        const memberViolationCount = violations.length;
         const path = __nexgenDefinitions.memberPath(key);
-        out[key] = (() => {
-          try {
-            return addressTransferTypeConverter.toTransferType(entry);
-          } catch (error) {
-            __nexgenDefinitions.collect(violations, path, error);
-            return undefined;
-          }
-        })();
+        if (violations.length === memberViolationCount) {
+          out[key] = (() => {
+            try {
+              return addressTransferTypeConverter.toTransferType(entry);
+            } catch (error) {
+              __nexgenDefinitions.collect(violations, path, error);
+              return undefined;
+            }
+          })();
+        }
       }
       if (violations.length) {
         throw __nexgenDefinitions.payloadValidationError(violations);
@@ -998,7 +1006,12 @@ export const attributesTransferTypeConverter =
         string,
         unknown
       >;
-      for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
+      if (!__nexgenDefinitions.isPlainObject(value.additionalProperties)) {
+        throw __nexgenDefinitions.payloadValidationError([
+          { path: "", reason: "expected object" },
+        ]);
+      }
+      for (const [key, entry] of Object.entries(value.additionalProperties)) {
         const path = __nexgenDefinitions.memberPath(key);
         if (!(typeof entry === "string")) {
           violations.push({ path: path, reason: "expected string" });
@@ -1080,9 +1093,21 @@ export const blobIndexTransferTypeConverter =
         string,
         unknown
       >;
-      for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
+      if (!__nexgenDefinitions.isPlainObject(value.additionalProperties)) {
+        throw __nexgenDefinitions.payloadValidationError([
+          { path: "", reason: "expected object" },
+        ]);
+      }
+      for (const [key, entry] of Object.entries(value.additionalProperties)) {
+        const memberViolationCount = violations.length;
         const path = __nexgenDefinitions.memberPath(key);
-        out[key] = __nexgenDefinitions.bytesToBase64(entry);
+        if (!(entry instanceof Uint8Array)) {
+          violations.push({ path: path, reason: "expected bytes" });
+        } else {
+        }
+        if (violations.length === memberViolationCount) {
+          out[key] = __nexgenDefinitions.bytesToBase64(entry);
+        }
       }
       if (violations.length) {
         throw __nexgenDefinitions.payloadValidationError(violations);
@@ -1134,16 +1159,24 @@ export const choicesTransferTypeConverter =
         string,
         unknown
       >;
-      for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
+      if (!__nexgenDefinitions.isPlainObject(value.additionalProperties)) {
+        throw __nexgenDefinitions.payloadValidationError([
+          { path: "", reason: "expected object" },
+        ]);
+      }
+      for (const [key, entry] of Object.entries(value.additionalProperties)) {
+        const memberViolationCount = violations.length;
         const path = __nexgenDefinitions.memberPath(key);
-        out[key] = (() => {
-          try {
-            return choicesValueTransferTypeConverter.toTransferType(entry);
-          } catch (error) {
-            __nexgenDefinitions.collect(violations, path, error);
-            return undefined;
-          }
-        })();
+        if (violations.length === memberViolationCount) {
+          out[key] = (() => {
+            try {
+              return choicesValueTransferTypeConverter.toTransferType(entry);
+            } catch (error) {
+              __nexgenDefinitions.collect(violations, path, error);
+              return undefined;
+            }
+          })();
+        }
       }
       if (violations.length) {
         throw __nexgenDefinitions.payloadValidationError(violations);
@@ -1555,9 +1588,18 @@ export const dateIndexTransferTypeConverter =
         string,
         unknown
       >;
-      for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
+      if (!__nexgenDefinitions.isPlainObject(value.additionalProperties)) {
+        throw __nexgenDefinitions.payloadValidationError([
+          { path: "", reason: "expected object" },
+        ]);
+      }
+      for (const [key, entry] of Object.entries(value.additionalProperties)) {
         const path = __nexgenDefinitions.memberPath(key);
-        __nexgenDefinitions.validateTemporalDate(entry, path, violations);
+        if (!(typeof entry === "string")) {
+          violations.push({ path: path, reason: "expected date" });
+        } else {
+          __nexgenDefinitions.validateTemporalDate(entry, path, violations);
+        }
         out[key] = entry;
       }
       if (violations.length) {
@@ -1607,7 +1649,12 @@ export const extrasTransferTypeConverter =
         string,
         unknown
       >;
-      for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
+      if (!__nexgenDefinitions.isPlainObject(value.additionalProperties)) {
+        throw __nexgenDefinitions.payloadValidationError([
+          { path: "", reason: "expected object" },
+        ]);
+      }
+      for (const [key, entry] of Object.entries(value.additionalProperties)) {
         out[key] = entry;
       }
       const keys = Object.keys(out);
@@ -1673,7 +1720,12 @@ export const labelsTransferTypeConverter =
         string,
         unknown
       >;
-      for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
+      if (!__nexgenDefinitions.isPlainObject(value.additionalProperties)) {
+        throw __nexgenDefinitions.payloadValidationError([
+          { path: "", reason: "expected object" },
+        ]);
+      }
+      for (const [key, entry] of Object.entries(value.additionalProperties)) {
         const path = __nexgenDefinitions.memberPath(key);
         if (!(typeof entry === "string")) {
           violations.push({ path: path, reason: "expected string" });
@@ -1864,7 +1916,12 @@ export const metricsTransferTypeConverter =
         string,
         unknown
       >;
-      for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
+      if (!__nexgenDefinitions.isPlainObject(value.additionalProperties)) {
+        throw __nexgenDefinitions.payloadValidationError([
+          { path: "", reason: "expected object" },
+        ]);
+      }
+      for (const [key, entry] of Object.entries(value.additionalProperties)) {
         const path = __nexgenDefinitions.memberPath(key);
         if (!(typeof entry === "number")) {
           violations.push({ path: path, reason: "expected number" });
@@ -1941,7 +1998,12 @@ export const nicknamesTransferTypeConverter =
         string,
         unknown
       >;
-      for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
+      if (!__nexgenDefinitions.isPlainObject(value.additionalProperties)) {
+        throw __nexgenDefinitions.payloadValidationError([
+          { path: "", reason: "expected object" },
+        ]);
+      }
+      for (const [key, entry] of Object.entries(value.additionalProperties)) {
         const path = __nexgenDefinitions.memberPath(key);
         if (entry !== null) {
           if (!(typeof entry === "string")) {
@@ -2072,7 +2134,12 @@ export const quotasTransferTypeConverter =
         string,
         unknown
       >;
-      for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
+      if (!__nexgenDefinitions.isPlainObject(value.additionalProperties)) {
+        throw __nexgenDefinitions.payloadValidationError([
+          { path: "", reason: "expected object" },
+        ]);
+      }
+      for (const [key, entry] of Object.entries(value.additionalProperties)) {
         const path = __nexgenDefinitions.memberPath(key);
         if (!(typeof entry === "number" && Number.isInteger(entry))) {
           violations.push({ path: path, reason: "expected integer" });
@@ -4929,14 +4996,28 @@ export const showcaseTransferTypeConverter =
         if (value.blob === null) {
           violations.push({ path: "blob", reason: "explicit null not allowed" });
         } else {
-          out["blob"] = __nexgenDefinitions.bytesToBase64(value.blob);
+          const blobViolationCount = violations.length;
+          if (!(value.blob instanceof Uint8Array)) {
+            violations.push({ path: "blob", reason: "expected bytes" });
+          } else {
+          }
+          if (violations.length === blobViolationCount) {
+            out["blob"] = __nexgenDefinitions.bytesToBase64(value.blob);
+          }
         }
       }
       if (value.urlBlob !== undefined) {
         if (value.urlBlob === null) {
           violations.push({ path: "urlBlob", reason: "explicit null not allowed" });
         } else {
-          out["urlBlob"] = __nexgenDefinitions.bytesToBase64Url(value.urlBlob);
+          const urlBlobViolationCount = violations.length;
+          if (!(value.urlBlob instanceof Uint8Array)) {
+            violations.push({ path: "urlBlob", reason: "expected bytes" });
+          } else {
+          }
+          if (violations.length === urlBlobViolationCount) {
+            out["urlBlob"] = __nexgenDefinitions.bytesToBase64Url(value.urlBlob);
+          }
         }
       }
       if (value.retries !== undefined) {
@@ -5354,26 +5435,30 @@ export const showcaseTransferTypeConverter =
         if (value.detail === null) {
           violations.push({ path: "detail", reason: "explicit null not allowed" });
         } else {
+          const detailViolationCount = violations.length;
           if (typeof value.detail === "string") {
             if (!(typeof (value.detail as string) === "string")) {
               violations.push({ path: "detail", reason: "expected string" });
             } else {
             }
           }
-          out["detail"] = (() => {
-            try {
-              return serializeShowcaseDetail(value.detail);
-            } catch (error) {
-              __nexgenDefinitions.collect(violations, "detail", error);
-              return undefined;
-            }
-          })();
+          if (violations.length === detailViolationCount) {
+            out["detail"] = (() => {
+              try {
+                return serializeShowcaseDetail(value.detail);
+              } catch (error) {
+                __nexgenDefinitions.collect(violations, "detail", error);
+                return undefined;
+              }
+            })();
+          }
         }
       }
       if (value.shapeOrName !== undefined) {
         if (value.shapeOrName === null) {
           violations.push({ path: "shapeOrName", reason: "explicit null not allowed" });
         } else {
+          const shapeOrNameViolationCount = violations.length;
           if (typeof value.shapeOrName === "string") {
             if (!(typeof (value.shapeOrName as string) === "string")) {
               violations.push({ path: "shapeOrName", reason: "expected string" });
@@ -5389,14 +5474,16 @@ export const showcaseTransferTypeConverter =
               }
             }
           }
-          out["shapeOrName"] = (() => {
-            try {
-              return serializeShowcaseShapeOrName(value.shapeOrName);
-            } catch (error) {
-              __nexgenDefinitions.collect(violations, "shapeOrName", error);
-              return undefined;
-            }
-          })();
+          if (violations.length === shapeOrNameViolationCount) {
+            out["shapeOrName"] = (() => {
+              try {
+                return serializeShowcaseShapeOrName(value.shapeOrName);
+              } catch (error) {
+                __nexgenDefinitions.collect(violations, "shapeOrName", error);
+                return undefined;
+              }
+            })();
+          }
         }
       }
       if (value.measurements !== undefined) {
@@ -5465,44 +5552,50 @@ export const showcaseTransferTypeConverter =
         if (value.shapes === null) {
           violations.push({ path: "shapes", reason: "explicit null not allowed" });
         } else {
+          const shapesViolationCount = violations.length;
           if (!Array.isArray(value.shapes)) {
             violations.push({ path: "shapes", reason: "expected array" });
           } else {
             value.shapes.forEach((element, index) => {});
           }
-          out["shapes"] = value.shapes.map((element, index) =>
-            (() => {
-              try {
-                return shapeTransferTypeConverter.toTransferType(element);
-              } catch (error) {
-                __nexgenDefinitions.collect(violations, `shapes[${index}]`, error);
-                return undefined;
-              }
-            })(),
-          );
+          if (violations.length === shapesViolationCount) {
+            out["shapes"] = value.shapes.map((element, index) =>
+              (() => {
+                try {
+                  return shapeTransferTypeConverter.toTransferType(element);
+                } catch (error) {
+                  __nexgenDefinitions.collect(violations, `shapes[${index}]`, error);
+                  return undefined;
+                }
+              })(),
+            );
+          }
         }
       }
       if (value.segments !== undefined) {
         if (value.segments === null) {
           violations.push({ path: "segments", reason: "explicit null not allowed" });
         } else {
+          const segmentsViolationCount = violations.length;
           if (!Array.isArray(value.segments)) {
             violations.push({ path: "segments", reason: "expected array" });
           } else {
             value.segments.forEach((element, index) => {});
           }
-          out["segments"] = value.segments.map((element, index) =>
-            (() => {
-              try {
-                return showcaseSegmentsItemTransferTypeConverter.toTransferType(
-                  element,
-                );
-              } catch (error) {
-                __nexgenDefinitions.collect(violations, `segments[${index}]`, error);
-                return undefined;
-              }
-            })(),
-          );
+          if (violations.length === segmentsViolationCount) {
+            out["segments"] = value.segments.map((element, index) =>
+              (() => {
+                try {
+                  return showcaseSegmentsItemTransferTypeConverter.toTransferType(
+                    element,
+                  );
+                } catch (error) {
+                  __nexgenDefinitions.collect(violations, `segments[${index}]`, error);
+                  return undefined;
+                }
+              })(),
+            );
+          }
         }
       }
       if (value.slots !== undefined) {
@@ -5630,35 +5723,43 @@ export const showcaseTransferTypeConverter =
         if (value.addresses === null) {
           violations.push({ path: "addresses", reason: "explicit null not allowed" });
         } else {
+          const addressesViolationCount = violations.length;
           if (!Array.isArray(value.addresses)) {
             violations.push({ path: "addresses", reason: "expected array" });
           } else {
             value.addresses.forEach((element, index) => {});
           }
-          out["addresses"] = value.addresses.map((element, index) =>
-            (() => {
-              try {
-                return addressTransferTypeConverter.toTransferType(element);
-              } catch (error) {
-                __nexgenDefinitions.collect(violations, `addresses[${index}]`, error);
-                return undefined;
-              }
-            })(),
-          );
+          if (violations.length === addressesViolationCount) {
+            out["addresses"] = value.addresses.map((element, index) =>
+              (() => {
+                try {
+                  return addressTransferTypeConverter.toTransferType(element);
+                } catch (error) {
+                  __nexgenDefinitions.collect(violations, `addresses[${index}]`, error);
+                  return undefined;
+                }
+              })(),
+            );
+          }
         }
       }
       if (value.addressBook !== undefined) {
         if (value.addressBook === null) {
           violations.push({ path: "addressBook", reason: "explicit null not allowed" });
         } else {
-          out["addressBook"] = (() => {
-            try {
-              return addressBookTransferTypeConverter.toTransferType(value.addressBook);
-            } catch (error) {
-              __nexgenDefinitions.collect(violations, "addressBook", error);
-              return undefined;
-            }
-          })();
+          const addressBookViolationCount = violations.length;
+          if (violations.length === addressBookViolationCount) {
+            out["addressBook"] = (() => {
+              try {
+                return addressBookTransferTypeConverter.toTransferType(
+                  value.addressBook,
+                );
+              } catch (error) {
+                __nexgenDefinitions.collect(violations, "addressBook", error);
+                return undefined;
+              }
+            })();
+          }
         }
       }
       if (value.dates !== undefined) {
@@ -5669,11 +5770,15 @@ export const showcaseTransferTypeConverter =
             violations.push({ path: "dates", reason: "expected array" });
           } else {
             value.dates.forEach((element, index) => {
-              __nexgenDefinitions.validateTemporalDate(
-                element,
-                `dates[${index}]`,
-                violations,
-              );
+              if (!(typeof element === "string")) {
+                violations.push({ path: `dates[${index}]`, reason: "expected date" });
+              } else {
+                __nexgenDefinitions.validateTemporalDate(
+                  element,
+                  `dates[${index}]`,
+                  violations,
+                );
+              }
             });
           }
           out["dates"] = value.dates;
@@ -5683,56 +5788,73 @@ export const showcaseTransferTypeConverter =
         if (value.dateIndex === null) {
           violations.push({ path: "dateIndex", reason: "explicit null not allowed" });
         } else {
-          out["dateIndex"] = (() => {
-            try {
-              return dateIndexTransferTypeConverter.toTransferType(value.dateIndex);
-            } catch (error) {
-              __nexgenDefinitions.collect(violations, "dateIndex", error);
-              return undefined;
-            }
-          })();
+          const dateIndexViolationCount = violations.length;
+          if (violations.length === dateIndexViolationCount) {
+            out["dateIndex"] = (() => {
+              try {
+                return dateIndexTransferTypeConverter.toTransferType(value.dateIndex);
+              } catch (error) {
+                __nexgenDefinitions.collect(violations, "dateIndex", error);
+                return undefined;
+              }
+            })();
+          }
         }
       }
       if (value.blobs !== undefined) {
         if (value.blobs === null) {
           violations.push({ path: "blobs", reason: "explicit null not allowed" });
         } else {
+          const blobsViolationCount = violations.length;
           if (!Array.isArray(value.blobs)) {
             violations.push({ path: "blobs", reason: "expected array" });
           } else {
-            value.blobs.forEach((element, index) => {});
+            value.blobs.forEach((element, index) => {
+              if (!(element instanceof Uint8Array)) {
+                violations.push({ path: `blobs[${index}]`, reason: "expected bytes" });
+              } else {
+              }
+            });
           }
-          out["blobs"] = value.blobs.map((element, index) =>
-            __nexgenDefinitions.bytesToBase64(element),
-          );
+          if (violations.length === blobsViolationCount) {
+            out["blobs"] = value.blobs.map((element, index) =>
+              __nexgenDefinitions.bytesToBase64(element),
+            );
+          }
         }
       }
       if (value.blobIndex !== undefined) {
         if (value.blobIndex === null) {
           violations.push({ path: "blobIndex", reason: "explicit null not allowed" });
         } else {
-          out["blobIndex"] = (() => {
-            try {
-              return blobIndexTransferTypeConverter.toTransferType(value.blobIndex);
-            } catch (error) {
-              __nexgenDefinitions.collect(violations, "blobIndex", error);
-              return undefined;
-            }
-          })();
+          const blobIndexViolationCount = violations.length;
+          if (violations.length === blobIndexViolationCount) {
+            out["blobIndex"] = (() => {
+              try {
+                return blobIndexTransferTypeConverter.toTransferType(value.blobIndex);
+              } catch (error) {
+                __nexgenDefinitions.collect(violations, "blobIndex", error);
+                return undefined;
+              }
+            })();
+          }
         }
       }
       if (value.metrics !== undefined) {
         if (value.metrics === null) {
           violations.push({ path: "metrics", reason: "explicit null not allowed" });
         } else {
-          out["metrics"] = (() => {
-            try {
-              return metricsTransferTypeConverter.toTransferType(value.metrics);
-            } catch (error) {
-              __nexgenDefinitions.collect(violations, "metrics", error);
-              return undefined;
-            }
-          })();
+          const metricsViolationCount = violations.length;
+          if (violations.length === metricsViolationCount) {
+            out["metrics"] = (() => {
+              try {
+                return metricsTransferTypeConverter.toTransferType(value.metrics);
+              } catch (error) {
+                __nexgenDefinitions.collect(violations, "metrics", error);
+                return undefined;
+              }
+            })();
+          }
         }
       }
       if (value.metricOrLabel !== undefined) {
@@ -5782,6 +5904,7 @@ export const showcaseTransferTypeConverter =
             reason: "explicit null not allowed",
           });
         } else {
+          const addressListOrLabelViolationCount = violations.length;
           if (Array.isArray(value.addressListOrLabel)) {
             if (!Array.isArray(value.addressListOrLabel as Address[])) {
               violations.push({ path: "addressListOrLabel", reason: "expected array" });
@@ -5816,262 +5939,319 @@ export const showcaseTransferTypeConverter =
               }
             }
           }
-          out["addressListOrLabel"] = (() => {
-            try {
-              return serializeShowcaseAddressListOrLabel(value.addressListOrLabel);
-            } catch (error) {
-              __nexgenDefinitions.collect(violations, "addressListOrLabel", error);
-              return undefined;
-            }
-          })();
+          if (violations.length === addressListOrLabelViolationCount) {
+            out["addressListOrLabel"] = (() => {
+              try {
+                return serializeShowcaseAddressListOrLabel(value.addressListOrLabel);
+              } catch (error) {
+                __nexgenDefinitions.collect(violations, "addressListOrLabel", error);
+                return undefined;
+              }
+            })();
+          }
         }
       }
       if (value.location !== undefined) {
         if (value.location === null) {
           violations.push({ path: "location", reason: "explicit null not allowed" });
         } else {
-          out["location"] = (() => {
-            try {
-              return showcaseLocationTransferTypeConverter.toTransferType(
-                value.location,
-              );
-            } catch (error) {
-              __nexgenDefinitions.collect(violations, "location", error);
-              return undefined;
-            }
-          })();
+          const locationViolationCount = violations.length;
+          if (violations.length === locationViolationCount) {
+            out["location"] = (() => {
+              try {
+                return showcaseLocationTransferTypeConverter.toTransferType(
+                  value.location,
+                );
+              } catch (error) {
+                __nexgenDefinitions.collect(violations, "location", error);
+                return undefined;
+              }
+            })();
+          }
         }
       }
       if (value.audit !== undefined) {
-        out["audit"] =
-          value.audit === null
-            ? null
-            : (() => {
-                try {
-                  return showcaseAuditTransferTypeConverter.toTransferType(value.audit);
-                } catch (error) {
-                  __nexgenDefinitions.collect(violations, "audit", error);
-                  return undefined;
-                }
-              })();
+        const auditViolationCount = violations.length;
+        if (violations.length === auditViolationCount) {
+          out["audit"] =
+            value.audit === null
+              ? null
+              : (() => {
+                  try {
+                    return showcaseAuditTransferTypeConverter.toTransferType(
+                      value.audit,
+                    );
+                  } catch (error) {
+                    __nexgenDefinitions.collect(violations, "audit", error);
+                    return undefined;
+                  }
+                })();
+        }
       }
       if (value.rows !== undefined) {
         if (value.rows === null) {
           violations.push({ path: "rows", reason: "explicit null not allowed" });
         } else {
+          const rowsViolationCount = violations.length;
           if (!Array.isArray(value.rows)) {
             violations.push({ path: "rows", reason: "expected array" });
           } else {
             value.rows.forEach((element, index) => {});
           }
-          out["rows"] = value.rows.map((element, index) =>
-            (() => {
-              try {
-                return showcaseRowsItemTransferTypeConverter.toTransferType(element);
-              } catch (error) {
-                __nexgenDefinitions.collect(violations, `rows[${index}]`, error);
-                return undefined;
-              }
-            })(),
-          );
+          if (violations.length === rowsViolationCount) {
+            out["rows"] = value.rows.map((element, index) =>
+              (() => {
+                try {
+                  return showcaseRowsItemTransferTypeConverter.toTransferType(element);
+                } catch (error) {
+                  __nexgenDefinitions.collect(violations, `rows[${index}]`, error);
+                  return undefined;
+                }
+              })(),
+            );
+          }
         }
       }
       if (value.ledgerTs !== undefined) {
         if (value.ledgerTs === null) {
           violations.push({ path: "ledger", reason: "explicit null not allowed" });
         } else {
-          out["ledger"] = (() => {
-            try {
-              return showcaseLedgerTransferTypeConverter.toTransferType(value.ledgerTs);
-            } catch (error) {
-              __nexgenDefinitions.collect(violations, "ledger", error);
-              return undefined;
-            }
-          })();
+          const ledgerTsViolationCount = violations.length;
+          if (violations.length === ledgerTsViolationCount) {
+            out["ledger"] = (() => {
+              try {
+                return showcaseLedgerTransferTypeConverter.toTransferType(
+                  value.ledgerTs,
+                );
+              } catch (error) {
+                __nexgenDefinitions.collect(violations, "ledger", error);
+                return undefined;
+              }
+            })();
+          }
         }
       }
       if (value.metadata !== undefined) {
         if (value.metadata === null) {
           violations.push({ path: "metadata", reason: "explicit null not allowed" });
         } else {
-          out["metadata"] = (() => {
-            try {
-              return showcaseMetadataTransferTypeConverter.toTransferType(
-                value.metadata,
-              );
-            } catch (error) {
-              __nexgenDefinitions.collect(violations, "metadata", error);
-              return undefined;
-            }
-          })();
+          const metadataViolationCount = violations.length;
+          if (violations.length === metadataViolationCount) {
+            out["metadata"] = (() => {
+              try {
+                return showcaseMetadataTransferTypeConverter.toTransferType(
+                  value.metadata,
+                );
+              } catch (error) {
+                __nexgenDefinitions.collect(violations, "metadata", error);
+                return undefined;
+              }
+            })();
+          }
         }
       }
       if (value.quotas !== undefined) {
         if (value.quotas === null) {
           violations.push({ path: "quotas", reason: "explicit null not allowed" });
         } else {
-          out["quotas"] = (() => {
-            try {
-              return quotasTransferTypeConverter.toTransferType(value.quotas);
-            } catch (error) {
-              __nexgenDefinitions.collect(violations, "quotas", error);
-              return undefined;
-            }
-          })();
+          const quotasViolationCount = violations.length;
+          if (violations.length === quotasViolationCount) {
+            out["quotas"] = (() => {
+              try {
+                return quotasTransferTypeConverter.toTransferType(value.quotas);
+              } catch (error) {
+                __nexgenDefinitions.collect(violations, "quotas", error);
+                return undefined;
+              }
+            })();
+          }
         }
       }
       if (value.tokens !== undefined) {
         if (value.tokens === null) {
           violations.push({ path: "tokens", reason: "explicit null not allowed" });
         } else {
-          out["tokens"] = (() => {
-            try {
-              return tokensTransferTypeConverter.toTransferType(value.tokens);
-            } catch (error) {
-              __nexgenDefinitions.collect(violations, "tokens", error);
-              return undefined;
-            }
-          })();
+          const tokensViolationCount = violations.length;
+          if (violations.length === tokensViolationCount) {
+            out["tokens"] = (() => {
+              try {
+                return tokensTransferTypeConverter.toTransferType(value.tokens);
+              } catch (error) {
+                __nexgenDefinitions.collect(violations, "tokens", error);
+                return undefined;
+              }
+            })();
+          }
         }
       }
       if (value.nicknames !== undefined) {
         if (value.nicknames === null) {
           violations.push({ path: "nicknames", reason: "explicit null not allowed" });
         } else {
-          out["nicknames"] = (() => {
-            try {
-              return nicknamesTransferTypeConverter.toTransferType(value.nicknames);
-            } catch (error) {
-              __nexgenDefinitions.collect(violations, "nicknames", error);
-              return undefined;
-            }
-          })();
+          const nicknamesViolationCount = violations.length;
+          if (violations.length === nicknamesViolationCount) {
+            out["nicknames"] = (() => {
+              try {
+                return nicknamesTransferTypeConverter.toTransferType(value.nicknames);
+              } catch (error) {
+                __nexgenDefinitions.collect(violations, "nicknames", error);
+                return undefined;
+              }
+            })();
+          }
         }
       }
       if (value.choices !== undefined) {
         if (value.choices === null) {
           violations.push({ path: "choices", reason: "explicit null not allowed" });
         } else {
-          out["choices"] = (() => {
-            try {
-              return choicesTransferTypeConverter.toTransferType(value.choices);
-            } catch (error) {
-              __nexgenDefinitions.collect(violations, "choices", error);
-              return undefined;
-            }
-          })();
+          const choicesViolationCount = violations.length;
+          if (violations.length === choicesViolationCount) {
+            out["choices"] = (() => {
+              try {
+                return choicesTransferTypeConverter.toTransferType(value.choices);
+              } catch (error) {
+                __nexgenDefinitions.collect(violations, "choices", error);
+                return undefined;
+              }
+            })();
+          }
         }
       }
       if (value.extras !== undefined) {
         if (value.extras === null) {
           violations.push({ path: "extras", reason: "explicit null not allowed" });
         } else {
-          out["extras"] = (() => {
-            try {
-              return extrasTransferTypeConverter.toTransferType(value.extras);
-            } catch (error) {
-              __nexgenDefinitions.collect(violations, "extras", error);
-              return undefined;
-            }
-          })();
+          const extrasViolationCount = violations.length;
+          if (violations.length === extrasViolationCount) {
+            out["extras"] = (() => {
+              try {
+                return extrasTransferTypeConverter.toTransferType(value.extras);
+              } catch (error) {
+                __nexgenDefinitions.collect(violations, "extras", error);
+                return undefined;
+              }
+            })();
+          }
         }
       }
       if (value.shape !== undefined) {
         if (value.shape === null) {
           violations.push({ path: "shape", reason: "explicit null not allowed" });
         } else {
-          out["shape"] = (() => {
-            try {
-              return shapeTransferTypeConverter.toTransferType(value.shape);
-            } catch (error) {
-              __nexgenDefinitions.collect(violations, "shape", error);
-              return undefined;
-            }
-          })();
+          const shapeViolationCount = violations.length;
+          if (violations.length === shapeViolationCount) {
+            out["shape"] = (() => {
+              try {
+                return shapeTransferTypeConverter.toTransferType(value.shape);
+              } catch (error) {
+                __nexgenDefinitions.collect(violations, "shape", error);
+                return undefined;
+              }
+            })();
+          }
         }
       }
       if (value.note !== undefined) {
         if (value.note === null) {
           violations.push({ path: "note", reason: "explicit null not allowed" });
         } else {
-          out["note"] = (() => {
-            try {
-              return noteTransferTypeConverter.toTransferType(value.note);
-            } catch (error) {
-              __nexgenDefinitions.collect(violations, "note", error);
-              return undefined;
-            }
-          })();
+          const noteViolationCount = violations.length;
+          if (violations.length === noteViolationCount) {
+            out["note"] = (() => {
+              try {
+                return noteTransferTypeConverter.toTransferType(value.note);
+              } catch (error) {
+                __nexgenDefinitions.collect(violations, "note", error);
+                return undefined;
+              }
+            })();
+          }
         }
       }
       if (value.address !== undefined) {
         if (value.address === null) {
           violations.push({ path: "address", reason: "explicit null not allowed" });
         } else {
-          out["address"] = (() => {
-            try {
-              return addressTransferTypeConverter.toTransferType(value.address);
-            } catch (error) {
-              __nexgenDefinitions.collect(violations, "address", error);
-              return undefined;
-            }
-          })();
+          const addressViolationCount = violations.length;
+          if (violations.length === addressViolationCount) {
+            out["address"] = (() => {
+              try {
+                return addressTransferTypeConverter.toTransferType(value.address);
+              } catch (error) {
+                __nexgenDefinitions.collect(violations, "address", error);
+                return undefined;
+              }
+            })();
+          }
         }
       }
       if (value.labels !== undefined) {
         if (value.labels === null) {
           violations.push({ path: "labels", reason: "explicit null not allowed" });
         } else {
-          out["labels"] = (() => {
-            try {
-              return labelsTransferTypeConverter.toTransferType(value.labels);
-            } catch (error) {
-              __nexgenDefinitions.collect(violations, "labels", error);
-              return undefined;
-            }
-          })();
+          const labelsViolationCount = violations.length;
+          if (violations.length === labelsViolationCount) {
+            out["labels"] = (() => {
+              try {
+                return labelsTransferTypeConverter.toTransferType(value.labels);
+              } catch (error) {
+                __nexgenDefinitions.collect(violations, "labels", error);
+                return undefined;
+              }
+            })();
+          }
         }
       }
       if (value.settings !== undefined) {
         if (value.settings === null) {
           violations.push({ path: "settings", reason: "explicit null not allowed" });
         } else {
-          out["settings"] = (() => {
-            try {
-              return settingsTransferTypeConverter.toTransferType(value.settings);
-            } catch (error) {
-              __nexgenDefinitions.collect(violations, "settings", error);
-              return undefined;
-            }
-          })();
+          const settingsViolationCount = violations.length;
+          if (violations.length === settingsViolationCount) {
+            out["settings"] = (() => {
+              try {
+                return settingsTransferTypeConverter.toTransferType(value.settings);
+              } catch (error) {
+                __nexgenDefinitions.collect(violations, "settings", error);
+                return undefined;
+              }
+            })();
+          }
         }
       }
       if (value.attributes !== undefined) {
         if (value.attributes === null) {
           violations.push({ path: "attributes", reason: "explicit null not allowed" });
         } else {
-          out["attributes"] = (() => {
-            try {
-              return attributesTransferTypeConverter.toTransferType(value.attributes);
-            } catch (error) {
-              __nexgenDefinitions.collect(violations, "attributes", error);
-              return undefined;
-            }
-          })();
+          const attributesViolationCount = violations.length;
+          if (violations.length === attributesViolationCount) {
+            out["attributes"] = (() => {
+              try {
+                return attributesTransferTypeConverter.toTransferType(value.attributes);
+              } catch (error) {
+                __nexgenDefinitions.collect(violations, "attributes", error);
+                return undefined;
+              }
+            })();
+          }
         }
       }
       if (value.contact !== undefined) {
         if (value.contact === null) {
           violations.push({ path: "contact", reason: "explicit null not allowed" });
         } else {
-          out["contact"] = (() => {
-            try {
-              return contactTsTransferTypeConverter.toTransferType(value.contact);
-            } catch (error) {
-              __nexgenDefinitions.collect(violations, "contact", error);
-              return undefined;
-            }
-          })();
+          const contactViolationCount = violations.length;
+          if (violations.length === contactViolationCount) {
+            out["contact"] = (() => {
+              try {
+                return contactTsTransferTypeConverter.toTransferType(value.contact);
+              } catch (error) {
+                __nexgenDefinitions.collect(violations, "contact", error);
+                return undefined;
+              }
+            })();
+          }
         }
       }
       if (value.nullableCount !== undefined) {
@@ -6548,16 +6728,24 @@ export const showcaseLedgerTransferTypeConverter =
         string,
         unknown
       >;
-      for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
+      if (!__nexgenDefinitions.isPlainObject(value.additionalProperties)) {
+        throw __nexgenDefinitions.payloadValidationError([
+          { path: "", reason: "expected object" },
+        ]);
+      }
+      for (const [key, entry] of Object.entries(value.additionalProperties)) {
+        const memberViolationCount = violations.length;
         const path = __nexgenDefinitions.memberPath(key);
-        out[key] = (() => {
-          try {
-            return showcaseLedgerValueTransferTypeConverter.toTransferType(entry);
-          } catch (error) {
-            __nexgenDefinitions.collect(violations, path, error);
-            return undefined;
-          }
-        })();
+        if (violations.length === memberViolationCount) {
+          out[key] = (() => {
+            try {
+              return showcaseLedgerValueTransferTypeConverter.toTransferType(entry);
+            } catch (error) {
+              __nexgenDefinitions.collect(violations, path, error);
+              return undefined;
+            }
+          })();
+        }
       }
       if (violations.length) {
         throw __nexgenDefinitions.payloadValidationError(violations);
@@ -6762,14 +6950,19 @@ export const showcaseLocationTransferTypeConverter =
         if (value.geo === null) {
           violations.push({ path: "geo", reason: "explicit null not allowed" });
         } else {
-          out["geo"] = (() => {
-            try {
-              return showcaseLocationGeoTransferTypeConverter.toTransferType(value.geo);
-            } catch (error) {
-              __nexgenDefinitions.collect(violations, "geo", error);
-              return undefined;
-            }
-          })();
+          const geoViolationCount = violations.length;
+          if (violations.length === geoViolationCount) {
+            out["geo"] = (() => {
+              try {
+                return showcaseLocationGeoTransferTypeConverter.toTransferType(
+                  value.geo,
+                );
+              } catch (error) {
+                __nexgenDefinitions.collect(violations, "geo", error);
+                return undefined;
+              }
+            })();
+          }
         }
       }
       for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
@@ -6961,7 +7154,12 @@ export const showcaseMetadataTransferTypeConverter =
         string,
         unknown
       >;
-      for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
+      if (!__nexgenDefinitions.isPlainObject(value.additionalProperties)) {
+        throw __nexgenDefinitions.payloadValidationError([
+          { path: "", reason: "expected object" },
+        ]);
+      }
+      for (const [key, entry] of Object.entries(value.additionalProperties)) {
         out[key] = entry;
       }
       const keys = Object.keys(out);
@@ -7530,7 +7728,12 @@ export const tokensTransferTypeConverter =
         string,
         unknown
       >;
-      for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
+      if (!__nexgenDefinitions.isPlainObject(value.additionalProperties)) {
+        throw __nexgenDefinitions.payloadValidationError([
+          { path: "", reason: "expected object" },
+        ]);
+      }
+      for (const [key, entry] of Object.entries(value.additionalProperties)) {
         const path = __nexgenDefinitions.memberPath(key);
         if (!(typeof entry === "string")) {
           violations.push({ path: path, reason: "expected string" });

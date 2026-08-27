@@ -1429,11 +1429,28 @@ fn render_ts_field_checks(
 }
 
 fn ts_serialize_type_check(schema: &Schema, value_expr: &str) -> Option<(String, &'static str)> {
-    // Materialized wire strings are already target-language objects by the
-    // time serialize validation runs. Their dedicated format/encoding checks
-    // below validate that representation before producing the wire string.
-    if temporal_kind_direct(schema).is_some() || content_encoding_direct(schema).is_some() {
-        return None;
+    if let Some(kind) = temporal_kind_direct(schema) {
+        let native = ts_temporal_type(kind, active_repr());
+        let predicate = match native {
+            "string" => format!("typeof {value_expr} === 'string'"),
+            "Date" => format!("{value_expr} instanceof Date"),
+            _ => format!("{value_expr} instanceof {native}"),
+        };
+        return Some((
+            predicate,
+            match kind {
+                TemporalKind::DateTime => "expected date-time",
+                TemporalKind::Date => "expected date",
+                TemporalKind::Time => "expected time",
+                TemporalKind::Duration => "expected duration",
+            },
+        ));
+    }
+    if content_encoding_direct(schema).is_some() {
+        return Some((
+            format!("{value_expr} instanceof Uint8Array"),
+            "expected bytes",
+        ));
     }
     match schema.ty.as_ref().and_then(Value::as_str) {
         Some("string") => Some((
@@ -1472,6 +1489,28 @@ fn render_ts_field_checks_at_depth(
         render_ts_field_checks_at_depth(
             output, non_null, value_expr, path_expr, indent, depth, check_type,
         );
+        return;
+    }
+    if check_type && let Some((predicate, reason)) = ts_serialize_type_check(schema, value_expr) {
+        output.push_str(indent);
+        output.push_str(&format!("if (!({predicate})) {{\n"));
+        output.push_str(indent);
+        output.push_str(&format!(
+            "  violations.push({{ path: {path_expr}, reason: '{reason}' }});\n"
+        ));
+        output.push_str(indent);
+        output.push_str("} else {\n");
+        render_ts_field_checks_at_depth(
+            output,
+            schema,
+            value_expr,
+            path_expr,
+            &format!("{indent}  "),
+            depth,
+            false,
+        );
+        output.push_str(indent);
+        output.push_str("}\n");
         return;
     }
     if let Some(kind) = temporal_kind_direct(schema) {
@@ -1523,28 +1562,6 @@ fn render_ts_field_checks_at_depth(
         if let Some(union) = classify_ts_union(schema, &[]) {
             render_ts_union_value_checks(output, &union, value_expr, path_expr, indent);
         }
-        return;
-    }
-    if check_type && let Some((predicate, reason)) = ts_serialize_type_check(schema, value_expr) {
-        output.push_str(indent);
-        output.push_str(&format!("if (!({predicate})) {{\n"));
-        output.push_str(indent);
-        output.push_str(&format!(
-            "  violations.push({{ path: {path_expr}, reason: '{reason}' }});\n"
-        ));
-        output.push_str(indent);
-        output.push_str("} else {\n");
-        render_ts_field_checks_at_depth(
-            output,
-            schema,
-            value_expr,
-            path_expr,
-            &format!("{indent}  "),
-            depth,
-            false,
-        );
-        output.push_str(indent);
-        output.push_str("}\n");
         return;
     }
     if let Some(const_value) = &schema.const_value {
@@ -3570,12 +3587,18 @@ fn render_model_serializer_body(
     );
 
     if let Some(shape) = ts_map_shape(&schema)? {
+        output.push_str(&format!(
+            "  if (!{DEFINITIONS_NAMESPACE}.isPlainObject(value.additionalProperties)) {{\n    throw {DEFINITIONS_NAMESPACE}.payloadValidationError([{{ path: '', reason: 'expected object' }}]);\n  }}\n"
+        ));
         output.push_str(
-            "  for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {\n",
+            "  for (const [key, entry] of Object.entries(value.additionalProperties)) {\n",
         );
         // Every member is re-checked against `T` before emit (P12), keyed by its
         // own key — the same predicates the parse side ran.
         if let Some(value_schema) = &shape.value_schema {
+            if serialize_expr(value_schema, "entry") != "entry" {
+                output.push_str("    const memberViolationCount = violations.length;\n");
+            }
             output.push_str(&format!(
                 "    const path = {DEFINITIONS_NAMESPACE}.memberPath(key);\n"
             ));
@@ -3587,7 +3610,17 @@ fn render_model_serializer_body(
             Some(value_schema) => serialize_expr_collecting(value_schema, "entry", "path"),
             None => "entry".to_string(),
         };
-        output.push_str(&format!("    out[key] = {entry};\n"));
+        if shape
+            .value_schema
+            .as_ref()
+            .is_some_and(|value_schema| serialize_expr(value_schema, "entry") != "entry")
+        {
+            output.push_str("    if (violations.length === memberViolationCount) {\n");
+            output.push_str(&format!("      out[key] = {entry};\n"));
+            output.push_str("    }\n");
+        } else {
+            output.push_str(&format!("    out[key] = {entry};\n"));
+        }
         output.push_str("  }\n");
         if needs_validation {
             let mut checks = String::new();
@@ -3639,12 +3672,31 @@ fn render_model_serializer_body(
                 } else {
                     "  "
                 };
+                let gates_conversion = assignment != value_expr;
+                let violation_count = format!("{field_name}ViolationCount");
+                if gates_conversion {
+                    output.push_str(indent);
+                    output.push_str(&format!("const {violation_count} = violations.length;\n"));
+                }
                 render_ts_serialize_property_check(output, json_name, property, indent);
-                output.push_str(indent);
+                let assignment_indent = if gates_conversion {
+                    output.push_str(indent);
+                    output.push_str(&format!(
+                        "if (violations.length === {violation_count}) {{\n"
+                    ));
+                    format!("{indent}  ")
+                } else {
+                    indent.to_string()
+                };
+                output.push_str(&assignment_indent);
                 output.push_str(&ts_index_access("out", json_name));
                 output.push_str(" = ");
                 output.push_str(&assignment);
                 output.push_str(";\n");
+                if gates_conversion {
+                    output.push_str(indent);
+                    output.push_str("}\n");
+                }
                 if requires_value {
                     output.push_str("  }\n");
                 }
@@ -3661,12 +3713,31 @@ fn render_model_serializer_body(
                 } else {
                     "    "
                 };
+                let gates_conversion = assignment != value_expr;
+                let violation_count = format!("{field_name}ViolationCount");
+                if gates_conversion {
+                    output.push_str(indent);
+                    output.push_str(&format!("const {violation_count} = violations.length;\n"));
+                }
                 render_ts_serialize_property_check(output, json_name, property, indent);
-                output.push_str(indent);
+                let assignment_indent = if gates_conversion {
+                    output.push_str(indent);
+                    output.push_str(&format!(
+                        "if (violations.length === {violation_count}) {{\n"
+                    ));
+                    format!("{indent}  ")
+                } else {
+                    indent.to_string()
+                };
+                output.push_str(&assignment_indent);
                 output.push_str(&ts_index_access("out", json_name));
                 output.push_str(" = ");
                 output.push_str(&assignment);
                 output.push_str(";\n");
+                if gates_conversion {
+                    output.push_str(indent);
+                    output.push_str("}\n");
+                }
                 if rejects_null {
                     output.push_str("    }\n");
                 }
@@ -3688,9 +3759,19 @@ fn render_model_serializer_body(
         output.push_str("      continue;\n");
         output.push_str("    }\n");
         if let Some(value_schema) = additional_properties_value_schema(&schema)? {
+            let gates_conversion = serialize_expr(&value_schema, "entry") != "entry";
+            if gates_conversion {
+                output.push_str("    const memberViolationCount = violations.length;\n");
+            }
             render_ts_member_check(output, &value_schema, "entry", "path", "    ");
             let entry = serialize_expr_collecting(&value_schema, "entry", "path");
-            output.push_str(&format!("    out[key] = {entry};\n"));
+            if gates_conversion {
+                output.push_str("    if (violations.length === memberViolationCount) {\n");
+                output.push_str(&format!("      out[key] = {entry};\n"));
+                output.push_str("    }\n");
+            } else {
+                output.push_str(&format!("    out[key] = {entry};\n"));
+            }
         } else {
             output.push_str("    out[key] = entry;\n");
         }

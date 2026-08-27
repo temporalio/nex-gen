@@ -1859,17 +1859,20 @@ fn python_json_union_serializer_validates_before_dispatching() {
     )),
     "the `pick` dispatch is not preceded by the no-branch-matched test:\n{dispatch}");
 
-    // The enclosing member holds no copy of that test; it only re-paths.
+    // The enclosing member holds no copy of that test; it only gates the
+    // conversion after its own checks and re-paths the converter's failure.
     let member = rendered
         .split_once("        if value.pick is not None:\n")
         .expect("no serialize block for the `pick` member")
         .1;
     assert!(
         member.starts_with(concat!(
-            "            try:\n",
-            "                out[\"pick\"] = _bag_pick_to_transfer_type(value.pick)\n",
-            "            except temporalio.exceptions.ApplicationError as error:\n",
-            "                _collect(violations, \"pick\", error)\n",
+            "            pick_violation_count = len(violations)\n",
+            "            if len(violations) == pick_violation_count:\n",
+            "                try:\n",
+            "                    out[\"pick\"] = _bag_pick_to_transfer_type(value.pick)\n",
+            "                except temporalio.exceptions.ApplicationError as error:\n",
+            "                    _collect(violations, \"pick\", error)\n",
         )),
         "the `pick` member repeats the union's checks:\n{member}"
     );

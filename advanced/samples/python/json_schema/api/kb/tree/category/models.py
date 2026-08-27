@@ -116,19 +116,21 @@ class _CategoryTransferTypeConverter(
                 violations.append(Violation(path="name", reason="expected string"))
             out["name"] = value.name
         if value.children is not None:
+            children_violation_count = len(violations)
             if not (isinstance(value.children, list)):
                 violations.append(Violation(path="children", reason="expected array"))
-            children_out: list[typing.Any] = []
-            for children_index, children_element in enumerate(value.children):
-                try:
-                    children_out.append(
-                        _CategoryTransferTypeConverter().to_transfer_type(
-                            children_element
+            if len(violations) == children_violation_count:
+                children_out: list[typing.Any] = []
+                for children_index, children_element in enumerate(value.children):
+                    try:
+                        children_out.append(
+                            _CategoryTransferTypeConverter().to_transfer_type(
+                                children_element
+                            )
                         )
-                    )
-                except temporalio.exceptions.ApplicationError as error:
-                    _collect(violations, f"children[{children_index}]", error)
-            out["children"] = children_out
+                    except temporalio.exceptions.ApplicationError as error:
+                        _collect(violations, f"children[{children_index}]", error)
+                out["children"] = children_out
         if violations:
             raise temporalio.converter.create_payload_validation_error(violations)
         return out

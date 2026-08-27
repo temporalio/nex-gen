@@ -203,28 +203,34 @@ export const blockTransferTypeConverter =
         if (value.style === null) {
           violations.push({ path: "style", reason: "explicit null not allowed" });
         } else {
-          out["style"] = (() => {
-            try {
-              return blockStyleTransferTypeConverter.toTransferType(value.style);
-            } catch (error) {
-              __nexgenDefinitions.collect(violations, "style", error);
-              return undefined;
-            }
-          })();
+          const styleViolationCount = violations.length;
+          if (violations.length === styleViolationCount) {
+            out["style"] = (() => {
+              try {
+                return blockStyleTransferTypeConverter.toTransferType(value.style);
+              } catch (error) {
+                __nexgenDefinitions.collect(violations, "style", error);
+                return undefined;
+              }
+            })();
+          }
         }
       }
       if (value.page !== undefined) {
-        out["page"] =
-          value.page === null
-            ? null
-            : (() => {
-                try {
-                  return pageTransferTypeConverter.toTransferType(value.page);
-                } catch (error) {
-                  __nexgenDefinitions.collect(violations, "page", error);
-                  return undefined;
-                }
-              })();
+        const pageViolationCount = violations.length;
+        if (violations.length === pageViolationCount) {
+          out["page"] =
+            value.page === null
+              ? null
+              : (() => {
+                  try {
+                    return pageTransferTypeConverter.toTransferType(value.page);
+                  } catch (error) {
+                    __nexgenDefinitions.collect(violations, "page", error);
+                    return undefined;
+                  }
+                })();
+        }
       }
       if (violations.length) {
         throw __nexgenDefinitions.payloadValidationError(violations);
