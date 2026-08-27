@@ -77,7 +77,7 @@ public final class AddressBook {
                     @SuppressWarnings("unchecked")
                     List<Violation> nestedViolations0 = (List<Violation>) nested0.getDetails().get(0, List.class);
                     for (Violation nestedViolation0 : nestedViolations0) {
-                        violations.add(nestedViolation0.withPathPrefix(entry.getKey()));
+                        violations.add(nestedViolation0.withPathPrefix(Violation.memberPath(entry.getKey())));
                     }
                     gen.writeNull();
                 }
@@ -104,9 +104,10 @@ public final class AddressBook {
             Iterator<String> fieldNames = node.fieldNames();
             while (fieldNames.hasNext()) {
                 String key = fieldNames.next();
+                String path = Violation.memberPath(key);
                 JsonNode element = node.get(key);
                 if (element.isNull()) {
-                    violations.add(new Violation(key, "explicit null not allowed"));
+                    violations.add(new Violation(path, "explicit null not allowed"));
                     continue;
                 }
                 try {
@@ -120,10 +121,10 @@ public final class AddressBook {
                     @SuppressWarnings("unchecked")
                     List<Violation> nestedViolations = (List<Violation>) nested.getDetails().get(0, List.class);
                     for (Violation violation : nestedViolations) {
-                        violations.add(violation.withPathPrefix(key));
+                        violations.add(violation.withPathPrefix(path));
                     }
                 } catch (IOException nested) {
-                    violations.add(new Violation(key, nested.getMessage()));
+                    violations.add(new Violation(path, nested.getMessage()));
                 }
             }
             if (!violations.isEmpty()) {

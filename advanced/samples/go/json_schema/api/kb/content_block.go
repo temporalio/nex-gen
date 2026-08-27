@@ -59,7 +59,7 @@ func (m *Block) UnmarshalJSON(data []byte) error {
 		switch k {
 		case "blockId", "order", "text", "style", "page":
 		default:
-			errs = append(errs, Violation{k, "unknown field"})
+			errs = append(errs, Violation{memberPath(k), "unknown field"})
 		}
 	}
 	get := func(k string) *json.RawMessage {
@@ -170,7 +170,7 @@ func (m *BlockStyle) UnmarshalJSON(data []byte) error {
 		switch k {
 		case "bold", "indent":
 		default:
-			errs = append(errs, Violation{k, "unknown field"})
+			errs = append(errs, Violation{memberPath(k), "unknown field"})
 		}
 	}
 	get := func(k string) *json.RawMessage {

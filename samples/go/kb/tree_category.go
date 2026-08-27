@@ -45,7 +45,7 @@ func (m *Category) UnmarshalJSON(data []byte) error {
 		switch k {
 		case "id", "name", "children":
 		default:
-			errs = append(errs, Violation{k, "unknown field"})
+			errs = append(errs, Violation{memberPath(k), "unknown field"})
 		}
 	}
 	get := func(k string) *json.RawMessage {
@@ -137,7 +137,7 @@ func (m *Palette) UnmarshalJSON(data []byte) error {
 		switch k {
 		case "swatches":
 		default:
-			errs = append(errs, Violation{k, "unknown field"})
+			errs = append(errs, Violation{memberPath(k), "unknown field"})
 		}
 	}
 	get := func(k string) *json.RawMessage {

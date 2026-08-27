@@ -10,7 +10,9 @@ use serde_json::Value;
 use crate::error::{Error, Result};
 use crate::generator::ExternalModelBackend;
 use crate::generator::json_schema::build_json_name_manifest;
-use crate::generator::json_schema::{bare_ref_target, register_cross_module_ref_names};
+use crate::generator::json_schema::{
+    bare_ref_target, register_cross_module_ref_names, violation_member_segment,
+};
 use crate::generator::python::{
     PythonImports, PythonModelHoists, RenderedModelFragments, WireValueConversion,
     module_common_prefix_len, python_field_name, render_generated_file_header,
@@ -90,6 +92,10 @@ struct Schema {
 /// `Debug`'s Python-invalid `\u{...}` spelling.
 fn python_string_literal(value: &str) -> String {
     serde_json::to_string(value).expect("a Rust string is always JSON-serializable")
+}
+
+fn python_violation_path_literal(key: &str) -> String {
+    python_string_literal(&violation_member_segment(key))
 }
 
 impl Schema {
@@ -941,6 +947,7 @@ const JSON_RUNTIME_SYMBOLS: &[&str] = &[
     "_check_unique_items",
     "_collect",
     "_json_values_equal",
+    "_member_path",
     "_format_base64",
     "_format_base64url",
     "_format_date",
@@ -1033,6 +1040,7 @@ fn render_json_runtime_module() -> String {
         "_check_unique_items",
         "_collect",
         "_json_values_equal",
+        "_member_path",
         "_format_base64",
         "_format_base64url",
         "_format_date",
@@ -1097,6 +1105,14 @@ def _quote(value: object) -> str:
         return repr(value)
 
 
+def _member_path(key: str) -> str:
+    """Returns one escaped member segment in the public violation-path grammar."""
+
+    if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key):
+        return key
+    return '["' + key.replace("\\", "\\\\").replace('"', '\\"') + '"]'
+
+
 def _collect(
     violations: list[Violation],
     path: str,
@@ -1113,7 +1129,13 @@ def _collect(
         # A nested violation about the value *itself* carries no path of its own
         # (a union branch's own constraint, an element-level check), so the
         # prefix is the whole path -- never a dangling separator (P11).
-        nested = f"{path}.{inner.path}" if inner.path else path
+        nested = (
+            path
+            if not inner.path
+            else f"{path}{inner.path}"
+            if inner.path.startswith("[")
+            else f"{path}.{inner.path}"
+        )
         violations.append(Violation(path=nested, reason=inner.reason))
 "#;
 
@@ -2006,7 +2028,7 @@ fn render_py_property_name_checks(
             output,
             &inner,
             &format!("len(key) < {min}"),
-            "key",
+            "_member_path(key)",
             &format!(
                 "f\"invalid property name {{_quote(key)}}: must have length >= {min}, got {{len(key)}}\""
             ),
@@ -2017,7 +2039,7 @@ fn render_py_property_name_checks(
             output,
             &inner,
             &format!("len(key) > {max}"),
-            "key",
+            "_member_path(key)",
             &format!(
                 "f\"invalid property name {{_quote(key)}}: must have length <= {max}, got {{len(key)}}\""
             ),
@@ -2030,7 +2052,7 @@ fn render_py_property_name_checks(
             output,
             &inner,
             &format!("{const_name}.search(key) is None"),
-            "key",
+            "_member_path(key)",
             &format!(
                 "f'invalid property name {{_quote(key)}}: must match pattern {{{const_name}.pattern}}'"
             ),
@@ -2056,7 +2078,7 @@ fn render_py_property_name_checks(
                 output,
                 &inner,
                 &format!("key not in {}", py_value_tuple(&allowed)),
-                "key",
+                "_member_path(key)",
                 &format!(
                     "f'invalid property name {{_quote(key)}}: must be one of [{}], got {{_quote(key)}}'",
                     py_fstring_text(&rendered)
@@ -2077,7 +2099,7 @@ fn render_py_property_name_checks(
             output,
             &inner,
             &format!("{length_guard}{const_name}.search(key) is None"),
-            "key",
+            "_member_path(key)",
             &format!(
                 "f'invalid property name {{_quote(key)}}: must be a valid {}'",
                 check.name
@@ -3877,6 +3899,7 @@ fn render_map_parser_body(
         // Free-form members are carried verbatim, `null` included (P13).
         None => output.push_str("    additional_properties[key] = raw[key]\n"),
         Some(value_schema) => {
+            output.push_str("    path = _member_path(key)\n");
             render_py_slot_declaration(output, "    ", "member", &shape.value_annotation);
             output.push_str("    member_raw = raw[key]\n");
             render_value_parser(
@@ -3884,7 +3907,7 @@ fn render_map_parser_body(
                 value_schema,
                 "member_raw",
                 "member",
-                "key",
+                "path",
                 "    ",
                 "member",
             )?;
@@ -3923,7 +3946,8 @@ fn render_model_serializer_body(
     if let Some(shape) = py_map_shape(schema)? {
         output.push_str("for key, entry in value.additional_properties.items():\n");
         if let Some(value_schema) = &shape.value_schema {
-            render_py_member_check(output, value_schema, models, "entry", "key", "    ")?;
+            output.push_str("    path = _member_path(key)\n");
+            render_py_member_check(output, value_schema, models, "entry", "path", "    ")?;
         }
         match &shape.value_schema {
             Some(value_schema) => render_py_serialize_value(
@@ -3931,7 +3955,7 @@ fn render_model_serializer_body(
                 value_schema,
                 PySerializeSink::Assign("out[key]"),
                 "entry",
-                "key",
+                "path",
                 "    ",
                 "entry",
             )?,
@@ -3963,7 +3987,7 @@ fn render_model_serializer_body(
             };
             let key = python_string_literal(json_name);
             let target = format!("out[{key}]");
-            let path_expr = python_string_literal(json_name);
+            let path_expr = python_violation_path_literal(json_name);
             // An optional member is emitted under an `is not None` guard, so the
             // nullability wrapper's own `None` branch is already ruled out and the
             // transform is taken straight from the member's non-null shape.
@@ -4023,23 +4047,24 @@ fn render_model_serializer_body(
     }
     if is_open_object(schema) {
         output.push_str("for key, entry in value.additional_properties.items():\n");
+        output.push_str("    path = _member_path(key)\n");
         output.push_str(&format!(
             "    if key in {}:\n",
             declared_fields_const_name(&model.model_name)
         ));
         output.push_str(
-            "        violations.append(Violation(path=key, reason=\"additional property collides with declared property\"))\n",
+            "        violations.append(Violation(path=path, reason=\"additional property collides with declared property\"))\n",
         );
         output.push_str("    else:\n");
         match typed_additional_properties_schema(schema)? {
             Some(value_schema) => {
-                render_py_member_check(output, &value_schema, models, "entry", "key", "        ")?;
+                render_py_member_check(output, &value_schema, models, "entry", "path", "        ")?;
                 render_py_serialize_value(
                     output,
                     &value_schema,
                     PySerializeSink::Assign("out[key]"),
                     "entry",
-                    "key",
+                    "path",
                     "        ",
                     "entry",
                 )?;
@@ -4253,7 +4278,7 @@ fn render_py_serialize_property_check(
         return Ok(());
     }
     let value_expr = format!("value.{}", property.py_member_name(json_name));
-    let path_expr = python_string_literal(json_name);
+    let path_expr = python_violation_path_literal(json_name);
     let guard_null = allows_null(property) && !guarded;
     let body_indent = if guard_null {
         format!("{indent}    ")
@@ -4336,7 +4361,7 @@ fn render_property_parser(
     let slot = parse_slot_local(&property.py_member_name(json_name));
     let member_type = annotation(property)?;
     let key = python_string_literal(json_name);
-    let path_expr = python_string_literal(json_name);
+    let path_expr = python_violation_path_literal(json_name);
     let raw_local = format!("{slot}_raw");
     let nullable = allows_null(property);
 
@@ -4394,7 +4419,7 @@ fn render_property_value_parser(
     raw_expr: &str,
     indent: &str,
 ) -> Result<()> {
-    let path_expr = python_string_literal(json_name);
+    let path_expr = python_violation_path_literal(json_name);
     // An inline `oneOf` sum type dispatches through the module's union parser (a
     // `$ref` at a named union routes through the reference path below).
     if classify_py_union(property, models)?.is_some() {
@@ -5052,11 +5077,15 @@ fn render_closed_object_unknown_key_check(output: &mut String, schema: &Schema) 
     output.push_str("for key in raw:\n");
     if fields.is_empty() {
         // A closed object with no declared members admits nothing at all.
-        output.push_str("    violations.append(Violation(path=key, reason=\"unknown field\"))\n");
+        output.push_str(
+            "    violations.append(Violation(path=_member_path(key), reason=\"unknown field\"))\n",
+        );
         return;
     }
     output.push_str(&format!("    if {}:\n", fields.join(" and ")));
-    output.push_str("        violations.append(Violation(path=key, reason=\"unknown field\"))\n");
+    output.push_str(
+        "        violations.append(Violation(path=_member_path(key), reason=\"unknown field\"))\n",
+    );
 }
 
 fn render_open_object_collection(
@@ -5078,6 +5107,7 @@ fn render_open_object_collection(
     match value_schema {
         None => output.push_str("        additional_properties[key] = raw[key]\n"),
         Some(value_schema) => {
+            output.push_str("        path = _member_path(key)\n");
             render_py_slot_declaration(output, "        ", "member", &value_annotation);
             output.push_str("        member_raw = raw[key]\n");
             output.push_str("        member_violation_count = len(violations)\n");
@@ -5086,7 +5116,7 @@ fn render_open_object_collection(
                 &value_schema,
                 "member_raw",
                 "member",
-                "key",
+                "path",
                 "        ",
                 "member",
             )?;

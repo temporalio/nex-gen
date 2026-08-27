@@ -126,4 +126,31 @@ describe("json-schema chat generated definitions", () => {
       }),
     ).toThrow(/roomId.*collides with declared property/);
   });
+
+  test("escapes arbitrary wire keys in violation paths", () => {
+    const paths = (value: unknown): string[] => {
+      try {
+        sendMessageInputTransferTypeConverter.fromTransferType(value);
+      } catch (error) {
+        expect(error).toBeInstanceOf(ApplicationFailure);
+        return ((error as ApplicationFailure).details?.[0] as { path: string }[]).map(
+          ({ path }) => path,
+        );
+      }
+      return [];
+    };
+
+    expect(
+      paths({
+        roomId: "r1",
+        message: { kind: "text", body: "hi", "a.b": 1 },
+        "[0]": 1,
+        'quote"slash\\': 1,
+      }),
+    ).toEqual([
+      'message["a.b"]',
+      '["[0]"]',
+      '["quote\\"slash\\\\"]',
+    ]);
+  });
 });

@@ -69,7 +69,7 @@ public final class Nicknames {
                 }
                 int length = entry.getValue().codePointCount(0, entry.getValue().length());
                 if (length < 2) {
-                    violations.add(new Violation(entry.getKey(), "must have length >= 2, got " + length));
+                    violations.add(new Violation(Violation.memberPath(entry.getKey()), "must have length >= 2, got " + length));
                 }
             }
             if (!violations.isEmpty()) {
@@ -102,18 +102,19 @@ public final class Nicknames {
             Iterator<String> fieldNames = node.fieldNames();
             while (fieldNames.hasNext()) {
                 String key = fieldNames.next();
+                String path = Violation.memberPath(key);
                 JsonNode element = node.get(key);
                 if (element.isNull()) {
                     additionalProperties.put(key, null);
                     continue;
                 }
                 if (!element.isTextual()) {
-                    violations.add(new Violation(key, "expected string value"));
+                    violations.add(new Violation(path, "expected string value"));
                 } else {
                     String value = element.textValue();
                     int length = value.codePointCount(0, value.length());
                     if (length < 2) {
-                        violations.add(new Violation(key, "must have length >= 2, got " + length));
+                        violations.add(new Violation(path, "must have length >= 2, got " + length));
                     }
                     additionalProperties.put(key, value);
                 }

@@ -828,9 +828,10 @@ export const addressTransferTypeConverter =
         out["zip"] = value.zip;
       }
       for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
+        const path = __nexgenDefinitions.memberPath(key);
         if (ADDRESS_DECLARED.has(key)) {
           violations.push({
-            path: key,
+            path,
             reason: "catch-all key collides with declared property",
           });
           continue;
@@ -859,11 +860,12 @@ export const addressBookTransferTypeConverter =
         null,
       ) as Record<string, Address>;
       for (const key of keys) {
+        const path = __nexgenDefinitions.memberPath(key);
         let entry: Address | undefined = undefined;
         try {
           entry = addressTransferTypeConverter.fromTransferType(raw[key]);
         } catch (error) {
-          __nexgenDefinitions.collect(violations, key, error);
+          __nexgenDefinitions.collect(violations, path, error);
         }
         if (entry !== undefined) {
           additionalProperties[key] = entry;
@@ -882,11 +884,12 @@ export const addressBookTransferTypeConverter =
         unknown
       >;
       for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
+        const path = __nexgenDefinitions.memberPath(key);
         out[key] = (() => {
           try {
             return addressTransferTypeConverter.toTransferType(entry);
           } catch (error) {
-            __nexgenDefinitions.collect(violations, key, error);
+            __nexgenDefinitions.collect(violations, path, error);
             return undefined;
           }
         })();
@@ -924,7 +927,7 @@ export const attributesTransferTypeConverter =
       for (const key of keys) {
         if (__nexgenDefinitions.codePointLength(key, 8) > 8) {
           violations.push({
-            path: key,
+            path: __nexgenDefinitions.memberPath(key),
             reason: `invalid property name "${key}": must have length <= 8, got ${__nexgenDefinitions.codePointLength(key)}`,
           });
         }
@@ -933,9 +936,10 @@ export const attributesTransferTypeConverter =
         null,
       ) as Record<string, string>;
       for (const key of keys) {
+        const path = __nexgenDefinitions.memberPath(key);
         let entry: string | undefined = undefined;
         if (typeof raw[key] !== "string") {
-          violations.push({ path: key, reason: "expected string" });
+          violations.push({ path: path, reason: "expected string" });
         } else {
           entry = raw[key];
         }
@@ -956,6 +960,7 @@ export const attributesTransferTypeConverter =
         unknown
       >;
       for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
+        const path = __nexgenDefinitions.memberPath(key);
         out[key] = entry;
       }
       const keys = Object.keys(out);
@@ -974,7 +979,7 @@ export const attributesTransferTypeConverter =
       for (const key of keys) {
         if (__nexgenDefinitions.codePointLength(key, 8) > 8) {
           violations.push({
-            path: key,
+            path: __nexgenDefinitions.memberPath(key),
             reason: `invalid property name "${key}": must have length <= 8, got ${__nexgenDefinitions.codePointLength(key)}`,
           });
         }
@@ -1001,11 +1006,12 @@ export const blobIndexTransferTypeConverter =
         null,
       ) as Record<string, Uint8Array>;
       for (const key of keys) {
+        const path = __nexgenDefinitions.memberPath(key);
         let entry: Uint8Array | undefined = undefined;
         if (typeof raw[key] !== "string") {
-          violations.push({ path: key, reason: "expected string" });
+          violations.push({ path: path, reason: "expected string" });
         } else {
-          const parsed = __nexgenDefinitions.base64ToBytes(raw[key], key, violations);
+          const parsed = __nexgenDefinitions.base64ToBytes(raw[key], path, violations);
           if (parsed !== undefined) {
             entry = parsed;
           }
@@ -1026,6 +1032,7 @@ export const blobIndexTransferTypeConverter =
         unknown
       >;
       for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
+        const path = __nexgenDefinitions.memberPath(key);
         out[key] = __nexgenDefinitions.bytesToBase64(entry);
       }
       return out;
@@ -1047,11 +1054,12 @@ export const choicesTransferTypeConverter =
         null,
       ) as Record<string, ChoicesValue>;
       for (const key of keys) {
+        const path = __nexgenDefinitions.memberPath(key);
         let entry: ChoicesValue | undefined = undefined;
         try {
           entry = choicesValueTransferTypeConverter.fromTransferType(raw[key]);
         } catch (error) {
-          __nexgenDefinitions.collect(violations, key, error);
+          __nexgenDefinitions.collect(violations, path, error);
         }
         if (entry !== undefined) {
           additionalProperties[key] = entry;
@@ -1070,11 +1078,12 @@ export const choicesTransferTypeConverter =
         unknown
       >;
       for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
+        const path = __nexgenDefinitions.memberPath(key);
         out[key] = (() => {
           try {
             return choicesValueTransferTypeConverter.toTransferType(entry);
           } catch (error) {
-            __nexgenDefinitions.collect(violations, key, error);
+            __nexgenDefinitions.collect(violations, path, error);
             return undefined;
           }
         })();
@@ -1215,9 +1224,10 @@ export const circleTransferTypeConverter =
       }
       out["radius"] = value.radius;
       for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
+        const path = __nexgenDefinitions.memberPath(key);
         if (CIRCLE_DECLARED.has(key)) {
           violations.push({
-            path: key,
+            path,
             reason: "catch-all key collides with declared property",
           });
           continue;
@@ -1348,9 +1358,10 @@ export const contactTsTransferTypeConverter =
         out["shippingZip"] = value.shippingZip;
       }
       for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
+        const path = __nexgenDefinitions.memberPath(key);
         if (CONTACT_TS_DECLARED.has(key)) {
           violations.push({
-            path: key,
+            path,
             reason: "catch-all key collides with declared property",
           });
           continue;
@@ -1399,13 +1410,14 @@ export const dateIndexTransferTypeConverter =
         null,
       ) as Record<string, string>;
       for (const key of keys) {
+        const path = __nexgenDefinitions.memberPath(key);
         let entry: string | undefined = undefined;
         if (typeof raw[key] !== "string") {
-          violations.push({ path: key, reason: "expected string" });
+          violations.push({ path: path, reason: "expected string" });
         } else {
           const parsed = __nexgenDefinitions.parseTemporalDate(
             raw[key],
-            key,
+            path,
             violations,
           );
           if (parsed !== undefined) {
@@ -1429,7 +1441,8 @@ export const dateIndexTransferTypeConverter =
         unknown
       >;
       for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
-        __nexgenDefinitions.validateTemporalDate(entry, key, violations);
+        const path = __nexgenDefinitions.memberPath(key);
+        __nexgenDefinitions.validateTemporalDate(entry, path, violations);
         out[key] = entry;
       }
       if (violations.length) {
@@ -1512,9 +1525,10 @@ export const labelsTransferTypeConverter =
         null,
       ) as Record<string, string>;
       for (const key of keys) {
+        const path = __nexgenDefinitions.memberPath(key);
         let entry: string | undefined = undefined;
         if (typeof raw[key] !== "string") {
-          violations.push({ path: key, reason: "expected string" });
+          violations.push({ path: path, reason: "expected string" });
         } else {
           entry = raw[key];
         }
@@ -1535,6 +1549,7 @@ export const labelsTransferTypeConverter =
         unknown
       >;
       for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
+        const path = __nexgenDefinitions.memberPath(key);
         out[key] = entry;
       }
       const keys = Object.keys(out);
@@ -1633,9 +1648,10 @@ export const linkNoteTransferTypeConverter =
       }
       out["href"] = value.href;
       for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
+        const path = __nexgenDefinitions.memberPath(key);
         if (LINK_NOTE_DECLARED.has(key)) {
           violations.push({
-            path: key,
+            path,
             reason: "catch-all key collides with declared property",
           });
           continue;
@@ -1664,14 +1680,15 @@ export const metricsTransferTypeConverter =
         null,
       ) as Record<string, number>;
       for (const key of keys) {
+        const path = __nexgenDefinitions.memberPath(key);
         let entry: number | undefined = undefined;
         if (typeof raw[key] !== "number") {
-          violations.push({ path: key, reason: "expected number" });
+          violations.push({ path: path, reason: "expected number" });
         } else {
           entry = raw[key];
           if (!Number.isFinite(raw[key])) {
             violations.push({
-              path: key,
+              path: path,
               reason: `must be a finite number, got ${raw[key]}`,
             });
           }
@@ -1693,9 +1710,10 @@ export const metricsTransferTypeConverter =
         unknown
       >;
       for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
+        const path = __nexgenDefinitions.memberPath(key);
         if (!Number.isFinite(entry)) {
           violations.push({
-            path: key,
+            path: path,
             reason: `must be a finite number, got ${entry}`,
           });
         }
@@ -1723,19 +1741,20 @@ export const nicknamesTransferTypeConverter =
         null,
       ) as Record<string, string | null>;
       for (const key of keys) {
+        const path = __nexgenDefinitions.memberPath(key);
         let entry: string | null | undefined = undefined;
         if (raw[key] === null) {
           entry = null;
         } else {
           if (typeof raw[key] !== "string") {
-            violations.push({ path: key, reason: "expected string" });
+            violations.push({ path: path, reason: "expected string" });
           } else {
             entry = raw[key];
             {
               const codePoints = __nexgenDefinitions.codePointLength(raw[key], 2);
               if (codePoints < 2) {
                 violations.push({
-                  path: key,
+                  path: path,
                   reason: `must have length >= 2, got ${codePoints}`,
                 });
               }
@@ -1759,12 +1778,13 @@ export const nicknamesTransferTypeConverter =
         unknown
       >;
       for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
+        const path = __nexgenDefinitions.memberPath(key);
         if (entry !== null) {
           {
             const codePoints = __nexgenDefinitions.codePointLength(entry, 2);
             if (codePoints < 2) {
               violations.push({
-                path: key,
+                path: path,
                 reason: `must have length >= 2, got ${codePoints}`,
               });
             }
@@ -1844,20 +1864,21 @@ export const quotasTransferTypeConverter =
         null,
       ) as Record<string, number>;
       for (const key of keys) {
+        const path = __nexgenDefinitions.memberPath(key);
         let entry: number | undefined = undefined;
         if (typeof raw[key] !== "number" || !Number.isSafeInteger(raw[key])) {
-          violations.push({ path: key, reason: "expected integer" });
+          violations.push({ path: path, reason: "expected integer" });
         } else {
           entry = raw[key];
           if (raw[key] < 0) {
-            violations.push({ path: key, reason: `must be >= 0, got ${raw[key]}` });
+            violations.push({ path: path, reason: `must be >= 0, got ${raw[key]}` });
           }
           if (raw[key] > 100) {
-            violations.push({ path: key, reason: `must be <= 100, got ${raw[key]}` });
+            violations.push({ path: path, reason: `must be <= 100, got ${raw[key]}` });
           }
           if (raw[key] % 5 !== 0) {
             violations.push({
-              path: key,
+              path: path,
               reason: `must be a multiple of 5, got ${raw[key]}`,
             });
           }
@@ -1879,18 +1900,19 @@ export const quotasTransferTypeConverter =
         unknown
       >;
       for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
+        const path = __nexgenDefinitions.memberPath(key);
         if (!Number.isSafeInteger(entry)) {
-          violations.push({ path: key, reason: "exceeds ±(2^53-1) integer cap" });
+          violations.push({ path: path, reason: "exceeds ±(2^53-1) integer cap" });
         } else {
           if (entry < 0) {
-            violations.push({ path: key, reason: `must be >= 0, got ${entry}` });
+            violations.push({ path: path, reason: `must be >= 0, got ${entry}` });
           }
           if (entry > 100) {
-            violations.push({ path: key, reason: `must be <= 100, got ${entry}` });
+            violations.push({ path: path, reason: `must be <= 100, got ${entry}` });
           }
           if (entry % 5 !== 0) {
             violations.push({
-              path: key,
+              path: path,
               reason: `must be a multiple of 5, got ${entry}`,
             });
           }
@@ -1944,7 +1966,10 @@ export const settingsTransferTypeConverter =
 
       for (const key of Object.keys(raw)) {
         if (key !== "theme" && key !== "fontSize") {
-          violations.push({ path: key, reason: "unknown field" });
+          violations.push({
+            path: __nexgenDefinitions.memberPath(key),
+            reason: "unknown field",
+          });
         }
       }
 
@@ -4093,7 +4118,10 @@ export const showcaseTransferTypeConverter =
           key !== "wildcard" &&
           key !== "quoted"
         ) {
-          violations.push({ path: key, reason: "unknown field" });
+          violations.push({
+            path: __nexgenDefinitions.memberPath(key),
+            reason: "unknown field",
+          });
         }
       }
 
@@ -5366,9 +5394,10 @@ export const showcaseAuditTransferTypeConverter =
       }
       out["by"] = value.by;
       for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
+        const path = __nexgenDefinitions.memberPath(key);
         if (SHOWCASE_AUDIT_DECLARED.has(key)) {
           violations.push({
-            path: key,
+            path,
             reason: "catch-all key collides with declared property",
           });
           continue;
@@ -5464,9 +5493,10 @@ export const showcaseDetailObjectTransferTypeConverter =
         out["hint"] = value.hint;
       }
       for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
+        const path = __nexgenDefinitions.memberPath(key);
         if (SHOWCASE_DETAIL_OBJECT_DECLARED.has(key)) {
           violations.push({
-            path: key,
+            path,
             reason: "catch-all key collides with declared property",
           });
           continue;
@@ -5495,11 +5525,12 @@ export const showcaseLedgerTransferTypeConverter =
         null,
       ) as Record<string, ShowcaseLedgerValue>;
       for (const key of keys) {
+        const path = __nexgenDefinitions.memberPath(key);
         let entry: ShowcaseLedgerValue | undefined = undefined;
         try {
           entry = showcaseLedgerValueTransferTypeConverter.fromTransferType(raw[key]);
         } catch (error) {
-          __nexgenDefinitions.collect(violations, key, error);
+          __nexgenDefinitions.collect(violations, path, error);
         }
         if (entry !== undefined) {
           additionalProperties[key] = entry;
@@ -5518,11 +5549,12 @@ export const showcaseLedgerTransferTypeConverter =
         unknown
       >;
       for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
+        const path = __nexgenDefinitions.memberPath(key);
         out[key] = (() => {
           try {
             return showcaseLedgerValueTransferTypeConverter.toTransferType(entry);
           } catch (error) {
-            __nexgenDefinitions.collect(violations, key, error);
+            __nexgenDefinitions.collect(violations, path, error);
             return undefined;
           }
         })();
@@ -5600,9 +5632,10 @@ export const showcaseLedgerValueTransferTypeConverter =
       }
       out["amount"] = value.amount;
       for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
+        const path = __nexgenDefinitions.memberPath(key);
         if (SHOWCASE_LEDGER_VALUE_DECLARED.has(key)) {
           violations.push({
-            path: key,
+            path,
             reason: "catch-all key collides with declared property",
           });
           continue;
@@ -5707,9 +5740,10 @@ export const showcaseLocationTransferTypeConverter =
         })();
       }
       for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
+        const path = __nexgenDefinitions.memberPath(key);
         if (SHOWCASE_LOCATION_DECLARED.has(key)) {
           violations.push({
-            path: key,
+            path,
             reason: "catch-all key collides with declared property",
           });
           continue;
@@ -5816,9 +5850,10 @@ export const showcaseLocationGeoTransferTypeConverter =
         out["lon"] = value.lon;
       }
       for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
+        const path = __nexgenDefinitions.memberPath(key);
         if (SHOWCASE_LOCATION_GEO_DECLARED.has(key)) {
           violations.push({
-            path: key,
+            path,
             reason: "catch-all key collides with declared property",
           });
           continue;
@@ -5949,9 +5984,10 @@ export const showcaseRowsItemTransferTypeConverter =
       }
       out["cell"] = value.cell;
       for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
+        const path = __nexgenDefinitions.memberPath(key);
         if (SHOWCASE_ROWS_ITEM_DECLARED.has(key)) {
           violations.push({
-            path: key,
+            path,
             reason: "catch-all key collides with declared property",
           });
           continue;
@@ -6062,7 +6098,10 @@ export const getShowcaseInputTransferTypeConverter =
 
       for (const key of Object.keys(raw)) {
         if (key !== "id") {
-          violations.push({ path: key, reason: "unknown field" });
+          violations.push({
+            path: __nexgenDefinitions.memberPath(key),
+            reason: "unknown field",
+          });
         }
       }
 
@@ -6159,9 +6198,10 @@ export const squareTransferTypeConverter =
       }
       out["side"] = value.side;
       for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
+        const path = __nexgenDefinitions.memberPath(key);
         if (SQUARE_DECLARED.has(key)) {
           violations.push({
-            path: key,
+            path,
             reason: "catch-all key collides with declared property",
           });
           continue;
@@ -6257,9 +6297,10 @@ export const textNoteTransferTypeConverter =
       }
       out["body"] = value.body;
       for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
+        const path = __nexgenDefinitions.memberPath(key);
         if (TEXT_NOTE_DECLARED.has(key)) {
           violations.push({
-            path: key,
+            path,
             reason: "catch-all key collides with declared property",
           });
           continue;
@@ -6288,29 +6329,30 @@ export const tokensTransferTypeConverter =
         null,
       ) as Record<string, string>;
       for (const key of keys) {
+        const path = __nexgenDefinitions.memberPath(key);
         let entry: string | undefined = undefined;
         if (typeof raw[key] !== "string") {
-          violations.push({ path: key, reason: "expected string" });
+          violations.push({ path: path, reason: "expected string" });
         } else {
           entry = raw[key];
           {
             const codePoints = __nexgenDefinitions.codePointLength(raw[key], 2);
             if (codePoints < 2) {
               violations.push({
-                path: key,
+                path: path,
                 reason: `must have length >= 2, got ${codePoints}`,
               });
             }
           }
           if (__nexgenDefinitions.codePointLength(raw[key], 8) > 8) {
             violations.push({
-              path: key,
+              path: path,
               reason: `must have length <= 8, got ${__nexgenDefinitions.codePointLength(raw[key])}`,
             });
           }
           if (!PATTERN_C182F89FDB221836.test(raw[key])) {
             violations.push({
-              path: key,
+              path: path,
               reason: `must match pattern ^[a-z]+\$, got ${JSON.stringify(raw[key])}`,
             });
           }
@@ -6332,24 +6374,25 @@ export const tokensTransferTypeConverter =
         unknown
       >;
       for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
+        const path = __nexgenDefinitions.memberPath(key);
         {
           const codePoints = __nexgenDefinitions.codePointLength(entry, 2);
           if (codePoints < 2) {
             violations.push({
-              path: key,
+              path: path,
               reason: `must have length >= 2, got ${codePoints}`,
             });
           }
         }
         if (__nexgenDefinitions.codePointLength(entry, 8) > 8) {
           violations.push({
-            path: key,
+            path: path,
             reason: `must have length <= 8, got ${__nexgenDefinitions.codePointLength(entry)}`,
           });
         }
         if (!PATTERN_C182F89FDB221836.test(entry)) {
           violations.push({
-            path: key,
+            path: path,
             reason: `must match pattern ^[a-z]+\$, got ${JSON.stringify(entry)}`,
           });
         }
@@ -6483,9 +6526,10 @@ export const widgetTransferTypeConverter =
         out["size"] = value.size;
       }
       for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
+        const path = __nexgenDefinitions.memberPath(key);
         if (WIDGET_DECLARED.has(key)) {
           violations.push({
-            path: key,
+            path,
             reason: "catch-all key collides with declared property",
           });
           continue;
@@ -6563,9 +6607,10 @@ export const widgetBaseTransferTypeConverter =
         out["kind"] = value.kind;
       }
       for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
+        const path = __nexgenDefinitions.memberPath(key);
         if (WIDGET_BASE_DECLARED.has(key)) {
           violations.push({
-            path: key,
+            path,
             reason: "catch-all key collides with declared property",
           });
           continue;

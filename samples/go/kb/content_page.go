@@ -49,7 +49,7 @@ func (m *Page) UnmarshalJSON(data []byte) error {
 		switch k {
 		case "pageId", "title", "meta", "blocks":
 		default:
-			errs = append(errs, Violation{k, "unknown field"})
+			errs = append(errs, Violation{memberPath(k), "unknown field"})
 		}
 	}
 	get := func(k string) *json.RawMessage {
@@ -154,7 +154,7 @@ func (m *PageMeta) UnmarshalJSON(data []byte) error {
 		switch k {
 		case "author", "wordCount":
 		default:
-			errs = append(errs, Violation{k, "unknown field"})
+			errs = append(errs, Violation{memberPath(k), "unknown field"})
 		}
 	}
 	get := func(k string) *json.RawMessage {

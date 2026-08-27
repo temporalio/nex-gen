@@ -256,3 +256,22 @@ def test_message_full_optional_nullable_null_collapses() -> None:
     )
     assert from_null == from_absent
     assert "replyToId" not in converter.to_transfer_type(from_null)
+
+
+def test_violation_paths_escape_arbitrary_wire_keys() -> None:
+    converter = converter_for(SendMessageInput)
+    with pytest.raises(temporalio.exceptions.ApplicationError) as excinfo:
+        converter.from_transfer_type(
+            {
+                "roomId": "r1",
+                "message": {"kind": "text", "body": "hi", "a.b": 1},
+                "[0]": 1,
+                'quote"slash\\': 1,
+            },
+            SendMessageInput,
+        )
+    assert violation_pairs(excinfo.value) == [
+        ('message["a.b"]', "unknown field"),
+        ('["[0]"]', "unknown field"),
+        ('["quote\\"slash\\\\"]', "unknown field"),
+    ]

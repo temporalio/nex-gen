@@ -117,7 +117,10 @@ export const pageTransferTypeConverter =
 
       for (const key of Object.keys(raw)) {
         if (key !== "pageId" && key !== "title" && key !== "meta" && key !== "blocks") {
-          violations.push({ path: key, reason: "unknown field" });
+          violations.push({
+            path: __nexgenDefinitions.memberPath(key),
+            reason: "unknown field",
+          });
         }
       }
 
@@ -210,7 +213,10 @@ export const pageMetaTransferTypeConverter =
 
       for (const key of Object.keys(raw)) {
         if (key !== "author" && key !== "wordCount") {
-          violations.push({ path: key, reason: "unknown field" });
+          violations.push({
+            path: __nexgenDefinitions.memberPath(key),
+            reason: "unknown field",
+          });
         }
       }
 

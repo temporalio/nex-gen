@@ -192,6 +192,7 @@ public final class Block {
             Iterator<String> fieldNames = node.fieldNames();
             while (fieldNames.hasNext()) {
                 String key = fieldNames.next();
+                String path = Violation.memberPath(key);
                 switch (key) {
                     case "blockId":
                     case "order":
@@ -200,7 +201,7 @@ public final class Block {
                     case "text":
                         break;
                     default:
-                        violations.add(new Violation(key, "unknown field"));
+                        violations.add(new Violation(path, "unknown field"));
                 }
             }
             String blockId = null;

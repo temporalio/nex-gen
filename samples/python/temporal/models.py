@@ -17,6 +17,7 @@ from ._definitions import (
     _format_date_time,
     _format_duration,
     _format_time,
+    _member_path,
     _parse_date,
     _parse_date_time,
     _parse_duration,
@@ -216,7 +217,9 @@ class _TemporalTransferTypeConverter(
                 and key != "deletedAt"
                 and key != "archivedOn"
             ):
-                violations.append(Violation(path=key, reason="unknown field"))
+                violations.append(
+                    Violation(path=_member_path(key), reason="unknown field")
+                )
         if violations:
             raise temporalio.converter.create_payload_validation_error(violations)
         return Temporal(

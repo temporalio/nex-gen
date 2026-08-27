@@ -42,3 +42,38 @@ pub(in crate::generator) fn register_cross_module_ref_names(
         ref_names.insert(format!("#/$defs/{full_name}"), model_name.clone());
     }
 }
+
+/// Returns one member segment in the public P11 violation-path grammar.
+/// Identifier-like wire keys use dot notation; every other key is bracket
+/// quoted so dots, brackets, quotes, and backslashes remain unambiguous.
+pub(in crate::generator) fn violation_member_segment(key: &str) -> String {
+    let mut bytes = key.bytes();
+    let identifier = bytes
+        .next()
+        .is_some_and(|byte| byte == b'_' || byte.is_ascii_alphabetic())
+        && bytes.all(|byte| byte == b'_' || byte.is_ascii_alphanumeric());
+    if identifier {
+        return key.to_string();
+    }
+    let escaped = key.replace('\\', "\\\\").replace('"', "\\\"");
+    format!("[\"{escaped}\"]")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::violation_member_segment;
+
+    #[test]
+    fn violation_member_segments_follow_the_public_path_grammar() {
+        assert_eq!(violation_member_segment("plain_name9"), "plain_name9");
+        assert_eq!(violation_member_segment("9lives"), "[\"9lives\"]");
+        assert_eq!(violation_member_segment("a.b"), "[\"a.b\"]");
+        assert_eq!(violation_member_segment("[0]"), "[\"[0]\"]");
+        assert_eq!(
+            violation_member_segment("quote\"slash\\"),
+            "[\"quote\\\"slash\\\\\"]"
+        );
+        assert_eq!(violation_member_segment(""), "[\"\"]");
+        assert_eq!(violation_member_segment("café"), "[\"café\"]");
+    }
+}

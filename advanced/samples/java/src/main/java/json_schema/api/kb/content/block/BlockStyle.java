@@ -112,12 +112,13 @@ public final class BlockStyle {
             Iterator<String> fieldNames = node.fieldNames();
             while (fieldNames.hasNext()) {
                 String key = fieldNames.next();
+                String path = Violation.memberPath(key);
                 switch (key) {
                     case "bold":
                     case "indent":
                         break;
                     default:
-                        violations.add(new Violation(key, "unknown field"));
+                        violations.add(new Violation(path, "unknown field"));
                 }
             }
             Boolean bold = null;

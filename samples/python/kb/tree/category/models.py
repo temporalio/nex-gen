@@ -11,6 +11,7 @@ import temporalio.exceptions
 from ..._definitions import (
     Violation,
     _collect,
+    _member_path,
     _transfer_type_convertible,
 )
 
@@ -83,7 +84,9 @@ class _CategoryTransferTypeConverter(
 
         for key in raw:
             if key != "id" and key != "name" and key != "children":
-                violations.append(Violation(path=key, reason="unknown field"))
+                violations.append(
+                    Violation(path=_member_path(key), reason="unknown field")
+                )
         if violations:
             raise temporalio.converter.create_payload_validation_error(violations)
         return Category(
@@ -175,7 +178,9 @@ class _PaletteTransferTypeConverter(
 
         for key in raw:
             if key != "swatches":
-                violations.append(Violation(path=key, reason="unknown field"))
+                violations.append(
+                    Violation(path=_member_path(key), reason="unknown field")
+                )
         if violations:
             raise temporalio.converter.create_payload_validation_error(violations)
         return Palette(

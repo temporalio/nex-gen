@@ -71,7 +71,7 @@ public final class Extras {
             if (value.additionalProperties != null) {
                 for (String key : value.additionalProperties.keySet()) {
                     if (!wireKeys.add(key)) {
-                        violations.add(new Violation(key, "declared property key collision"));
+                        violations.add(new Violation(Violation.memberPath(key), "declared property key collision"));
                     }
                 }
             }
@@ -108,6 +108,7 @@ public final class Extras {
             Iterator<String> fieldNames = node.fieldNames();
             while (fieldNames.hasNext()) {
                 String key = fieldNames.next();
+                String path = Violation.memberPath(key);
                 switch (key) {
                     default:
                         additionalProperties.put(key, node.get(key));

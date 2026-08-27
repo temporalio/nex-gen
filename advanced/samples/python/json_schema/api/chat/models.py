@@ -11,6 +11,7 @@ import temporalio.exceptions
 from ._definitions import (
     Violation,
     _collect,
+    _member_path,
     _parse_spec_integer,
     _transfer_type_convertible,
 )
@@ -47,7 +48,9 @@ class _GetRoomInputTransferTypeConverter(
 
         for key in raw:
             if key != "roomId":
-                violations.append(Violation(path=key, reason="unknown field"))
+                violations.append(
+                    Violation(path=_member_path(key), reason="unknown field")
+                )
         if violations:
             raise temporalio.converter.create_payload_validation_error(violations)
         return GetRoomInput(
@@ -88,10 +91,11 @@ class _LabelsTransferTypeConverter(
             )
         additional_properties: dict[str, str] = {}
         for key in raw:
+            path = _member_path(key)
             member: str = typing.cast("typing.Any", None)
             member_raw = raw[key]
             if not isinstance(member_raw, str):
-                violations.append(Violation(path=key, reason="expected string"))
+                violations.append(Violation(path=path, reason="expected string"))
             else:
                 member = member_raw
             additional_properties[key] = member
@@ -104,6 +108,7 @@ class _LabelsTransferTypeConverter(
         violations: list[Violation] = []
         out: dict[str, typing.Any] = {}
         for key, entry in value.additional_properties.items():
+            path = _member_path(key)
             out[key] = entry
         if len(out) > 50:
             violations.append(
@@ -194,7 +199,9 @@ class _MessageTransferTypeConverter(
                 and key != "replyToId"
                 and key != "priority"
             ):
-                violations.append(Violation(path=key, reason="unknown field"))
+                violations.append(
+                    Violation(path=_member_path(key), reason="unknown field")
+                )
         if violations:
             raise temporalio.converter.create_payload_validation_error(violations)
         return Message(
@@ -396,10 +403,11 @@ class _RoomTransferTypeConverter(
             except temporalio.exceptions.ApplicationError as error:
                 _collect(violations, "labels", error)
         for key, entry in value.additional_properties.items():
+            path = _member_path(key)
             if key in _ROOM_DECLARED:
                 violations.append(
                     Violation(
-                        path=key,
+                        path=path,
                         reason="additional property collides with declared property",
                     )
                 )
@@ -469,7 +477,9 @@ class _SendMessageInputTransferTypeConverter(
 
         for key in raw:
             if key != "roomId" and key != "message":
-                violations.append(Violation(path=key, reason="unknown field"))
+                violations.append(
+                    Violation(path=_member_path(key), reason="unknown field")
+                )
         if violations:
             raise temporalio.converter.create_payload_validation_error(violations)
         return SendMessageInput(
@@ -529,7 +539,9 @@ class _SendMessageOutputTransferTypeConverter(
 
         for key in raw:
             if key != "messageId":
-                violations.append(Violation(path=key, reason="unknown field"))
+                violations.append(
+                    Violation(path=_member_path(key), reason="unknown field")
+                )
         if violations:
             raise temporalio.converter.create_payload_validation_error(violations)
         return SendMessageOutput(

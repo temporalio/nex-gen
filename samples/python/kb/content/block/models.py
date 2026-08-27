@@ -9,6 +9,7 @@ import temporalio.converter
 
 from ..._definitions import (
     Violation,
+    _member_path,
     _parse_spec_integer,
     _transfer_type_convertible,
 )
@@ -64,7 +65,9 @@ class _BlockStyleTransferTypeConverter(
 
         for key in raw:
             if key != "bold" and key != "indent":
-                violations.append(Violation(path=key, reason="unknown field"))
+                violations.append(
+                    Violation(path=_member_path(key), reason="unknown field")
+                )
         if violations:
             raise temporalio.converter.create_payload_validation_error(violations)
         return BlockStyle(

@@ -82,15 +82,16 @@ public final class BlobIndex {
             Iterator<String> fieldNames = node.fieldNames();
             while (fieldNames.hasNext()) {
                 String key = fieldNames.next();
+                String path = Violation.memberPath(key);
                 JsonNode element = node.get(key);
                 if (element.isNull()) {
-                    violations.add(new Violation(key, "explicit null not allowed"));
+                    violations.add(new Violation(path, "explicit null not allowed"));
                     continue;
                 }
                 if (!element.isTextual()) {
-                    violations.add(new Violation(key, "expected string value"));
+                    violations.add(new Violation(path, "expected string value"));
                 } else {
-                    byte[] parsed = Base64Support.parseBase64(element.textValue(), key, violations);
+                    byte[] parsed = Base64Support.parseBase64(element.textValue(), path, violations);
                     if (parsed != null) {
                         additionalProperties.put(key, parsed);
                     }

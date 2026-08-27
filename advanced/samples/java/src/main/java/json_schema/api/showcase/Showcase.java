@@ -3444,6 +3444,7 @@ public final class Showcase {
             Iterator<String> fieldNames = node.fieldNames();
             while (fieldNames.hasNext()) {
                 String key = fieldNames.next();
+                String path = Violation.memberPath(key);
                 switch (key) {
                     case "active":
                     case "address":
@@ -3529,7 +3530,7 @@ public final class Showcase {
                     case "wildcard":
                         break;
                     default:
-                        violations.add(new Violation(key, "unknown field"));
+                        violations.add(new Violation(path, "unknown field"));
                 }
             }
             Kind kind = null;

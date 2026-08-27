@@ -11,6 +11,7 @@ import temporalio.exceptions
 from ._definitions import (
     Violation,
     _collect,
+    _member_path,
     _parse_spec_integer,
     _transfer_type_convertible,
 )
@@ -110,7 +111,9 @@ class _BlockTransferTypeConverter(
                 and key != "style"
                 and key != "page"
             ):
-                violations.append(Violation(path=key, reason="unknown field"))
+                violations.append(
+                    Violation(path=_member_path(key), reason="unknown field")
+                )
         if violations:
             raise temporalio.converter.create_payload_validation_error(violations)
         return Block(
@@ -255,7 +258,9 @@ class _PageTransferTypeConverter(
 
         for key in raw:
             if key != "pageId" and key != "title" and key != "meta" and key != "blocks":
-                violations.append(Violation(path=key, reason="unknown field"))
+                violations.append(
+                    Violation(path=_member_path(key), reason="unknown field")
+                )
         if violations:
             raise temporalio.converter.create_payload_validation_error(violations)
         return Page(

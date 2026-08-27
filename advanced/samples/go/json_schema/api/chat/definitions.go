@@ -14,7 +14,8 @@ import (
 )
 
 // Violation is a single constraint failure. Path is the JSON member path
-// (dotted for nested members); Reason is a human-readable message.
+// (dot segments for identifiers and escaped bracket segments otherwise);
+// Reason is a human-readable message.
 type Violation struct {
 	Path   string
 	Reason string
@@ -27,6 +28,21 @@ func (v Violation) String() string {
 		return v.Reason
 	}
 	return v.Path + ": " + v.Reason
+}
+
+func memberPath(key string) string {
+	identifier := key != ""
+	for i, r := range key {
+		if !(r == '_' || r >= 'A' && r <= 'Z' || r >= 'a' && r <= 'z' || i > 0 && r >= '0' && r <= '9') {
+			identifier = false
+			break
+		}
+	}
+	if identifier {
+		return key
+	}
+	escaped := strings.ReplaceAll(strings.ReplaceAll(key, `\`, `\\`), `"`, `\"`)
+	return `["` + escaped + `"]`
 }
 
 func newPayloadValidationError(violations []Violation) error {
@@ -305,7 +321,7 @@ func marshalField(out map[string]json.RawMessage, key string, v any, errs *[]Vio
 	}
 	b, err := json.Marshal(v)
 	if err != nil {
-		mergeNested(errs, key, err)
+		mergeNested(errs, memberPath(key), err)
 		return
 	}
 	out[key] = b

@@ -2069,7 +2069,7 @@ fn typescript_json_emits_complete_matchers_and_typed_mixed_extras() {
         "{rendered}"
     );
     assert!(
-        rendered.contains("parseTemporalDate(element, `${key}[${index}]`, violations)"),
+        rendered.contains("parseTemporalDate(element, `${path}[${index}]`, violations)"),
         "{rendered}"
     );
     assert!(
@@ -2423,8 +2423,9 @@ test("contains, propertyNames, arrays, and typed-extra counts aggregate both way
   expect(violations(() => auditTransferTypeConverter.toTransferType({ ...value, checkedArray: ["ok", "ok", "x", "x"] }))).not.toHaveLength(0);
 
   for (const key of ["x", "bad key@example.com", "c@example.com"]) {
+    const segment = /^[A-Za-z_][A-Za-z0-9_]*$/u.test(key) ? `.${key}` : `["${key}"]`;
     expect(violations(() => auditTransferTypeConverter.fromTransferType({ ...base, names: { [key]: "x" } }))
-      .some(({ path }) => path === `names.${key}`)).toBe(true);
+      .some(({ path }) => path === `names${segment}`)).toBe(true);
   }
   expect(violations(() => auditTransferTypeConverter.toTransferType({
     ...value, names: { additionalProperties: { "c@example.com": "x" } },

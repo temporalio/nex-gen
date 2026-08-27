@@ -1879,7 +1879,7 @@ fn go_json_decodes_element_position_unions() {
     assert!(rendered.contains("errs = append(errs, Violation{p0, \"explicit null not allowed\"})"));
     // A map member routes through the dispatcher under its key.
     assert!(rendered.contains("AdditionalProperties map[string]EntriesValue"));
-    assert!(rendered.contains("if value, ok := unmarshalEntriesValue(v, k, &errs); ok {"));
+    assert!(rendered.contains("if value, ok := unmarshalEntriesValue(v, path, &errs); ok {"));
     // Element nullability stays the element's own concern.
     assert!(rendered.contains("Slots []*string `json:\"slots,omitempty\"`"));
 
@@ -1972,7 +1972,7 @@ fn go_json_recursively_converts_and_validates_element_positions() {
     assert!(rendered.contains("p1 := fmt.Sprintf(\"%s[%d]\", p0, i1)"));
     assert!(rendered.contains("parseNumberField(&e1, p1, true, false, &errs)"));
     assert!(rendered.contains("parseDate(p0, s0, &errs)"));
-    assert!(rendered.contains("decodeBase64(k, s, blobMapValueContentEncoding, &errs)"));
+    assert!(rendered.contains("decodeBase64(path, s, blobMapValueContentEncoding, &errs)"));
     assert!(rendered.contains("mergeNested(&errs, p0, v0.Validate())"));
 
     fs::write(
