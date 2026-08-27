@@ -12,7 +12,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use nexgen::{GenerateRequest, generate_to_file};
 
 mod common;
-use common::json_input_path;
+use common::{json_input_path, write_bare_ref_alias_closure};
 
 static OUTPUT_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -2981,6 +2981,68 @@ fn go_json_cross_module_go_name_override_moves_every_reference() {
     for stale in ["[GetInput, Page]", "*Page ", "var tmp Page\n"] {
         assert!(!consuming.contains(stale), "{stale}\n{consuming}");
     }
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+#[test]
+fn go_json_bare_ref_root_is_a_runtime_alias_for_operation_io() {
+    let temp_dir = unique_output_path("go-json-bare-ref-alias");
+    let input = write_bare_ref_alias_closure(&temp_dir);
+    let output_path = temp_dir.join("aliases");
+    generate_to_file(&GenerateRequest {
+        language: nexgen::language::Language::Go,
+        input_paths: vec![input],
+        support_paths: Vec::new(),
+        descriptor_paths: Vec::new(),
+        output_path: output_path.clone(),
+        format: false,
+        generate_native_api: false,
+        java_package_name: None,
+        ts_date_time_types: Default::default(),
+    })
+    .unwrap();
+
+    let alias = fs::read_to_string(output_path.join("alias_alternate.go")).unwrap();
+    assert!(alias.contains("type Alternate = Main"), "{alias}");
+    assert!(!alias.contains("type Alternate struct"), "{alias}");
+    let target = fs::read_to_string(output_path.join("target_main.go")).unwrap();
+    assert!(target.contains("type Mirror = Main"), "{target}");
+    assert!(!target.contains("type Mirror struct"), "{target}");
+    let service = fs::read_to_string(output_path.join("service.go")).unwrap();
+    assert!(
+        service.contains("Echo nexus.OperationReference[Alternate, Alternate]"),
+        "{service}"
+    );
+    assert!(service.contains("Item Alternate `json:\"item\"`"), "{service}");
+    fs::write(
+        output_path.join("alias_runtime_test.go"),
+        r#"package aliases
+
+import (
+    "encoding/json"
+    "testing"
+)
+
+func TestBareRefAliasRoundTrips(t *testing.T) {
+    var value Alternate
+    if err := json.Unmarshal([]byte(`{"value":"ok"}`), &value); err != nil {
+        t.Fatal(err)
+    }
+    if value.Value != "ok" { t.Fatalf("value = %q", value.Value) }
+    if _, err := json.Marshal(value); err != nil { t.Fatal(err) }
+}
+"#,
+    )
+    .unwrap();
+    assert!(
+        Command::new("go")
+            .args(["test", "./..."])
+            .env("GO111MODULE", "on")
+            .current_dir(&output_path)
+            .status()
+            .unwrap()
+            .success()
+    );
     fs::remove_dir_all(temp_dir).unwrap();
 }
 

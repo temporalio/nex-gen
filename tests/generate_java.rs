@@ -7,7 +7,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use nexgen::{GenerateRequest, generate_to_file};
 
 mod common;
-use common::json_input_path;
+use common::{json_input_path, write_bare_ref_alias_closure};
 
 static OUTPUT_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -947,6 +947,46 @@ fn java_json_cross_module_java_name_override_moves_every_reference() {
         assert!(!service.contains(stale), "{stale}\n{service}");
         assert!(!consuming.contains(stale), "{stale}\n{consuming}");
     }
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+#[test]
+fn java_json_bare_ref_root_alias_collapses_to_the_target_class() {
+    let temp_dir = unique_output_path("java-json-bare-ref-alias");
+    let input = write_bare_ref_alias_closure(&temp_dir);
+    let output_path = temp_dir.join("aliases");
+    generate_to_file(&GenerateRequest {
+        language: nexgen::language::Language::Java,
+        input_paths: vec![input],
+        support_paths: Vec::new(),
+        descriptor_paths: Vec::new(),
+        output_path: output_path.clone(),
+        format: false,
+        generate_native_api: false,
+        java_package_name: Some("example.aliases".to_string()),
+        ts_date_time_types: Default::default(),
+    })
+    .unwrap();
+
+    assert!(output_path.join("target/main/Main.java").is_file());
+    assert!(
+        !output_path.join("alias/alternate/Alternate.java").exists(),
+        "Java must not synthesize a class for a bare-ref alias"
+    );
+    assert!(
+        !output_path.join("target/main/Mirror.java").exists(),
+        "Java must also collapse a bare-ref `$defs` alias"
+    );
+    let service = fs::read_to_string(output_path.join("service/AliasService.java")).unwrap();
+    assert!(
+        service.contains("import example.aliases.target.main.Main;"),
+        "{service}"
+    );
+    assert!(service.contains("Main echo(Main input);"), "{service}");
+    assert!(!service.contains("Alternate"), "{service}");
+    let holder = fs::read_to_string(output_path.join("service/Holder.java")).unwrap();
+    assert!(holder.contains("private final Main item;"), "{holder}");
+    assert!(!holder.contains("Alternate"), "{holder}");
     fs::remove_dir_all(temp_dir).unwrap();
 }
 
