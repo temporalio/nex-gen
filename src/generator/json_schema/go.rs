@@ -309,7 +309,7 @@ fn go_unexported(name: &str) -> String {
 /// `model_name` — unique per (model, field) so the pattern compiles once at
 /// package init (the load-time gate already proved it compiles). See
 /// `specs/json-schema/features/pattern.md`.
-fn go_pattern_var_name(model_name: &str, json_name: &str) -> String {
+pub(crate) fn go_pattern_var_name(model_name: &str, json_name: &str) -> String {
     go_unexported(&format!("{model_name}{}Pattern", go_field_name(json_name)))
 }
 
@@ -332,7 +332,12 @@ fn render_go_pattern_vars(output: &mut String, model: &PlannedJsonType, schema: 
         return;
     };
     for (json_name, property) in properties {
-        render_go_string_vars_recursive(output, &model.model_name, json_name, property);
+        render_go_string_vars_recursive(
+            output,
+            &model.model_name,
+            &property.go_member_name(json_name),
+            property,
+        );
     }
 }
 
@@ -416,7 +421,7 @@ fn render_go_string_vars(output: &mut String, model_name: &str, position: &str, 
 
 /// The package-level compiled-regex var name for a `contentEncoding` on
 /// `json_name` of `model_name`. See `specs/json-schema/features/contentEncoding.md`.
-fn go_content_encoding_var_name(model_name: &str, json_name: &str) -> String {
+pub(crate) fn go_content_encoding_var_name(model_name: &str, json_name: &str) -> String {
     go_unexported(&format!(
         "{model_name}{}ContentEncoding",
         go_field_name(json_name)
@@ -425,7 +430,7 @@ fn go_content_encoding_var_name(model_name: &str, json_name: &str) -> String {
 
 /// The package-level compiled-regex var name for a `format` on `json_name` of
 /// `model_name`. See `specs/json-schema/features/format.md`.
-fn go_format_var_name(model_name: &str, json_name: &str) -> String {
+pub(crate) fn go_format_var_name(model_name: &str, json_name: &str) -> String {
     go_unexported(&format!("{model_name}{}Format", go_field_name(json_name)))
 }
 
@@ -2966,6 +2971,7 @@ fn render_validate(
             let nullable = allows_null(property);
             let shape = property_shape(property);
             let property = shape.as_ref();
+            let emitted_position = property.go_member_name(json_name);
             let is_required = required_fields(schema).contains(json_name);
             // The field holds `T` directly only when it can be neither absent
             // nor `null`; otherwise it is a pointer (or an already-nilable slice).
@@ -3014,7 +3020,7 @@ fn render_validate(
                             output,
                             &wire,
                             &go_violation_path_literal(json_name),
-                            &go_pattern_var_name(&model.model_name, json_name),
+                            &go_pattern_var_name(&model.model_name, &emitted_position),
                             pattern,
                             indent,
                         );
@@ -3063,7 +3069,7 @@ fn render_validate(
                         output,
                         &wire,
                         &go_violation_path_literal(json_name),
-                        &go_pattern_var_name(&model.model_name, json_name),
+                        &go_pattern_var_name(&model.model_name, &emitted_position),
                         pattern,
                         indent,
                     );
@@ -3075,7 +3081,7 @@ fn render_validate(
                         output,
                         &wire,
                         &go_violation_path_literal(json_name),
-                        &go_format_var_name(&model.model_name, json_name),
+                        &go_format_var_name(&model.model_name, &emitted_position),
                         format,
                         indent,
                     );
@@ -3173,8 +3179,8 @@ fn render_validate(
                 && temporal_kind(property).is_none()
                 && content_encoding_kind(property).is_none()
             {
-                let var_name = go_pattern_var_name(&model.model_name, json_name);
-                let format_var = go_format_var_name(&model.model_name, json_name);
+                let var_name = go_pattern_var_name(&model.model_name, &emitted_position);
+                let format_var = go_format_var_name(&model.model_name, &emitted_position);
                 if by_value {
                     render_go_string_checks(
                         output,
@@ -3248,7 +3254,7 @@ fn render_validate(
                         property,
                         "\t",
                         &model.model_name,
-                        json_name,
+                        &emitted_position,
                     );
                 } else {
                     output.push_str("\tif ");
@@ -3261,7 +3267,7 @@ fn render_validate(
                         property,
                         "\t\t",
                         &model.model_name,
-                        json_name,
+                        &emitted_position,
                     );
                     output.push_str("\t}\n");
                 }
@@ -3274,7 +3280,7 @@ fn render_validate(
                     &go_violation_path_literal(json_name),
                     property,
                     &model.model_name,
-                    json_name,
+                    &emitted_position,
                     model_names,
                     unions,
                     0,
@@ -3601,7 +3607,7 @@ fn render_property_unmarshal(
                 output,
                 "v",
                 &path,
-                &go_pattern_var_name(&model.model_name, json_name),
+                &go_pattern_var_name(&model.model_name, &field),
                 pattern,
                 "\t\t",
             );
@@ -3611,7 +3617,7 @@ fn render_property_unmarshal(
                 output,
                 "v",
                 &path,
-                &go_format_var_name(&model.model_name, json_name),
+                &go_format_var_name(&model.model_name, &field),
                 format,
                 "\t\t",
             );
@@ -4218,6 +4224,7 @@ fn render_temporal_property_unmarshal(
     schema: &Schema,
 ) {
     let parse_fn = go_temporal_parse_fn(kind);
+    let emitted_position = schema.go_member_name(json_name);
     let key = go_string_literal(json_name);
     let path = go_violation_path_literal(json_name);
     output.push_str("\tif s, ok := parseStringField(get(");
@@ -4237,7 +4244,7 @@ fn render_temporal_property_unmarshal(
             output,
             "s",
             &path,
-            &go_pattern_var_name(model_name, json_name),
+            &go_pattern_var_name(model_name, &emitted_position),
             pattern,
             "\t\t",
         );
@@ -5868,7 +5875,8 @@ fn render_content_encoding_property_unmarshal(
     property: &Schema,
 ) {
     let decode_fn = go_content_encoding_decode_fn(encoding);
-    let re_var = go_content_encoding_var_name(model_name, json_name);
+    let emitted_position = property.go_member_name(json_name);
+    let re_var = go_content_encoding_var_name(model_name, &emitted_position);
     let key = go_string_literal(json_name);
     let path = go_violation_path_literal(json_name);
     output.push_str("\tif s, ok := parseStringField(get(");
@@ -5889,7 +5897,7 @@ fn render_content_encoding_property_unmarshal(
             output,
             "s",
             &path,
-            &go_pattern_var_name(model_name, json_name),
+            &go_pattern_var_name(model_name, &emitted_position),
             pattern,
             "\t\t",
         );
@@ -5901,7 +5909,7 @@ fn render_content_encoding_property_unmarshal(
             output,
             "s",
             &path,
-            &go_format_var_name(model_name, json_name),
+            &go_format_var_name(model_name, &emitted_position),
             format,
             "\t\t",
         );
