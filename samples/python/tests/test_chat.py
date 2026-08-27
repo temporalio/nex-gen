@@ -261,7 +261,7 @@ def test_message_full_optional_nullable_null_collapses() -> None:
 def test_violation_paths_escape_arbitrary_wire_keys() -> None:
     converter = converter_for(SendMessageInput)
     with pytest.raises(temporalio.exceptions.ApplicationError) as excinfo:
-        converter.from_transfer_type(
+        _ = converter.from_transfer_type(
             {
                 "roomId": "r1",
                 "message": {"kind": "text", "body": "hi", "a.b": 1},

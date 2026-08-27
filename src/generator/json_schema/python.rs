@@ -618,6 +618,9 @@ fn render_hoisted_models_module(hoists: &JsonModelHoistPlan) -> Result<String> {
 
     let mut output = String::new();
     render_generated_file_header(&mut output);
+    output.push_str(
+        "\n# pyright: reportUnnecessaryComparison=false, reportUnnecessaryIsInstance=false, reportUnreachable=false",
+    );
     output.push('\n');
     let wrote_imports =
         render_optional_python_imports(&mut output, &body, &model_fragments.module_imports, &[]);
@@ -933,6 +936,7 @@ pub(in crate::generator) fn render_external_models(
         export_sort_keys: BTreeMap::new(),
         declared_type_parameters: BTreeSet::new(),
         allows_private_wire_access: false,
+        has_dynamic_runtime_guards: true,
     })
 }
 

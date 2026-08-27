@@ -61,12 +61,12 @@ def test_closed_items_precede_array_level_violations() -> None:
     ]
     converter = converter_for(ItemRules)
     with pytest.raises(temporalio.exceptions.ApplicationError) as parsed:
-        converter.from_transfer_type({"values": ["bad", "bad"]}, ItemRules)
+        _ = converter.from_transfer_type({"values": ["bad", "bad"]}, ItemRules)
     assert violation_pairs(parsed.value) == expected
 
     with pytest.raises(temporalio.exceptions.ApplicationError) as serialized:
         invalid_values = typing.cast(list[typing.Literal["fixed"]], ["bad", "bad"])
-        converter.to_transfer_type(ItemRules(values=invalid_values))
+        _ = converter.to_transfer_type(ItemRules(values=invalid_values))
     assert violation_pairs(serialized.value) == expected
 
 
@@ -1133,7 +1133,7 @@ def test_serialize_rejects_invalid_in_memory_values() -> None:
         ({"count": typing.cast(typing.Any, True)}, ("count", "expected integer")),
         ({"count": typing.cast(typing.Any, 1.5)}, ("count", "expected integer")),
         (
-            {"count": typing.cast(typing.Any, 10**400)},
+            {"count": 10**400},
             ("count", "exceeds ±(2^53-1) integer cap"),
         ),
         ({"active": typing.cast(typing.Any, 1)}, ("active", "expected boolean")),
