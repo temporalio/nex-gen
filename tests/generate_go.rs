@@ -1773,25 +1773,40 @@ fn go_rejects_single_input_output_named_definitions_with_a_remedy() {
     )
     .unwrap();
 
-    let error = generate_to_file(&GenerateRequest {
+    let request = |output_name: &str| GenerateRequest {
         language: nexgen::language::Language::Go,
         input_paths: vec![input_path.clone()],
         support_paths: Vec::new(),
         descriptor_paths: Vec::new(),
-        output_path: temp_dir.join("definitions"),
+        output_path: temp_dir.join(output_name),
         format: false,
         generate_native_api: false,
         java_package_name: None,
         ts_date_time_types: Default::default(),
-    })
-    .expect_err("the model file must not overwrite the generated runtime")
-    .to_string();
+    };
 
-    assert!(error.contains("definitions.go"), "{error}");
-    assert!(error.contains("other.json"), "{error}");
-    assert!(error.contains("generated Go validation runtime"), "{error}");
-    assert!(error.contains("--output"), "{error}");
-    assert!(error.contains("not `definitions`"), "{error}");
+    for output_name in ["definitions", "Definitions", "definitions-"] {
+        let error = generate_to_file(&request(output_name))
+            .expect_err("the model file must not overwrite the generated runtime")
+            .to_string();
+        assert!(error.contains("definitions.go"), "{output_name}: {error}");
+        assert!(error.contains("other.json"), "{output_name}: {error}");
+        assert!(
+            error.contains("generated Go validation runtime"),
+            "{output_name}: {error}"
+        );
+        assert!(error.contains("--output"), "{output_name}: {error}");
+        assert!(
+            error.contains("derived Go package identifier")
+                && error.contains("not `definitions`")
+                && error.contains("`api`"),
+            "{output_name}: {error}"
+        );
+    }
+
+    generate_to_file(&request("api")).expect("a non-conflicting derived package name should load");
+    assert!(temp_dir.join("api/api.go").is_file());
+    assert!(temp_dir.join("api/definitions.go").is_file());
     fs::remove_dir_all(temp_dir).unwrap();
 }
 

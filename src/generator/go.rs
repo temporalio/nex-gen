@@ -685,7 +685,7 @@ fn generate_single_leaf(
                 path: definitions_path,
                 first_origin: leaf.source_path.clone(),
                 second_origin: PathBuf::from("<generated Go validation runtime>"),
-                remedy: "point `--output` at a directory whose name is not `definitions`"
+                remedy: "point `--output` at a directory whose derived Go package identifier is not `definitions` (for example, `api`)"
                     .to_string(),
             });
         }
