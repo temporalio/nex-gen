@@ -68,6 +68,11 @@ Loader behavior:
   nothing, so it emits **no** runtime check — not an empty one. An emitter whose
   trigger header is written before its (empty) body has produced output the
   target may not even parse.
+- A non-vacuous edge whose trigger or dependent is optional+nullable → reject.
+  Go, Java and Python collapse explicit `null` to absence while TypeScript does
+  not, so the presence predicate would otherwise differ after round-trip. Make
+  the named member non-nullable or remove the dependency. Bare `$ref` aliases
+  are followed when classifying nullability.
 
 ## Type mapping
 
@@ -119,6 +124,7 @@ parser then rejects.
 | Undeclared trigger/dependent (P7.1) | trigger or dependent absent from [[properties]] |
 | Dependent already in `required` | `required:["b"], dependentRequired:{"a":["b"]}` |
 | Trigger in `required` | `required:["a"], dependentRequired:{"a":["b"]}` |
+| Optional nullable trigger/dependent | `properties:{a:{oneOf:[{type:string},{type:null}]},b:{type:string}}, dependentRequired:{a:[b]}` |
 
 ### Runtime fixtures (validator)
 
@@ -138,13 +144,11 @@ parser then rejects.
   per **P6** (conditional shape doesn't lower). `dependentRequired` is
   the supported subset of conditional object logic.
 - **[[nullability]]**: independent at the type level — dependency is about
-  presence, not null-ness. On the wire the two meet: for a **nullable**
-  dependent, an explicit `null` is a present key inbound and, in the three
-  collapsing targets, no key outbound, so a payload can satisfy the dependency
-  on parse and fail it on re-serialize. That asymmetry is a defect, not a
-  licensed consequence of the collapse (**P1** excepts fidelity, never
-  validation semantics); it is the same open reconciliation the count keywords
-  carry ([[minProperties]]).
+  presence, not null-ness. At load, however, a non-vacuous edge may not name an
+  optional nullable trigger or dependent: the Go/Java/Python presence collapse
+  would otherwise make the predicate differ after round-trip. Required nullable
+  members remain legal generally, but the existing canonicalization rules make
+  a required trigger or dependent redundant here.
 - **[[minProperties]] / [[maxProperties]]**: a trigger forces its whole
   dependent set to be present at once, so a cap below that closure is
   uninhabitable — reconciled by the count keywords, specified in

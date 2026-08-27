@@ -4568,6 +4568,119 @@ fn validate_model_refs(
     Ok(())
 }
 
+/// Whether a property schema admits JSON `null`, following a bare `$ref` alias
+/// chain when necessary. Presence-sensitive object assertions cannot safely be
+/// combined with an optional nullable property: Go, Java, and Python deliberately
+/// collapse absent and explicit-null into one in-memory state, while TypeScript
+/// retains both (PRINCIPLES P1/P8 and `nullability.md`).
+fn schema_accepts_null<'a>(
+    path: &Path,
+    canonical_path: &'a Path,
+    schema: &'a Schema,
+    docs: &'a IndexMap<PathBuf, (PathBuf, Document)>,
+    models: &'a BTreeMap<TypeKey, JsonModel>,
+) -> Result<bool> {
+    let mut current_path = canonical_path;
+    let mut current = schema;
+    let mut seen = BTreeSet::new();
+    loop {
+        if current
+            .one_of
+            .as_ref()
+            .is_some_and(|branches| branches.iter().any(schema_type_is_null))
+        {
+            return Ok(true);
+        }
+        let Some(reference) = current.reference.as_deref() else {
+            return Ok(false);
+        };
+        if !seen.insert((current_path.to_path_buf(), reference.to_string())) {
+            return Ok(false);
+        }
+        let target = resolve_ref(path, current_path, reference, docs, models)?;
+        current_path = &target.canonical_path;
+        current = &target.schema;
+    }
+}
+
+fn validate_optional_nullable_presence_interactions(
+    path: &Path,
+    canonical_path: &Path,
+    schema: &Schema,
+    context: &str,
+    docs: &IndexMap<PathBuf, (PathBuf, Document)>,
+    models: &BTreeMap<TypeKey, JsonModel>,
+) -> Result<()> {
+    let Some(properties) = &schema.properties else {
+        return Ok(());
+    };
+    let required: BTreeSet<&str> = schema
+        .required
+        .as_ref()
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .collect();
+    let optional_nullable = |name: &str| -> Result<bool> {
+        let Some(property) = properties.get(name) else {
+            return Ok(false);
+        };
+        Ok(!required.contains(name)
+            && schema_accepts_null(path, canonical_path, property, docs, models)?)
+    };
+
+    if schema
+        .extra
+        .get("minProperties")
+        .and_then(Value::as_u64)
+        .is_some_and(|minimum| minimum > 0)
+    {
+        for (name, property) in properties {
+            if !required.contains(name.as_str())
+                && schema_accepts_null(path, canonical_path, property, docs, models)?
+            {
+                return Err(Error::InvalidJsonSchema {
+                    path: path.to_path_buf(),
+                    reason: format!(
+                        "{context}: `minProperties` cannot be combined with optional nullable property `{name}`; Go, Java, and Python collapse an explicit null to absence, so the outbound wire count would differ — make `{name}` required or non-nullable, or remove `minProperties`"
+                    ),
+                });
+            }
+        }
+    }
+
+    if let Some(Value::Object(dependencies)) = schema.extra.get("dependentRequired") {
+        for (trigger, dependents) in dependencies {
+            let Some(dependents) = dependents.as_array() else {
+                continue;
+            };
+            if dependents.is_empty() {
+                continue;
+            }
+            if optional_nullable(trigger)? {
+                return Err(Error::InvalidJsonSchema {
+                    path: path.to_path_buf(),
+                    reason: format!(
+                        "{context}: `dependentRequired` trigger `{trigger}` cannot be optional and nullable; Go, Java, and Python collapse explicit null to absence — make it non-nullable or remove this dependency"
+                    ),
+                });
+            }
+            for dependent in dependents.iter().filter_map(Value::as_str) {
+                if optional_nullable(dependent)? {
+                    return Err(Error::InvalidJsonSchema {
+                        path: path.to_path_buf(),
+                        reason: format!(
+                            "{context}: `dependentRequired.{trigger}` dependent `{dependent}` cannot be optional and nullable; Go, Java, and Python collapse explicit null to absence — make it non-nullable or remove this dependency"
+                        ),
+                    });
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 fn validate_schema_refs(
     path: &Path,
     canonical_path: &Path,
@@ -4577,6 +4690,14 @@ fn validate_schema_refs(
     models: &BTreeMap<TypeKey, JsonModel>,
 ) -> Result<()> {
     validate_schema_common(path, schema, context)?;
+    validate_optional_nullable_presence_interactions(
+        path,
+        canonical_path,
+        schema,
+        context,
+        docs,
+        models,
+    )?;
     if let Some(reference) = &schema.reference {
         let _ = resolve_ref_at(path, canonical_path, reference, context, docs, models)?;
         return Ok(());
@@ -12042,6 +12163,49 @@ properties:
     }
 
     #[test]
+    fn rejects_positive_min_properties_with_optional_nullable_members() {
+        let nullable = "oneOf: [{ type: string }, { type: 'null' }]";
+        let error = numeric_reject(&format!(
+            "type: object\nproperties: {{ note: {{ {nullable} }} }}\nminProperties: 1"
+        ));
+        assert!(
+            error.contains("optional nullable property `note`"),
+            "{error}"
+        );
+
+        // A zero floor asserts nothing, and a required nullable key cannot
+        // collapse to absence on a valid wire value.
+        numeric_accept(&format!(
+            "type: object\nproperties: {{ note: {{ {nullable} }} }}\nminProperties: 0"
+        ));
+        numeric_accept(&format!(
+            "type: object\nproperties: {{ note: {{ {nullable} }} }}\nrequired: [note]\nminProperties: 1"
+        ));
+    }
+
+    #[test]
+    fn rejects_min_properties_with_optional_nullable_ref_alias() {
+        let error = doc_reject(
+            r##"
+$schema: https://json-schema.org/draft/2020-12/schema
+title: Root
+type: object
+minProperties: 1
+properties:
+  note: { $ref: "#/$defs/NullableAlias" }
+$defs:
+  NullableAlias: { $ref: "#/$defs/Nullable" }
+  Nullable:
+    oneOf: [{ type: string }, { type: "null" }]
+"##,
+        );
+        assert!(
+            error.contains("optional nullable property `note`"),
+            "{error}"
+        );
+    }
+
+    #[test]
     fn rejects_min_properties_above_finite_property_names_capacity() {
         for (matcher, capacity, floor) in [
             ("{ type: string, enum: [a, b] }", 2, 3),
@@ -12145,6 +12309,31 @@ properties:
             "type: object\nproperties: { a: { type: string }, b: { type: string } }\ndependentRequired: { a: [b, b] }",
         );
         assert!(error.contains("more than once"), "{error}");
+    }
+
+    #[test]
+    fn rejects_dependent_required_optional_nullable_edges() {
+        let trigger = numeric_reject(
+            "type: object\nproperties:\n  a: { oneOf: [{ type: string }, { type: 'null' }] }\n  b: { type: string }\ndependentRequired: { a: [b] }",
+        );
+        assert!(
+            trigger.contains("trigger `a` cannot be optional and nullable"),
+            "{trigger}"
+        );
+
+        let dependent = numeric_reject(
+            "type: object\nproperties:\n  a: { type: string }\n  b: { oneOf: [{ type: string }, { type: 'null' }] }\ndependentRequired: { a: [b] }",
+        );
+        assert!(
+            dependent.contains("dependent `b` cannot be optional and nullable"),
+            "{dependent}"
+        );
+
+        // A vacuous edge emits no presence predicate and therefore has no
+        // collapse ambiguity.
+        numeric_accept(
+            "type: object\nproperties:\n  a: { oneOf: [{ type: string }, { type: 'null' }] }\ndependentRequired: { a: [] }",
+        );
     }
 
     #[test]

@@ -341,22 +341,12 @@ enforce it at the boundary but collapse it in memory.
 **What the collapse is licensed for, and where that runs out.** P1 excepts the
 collapse from *value-level round-trip fidelity*, and only for Go, Java and
 Python — TypeScript is not in the exception because it does not collapse. P1
-excepts nothing from **validation semantics**. So where the collapse changes not
-what a value reads back as but whether it is *accepted at all*, the exception
-does not reach it, and the decision above does not settle it. The live case is a
-count bound over an object with an optional+nullable member: the member is
-present on the wire and counts, and absent in memory and does not, so the two
-directions disagree about the same payload — and they disagree *per target*,
-because TypeScript keeps the distinction the other three drop.
-
-*(Status: open — this is a project decision, not a consequence to be read off
-the note above. Two closures are named, and neither is adopted here: preserve
-presence in the three collapsing targets, which reverses the rejection of a
-presence channel above; or reject the combination of an optional+nullable member
-with a count bound at load. [[minProperties]] and [[maxProperties]] own the
-count side of the question. Whichever is chosen, the cross-target barrier has to
-exercise the payload **round-trip**, not the two directions independently, or it
-cannot see the divergence at all.)*
+excepts nothing from **validation semantics**. The strict subset therefore
+rejects presence-sensitive combinations that cannot survive the collapse: a
+positive [[minProperties]] floor beside any optional nullable declared member,
+and a non-vacuous [[dependentRequired]] edge whose trigger or dependent is
+optional nullable. This keeps the plain ergonomic representation above without
+admitting a schema whose accepted set changes by target or direction.
 
 ### Diagnostics
 
@@ -400,7 +390,7 @@ optional-non-nullable.
 | required | nullable | empty-value serialize action |
 |---|---|---|
 | optional | non-nullable | **omit** the key (emitting `null` is invalid; `Validate` also rejects an explicit in-memory `null` where the language can hold one) |
-| optional | nullable | **omit** (conservative) in Go/Java/Python; **faithful** in TS — omit if `undefined`, emit `null` if explicitly `null`. Unresolved where the enclosing object also carries a count bound — see the Collapse note |
+| optional | nullable | **omit** (conservative) in Go/Java/Python; **faithful** in TS — omit if `undefined`, emit `null` if explicitly `null`. Presence-sensitive combinations that would observe the collapse reject at load — see the Collapse note |
 | required | non-nullable | cannot be empty — always emit the value. Where the language can hold an empty reference (Java `null`, Python `None`, TS `undefined`/`null`) `Validate` **rejects** it rather than omitting the key; a Go `nil` slice on a required array is written as `[]`, since Go has no non-nil empty-slice type (see [[items]]) |
 | required | nullable | **emit `key: null`** — omitting violates `required` |
 
