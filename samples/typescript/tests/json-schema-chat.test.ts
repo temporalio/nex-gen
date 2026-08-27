@@ -147,10 +147,6 @@ describe("json-schema chat generated definitions", () => {
         "[0]": 1,
         'quote"slash\\': 1,
       }),
-    ).toEqual([
-      'message["a.b"]',
-      '["[0]"]',
-      '["quote\\"slash\\\\"]',
-    ]);
+    ).toEqual(['message["a.b"]', '["[0]"]', '["quote\\"slash\\\\"]']);
   });
 });
