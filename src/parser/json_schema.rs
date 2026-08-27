@@ -8298,6 +8298,7 @@ pub(crate) fn build_name_manifest(
                 collect_default_constants(language, group.iter().copied(), &mut module)?;
                 collect_ts_const_constants(group.iter().copied(), &mut module)?;
                 collect_ts_transfer_type_converters(group.iter().copied(), &mut module)?;
+                collect_ts_inline_union_serializers(group.iter().copied(), &mut module)?;
             } else {
                 collect_python_module_idents(group.iter().copied(), &mut module)?;
             }
@@ -8307,6 +8308,67 @@ pub(crate) fn build_name_manifest(
     validate_service_file_scopes(language, services, &manifest)?;
 
     Ok(manifest)
+}
+
+/// TypeScript inline unions whose wire conversion is not the identity emit a
+/// module-private `serialize<Model><Member>` helper. The member half follows
+/// `x-ts-name`, and the helpers share one module scope with each other.
+fn collect_ts_inline_union_serializers<'a>(
+    models: impl Iterator<Item = &'a NsModel>,
+    top: &mut Namespace,
+) -> Result<()> {
+    let models = models.collect::<Vec<_>>();
+    for model in &models {
+        let Some(properties) = &model.schema.properties else {
+            continue;
+        };
+        for (json_name, property) in properties {
+            let Some(branches) = &property.one_of else {
+                continue;
+            };
+            // A referenced object branch is serialized through the target
+            // model's converter. This is the common inline-union helper path;
+            // array branches with nested conversions are conservatively
+            // included as well so mode-specific materialization cannot change
+            // the loader's accepted namespace.
+            let needs_helper = branches.iter().any(|branch| {
+                branch.reference.as_ref().is_some_and(|reference| {
+                    let reference = reference.trim_start_matches('.');
+                    models
+                        .iter()
+                        .find(|candidate| candidate.full_name == reference)
+                        .map(|candidate| {
+                            candidate.schema.ty.as_ref().and_then(Value::as_str) == Some("object")
+                        })
+                        .unwrap_or(true)
+                }) || ts_schema_may_need_serialization(branch)
+            });
+            if !needs_helper {
+                continue;
+            }
+            let member = member_identifier(Language::TypeScript, json_name, property);
+            top.insert(
+                Language::TypeScript,
+                format!(
+                    "serialize{}{}",
+                    model.type_ident,
+                    member.to_upper_camel_case()
+                ),
+                format!("`{}.{json_name}` inline union serializer", model.full_name),
+            )?;
+        }
+    }
+    Ok(())
+}
+
+fn ts_schema_may_need_serialization(schema: &Schema) -> bool {
+    schema.reference.is_some()
+        || schema.extra.contains_key("contentEncoding")
+        || schema.extra.contains_key("format")
+        || schema
+            .items
+            .as_deref()
+            .is_some_and(ts_schema_may_need_serialization)
 }
 
 /// Validate the identifiers that actually coexist in a generated service file.
@@ -14625,6 +14687,46 @@ $defs:
 "##;
         parse_for(Language::Go, input)
             .expect("the member override separates both unions' synthesized names");
+    }
+
+    #[test]
+    fn rejects_colliding_inline_union_serializers_typescript() {
+        let input = r##"
+$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  left: { $ref: "#/$defs/Foo" }
+  right: { $ref: "#/$defs/FooBar" }
+$defs:
+  Foo:
+    type: object
+    properties:
+      barBaz:
+        oneOf:
+          - { type: string }
+          - { $ref: "#/$defs/Leaf" }
+  FooBar:
+    type: object
+    properties:
+      baz:
+        oneOf:
+          - { type: integer }
+          - { $ref: "#/$defs/Other" }
+  Leaf: { type: object, properties: { value: { type: string } } }
+  Other: { type: object, properties: { count: { type: integer } } }
+"##;
+        let error = reject_for(Language::TypeScript, input);
+        assert!(
+            error.contains("collision") && error.contains("serializeFooBarBaz"),
+            "{error}"
+        );
+
+        let renamed = input.replace(
+            "      baz:\n        oneOf:",
+            "      baz:\n        x-ts-name: renamedBaz\n        oneOf:",
+        );
+        parse_for(Language::TypeScript, &renamed)
+            .expect("x-ts-name moves the inline union serializer with its member");
     }
 
     /// A union's synthesized variant wrapper shares the package namespace with
