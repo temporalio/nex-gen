@@ -28,7 +28,8 @@
 //!   `\p{…}`/`\pL` (Python; `\pL` also JS);
 //! - **lone `{`, `}`, `]`** outside a class — JS `u` (and Java, for `{`) treat
 //!   them as malformed quantifier/class brackets;
-//! - `\A` / `\z` / `\b{start}` … — JS (and Python, for `\z`) cannot compile them;
+//! - `\A` / `\z` / word-boundary assertions — either fail to compile in a
+//!   target or disagree beside non-ASCII input;
 //! - **named capture groups** — `(?P<n>…)` breaks Java, `(?<n>…)` breaks Python;
 //! - **POSIX classes** (`[[:alpha:]]`), **nested classes** (`[a[\s]]`) and
 //!   **class set operations** (`[a&&b]`, `[a--b]`, `[a~~b]`) — JS cannot compile
@@ -259,13 +260,21 @@ fn walk_normalize(ast: &Ast, pattern: &str, edits: &mut Vec<Edit>) -> Result<(),
     }
 }
 
-/// Zero-width assertions: `^`, `$`, `\b` and `\B` are portable (and `$` is
-/// normalized per target at emit time). `\A`, `\z` and the `\b{…}` family are
-/// Rust/Go spellings with no ECMA-262 equivalent.
+/// Zero-width assertions: `^` and `$` are portable (`$` is normalized per
+/// target at emit time). Word boundaries are not: Java's default `\b` uses a
+/// Unicode-aware word definition while the other targets use the portable
+/// ASCII `\w` set, so inputs such as `éfoo` disagree. `\A`, `\z` and the
+/// extended `\b{…}` family also have no shared spelling.
 fn check_assertion(assertion: &ast::Assertion, pattern: &str) -> Result<(), PatternError> {
     use ast::AssertionKind::*;
     match assertion.kind {
-        StartLine | EndLine | WordBoundary | NotWordBoundary => Ok(()),
+        StartLine | EndLine => Ok(()),
+        WordBoundary | NotWordBoundary => Err(PatternError(format!(
+            "pattern {pattern:?} uses a word-boundary assertion (`\\b` / `\\B`), whose \
+             meaning beside non-ASCII text differs across the supported engines (Java uses \
+             Unicode word boundaries while the portable word class is ASCII); avoid word \
+             boundaries and spell the intended ASCII delimiter structure explicitly"
+        ))),
         StartText => Err(PatternError(format!(
             "pattern {pattern:?} uses the `\\A` start-of-text anchor, which is a JavaScript \
              SyntaxError; use `^` (the generator never enables multiline mode, so `^` already \
@@ -284,7 +293,8 @@ fn check_assertion(assertion: &ast::Assertion, pattern: &str) -> Result<(), Patt
         | WordBoundaryEndHalf => Err(PatternError(format!(
             "pattern {pattern:?} uses a Rust/Go-only word-boundary assertion \
              (`\\b{{start}}` / `\\b{{end}}` / `\\<` / `\\>`), which no other target engine \
-             can compile; use the plain `\\b` / `\\B` boundaries"
+             can compile; avoid word-boundary assertions and spell the intended ASCII \
+             delimiter structure explicitly"
         ))),
     }
 }
@@ -518,7 +528,10 @@ fn collect_class_item<'a>(
 ///   `(a+|b)*`) — "reduces to" meaning after stripping groups, and for a
 ///   concatenation, when every other element is nullable (`(a+b*)+`), or
 /// - the body is an alternation with two textually identical branches
-///   (`(a|a)*`).
+///   (`(a|a)*`), or
+/// - the body is an alternation whose branches have the same positive fixed
+///   width (`(a|b)*`, `(ab|cd)*`). Java recursively evaluates each iteration
+///   of these forms and can overflow its stack on otherwise ordinary input.
 ///
 /// An **exact-count** inner repetition is unambiguous and stays accepted, which
 /// is what keeps the generator's own pinned `format` / `contentEncoding` regexes
@@ -540,7 +553,7 @@ fn check_repetition(repetition: &ast::Repetition, pattern: &str) -> Result<(), P
         "it applies a quantifier to another open-ended quantifier"
     } else if has_duplicate_alternation_branch(body, pattern) {
         "its body is an alternation with two identical branches"
-    } else if has_single_atom_alternation(body) {
+    } else if has_equal_fixed_width_alternation(body) {
         "Java's backtracking engine recurses once per alternation iteration and can overflow its stack"
     } else {
         return Ok(());
@@ -644,20 +657,54 @@ fn has_duplicate_alternation_branch(ast: &Ast, pattern: &str) -> bool {
 }
 
 /// Java recursively evaluates a repeated alternation even when its branches
-/// are disjoint single atoms (`(a|b)*`), overflowing on only a few thousand
-/// characters. Keep the reject targeted to that reproduced shape: the pinned
-/// URI grammar also contains structured repeated alternations and must continue
-/// to pass the gate until they have a separately proven safe replacement.
-fn has_single_atom_alternation(ast: &Ast) -> bool {
+/// are disjoint fixed-width strings (`(a|b)*`, `(ab|cd)*`), overflowing on only
+/// a few thousand characters. The equal-width guard catches that reproduced
+/// family without rejecting the generator's pinned URI grammar, whose repeated
+/// alternatives consume different-sized chunks (for example one literal byte
+/// or a three-byte percent escape).
+fn has_equal_fixed_width_alternation(ast: &Ast) -> bool {
     let Ast::Alternation(alternation) = strip_groups(ast) else {
         return false;
     };
-    alternation.asts.iter().all(|branch| {
-        matches!(
-            strip_groups(branch),
-            Ast::Literal(_) | Ast::Dot(_) | Ast::ClassPerl(_) | Ast::ClassBracketed(_)
-        )
-    })
+    let mut branches = alternation.asts.iter();
+    let Some(first_width) = branches.next().and_then(fixed_width) else {
+        return false;
+    };
+    first_width > 0 && branches.all(|branch| fixed_width(branch) == Some(first_width))
+}
+
+/// Exact code-point width when it is statically known. Assertions and empty
+/// nodes consume zero; character-producing atoms consume one; only exact-count
+/// repetitions and equal-width alternations preserve a fixed width.
+fn fixed_width(ast: &Ast) -> Option<u32> {
+    match ast {
+        Ast::Empty(_) | Ast::Flags(_) | Ast::Assertion(_) => Some(0),
+        Ast::Literal(_)
+        | Ast::Dot(_)
+        | Ast::ClassUnicode(_)
+        | Ast::ClassPerl(_)
+        | Ast::ClassBracketed(_) => Some(1),
+        Ast::Group(group) => fixed_width(&group.ast),
+        Ast::Concat(concat) => concat
+            .asts
+            .iter()
+            .try_fold(0_u32, |width, child| width.checked_add(fixed_width(child)?)),
+        Ast::Alternation(alternation) => {
+            let mut branches = alternation.asts.iter();
+            let width = fixed_width(branches.next()?)?;
+            branches
+                .all(|branch| fixed_width(branch) == Some(width))
+                .then_some(width)
+        }
+        Ast::Repetition(repetition) => {
+            let ast::RepetitionKind::Range(ast::RepetitionRange::Exactly(count)) =
+                repetition.op.kind
+            else {
+                return None;
+            };
+            fixed_width(&repetition.ast)?.checked_mul(count)
+        }
+    }
 }
 
 fn inline_flag_error(pattern: &str) -> PatternError {
@@ -823,8 +870,10 @@ mod tests {
     fn rejects_non_portable_anchors() {
         assert!(gate_and_normalize(r"\Aabc").is_err());
         assert!(gate_and_normalize(r"abc\z").is_err());
-        assert!(gate_and_normalize(r"\bfoo\b").is_ok());
-        assert!(gate_and_normalize(r"foo\B").is_ok());
+        for boundary in [r"\bfoo\b", r"foo\B"] {
+            let error = gate_and_normalize(boundary).unwrap_err().0;
+            assert!(error.contains("non-ASCII"), "{boundary}: {error}");
+        }
     }
 
     /// `08#1` / `08#3`: POSIX classes, nested classes and class set operations
@@ -853,6 +902,7 @@ mod tests {
             "^(a+b*)+$",
             "^(a+|b)*$",
             "^(a|a)*$",
+            "^(ab|cd)*$",
             r"^(\w+\s*)+$",
         ] {
             assert!(

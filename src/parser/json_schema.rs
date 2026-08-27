@@ -2392,12 +2392,12 @@ fn validate_format(path: &Path, schema: &Schema, context: &str) -> Result<()> {
         return reject(format!("{context}: `format` requires `type: string`"));
     }
 
-    let format_name = match crate::json_schema::format::classify(format) {
-        crate::json_schema::format::FormatClass::Supported(check) => check.name,
+    let (format_name, materializes) = match crate::json_schema::format::classify(format) {
+        crate::json_schema::format::FormatClass::Supported(check) => (check.name, false),
         // The temporal formats are materialized into native typed fields with a
         // narrowed grammar (leap `:60` rejected; `duration` time-only). Any
         // supplied literal is validated against that materialized grammar below.
-        crate::json_schema::format::FormatClass::Temporal(kind) => kind.name(),
+        crate::json_schema::format::FormatClass::Temporal(kind) => (kind.name(), true),
         crate::json_schema::format::FormatClass::Deferred => {
             return reject(format!(
                 "{context}: `format: {format}` is not yet supported (deferred); \
@@ -2411,6 +2411,18 @@ fn validate_format(path: &Path, schema: &Schema, context: &str) -> Result<()> {
             ));
         }
     };
+
+    // Both temporal formats and contentEncoding replace the schema's string
+    // slot with a native value, but with incompatible types. String-shaped
+    // formats remain valid beside contentEncoding: they constrain the encoded
+    // wire string before the supported bytes materialization.
+    if materializes && schema.extra.contains_key("contentEncoding") {
+        return reject(format!(
+            "{context}: materializing `format: {format}` cannot be combined with \
+             `contentEncoding`; both replace the same string slot with incompatible \
+             native types (remove one of the two keywords)"
+        ));
+    }
 
     // A supplied `const`/`default`/`enum` string literal on the same node must
     // satisfy the format at load (the literal-vs-constraint obligation).
@@ -2446,7 +2458,8 @@ fn validate_format(path: &Path, schema: &Schema, context: &str) -> Result<()> {
 ///
 /// Rejects (P7 / P7.1): a non-string `contentEncoding` value, a
 /// `contentEncoding` on a non-`string` node, an unsupported encoding (with a
-/// fix-it), a co-occurring `contentMediaType` / `contentSchema` (owned by those
+/// fix-it), a co-occurring materializing temporal `format` or
+/// `contentMediaType` / `contentSchema` (owned by those
 /// features, which have nowhere to emit the label in the model), and a
 /// `const`/`default`/`enum` string literal that is not well-formed for the
 /// declared encoding. The value stays in the schema `extra` map for the backends.
@@ -9658,6 +9671,25 @@ properties:
         for encoding in ["base64", "base64url"] {
             numeric_accept(&format!("type: string\ncontentEncoding: {encoding}"));
         }
+    }
+
+    #[test]
+    fn rejects_temporal_format_alongside_content_encoding() {
+        for format in ["date-time", "date", "time", "duration"] {
+            let error = numeric_reject(&format!(
+                "type: string\nformat: {format}\ncontentEncoding: base64"
+            ));
+            assert!(
+                error.contains(&format!("materializing `format: {format}`")),
+                "{format}: {error}"
+            );
+            assert!(error.contains("contentEncoding"), "{format}: {error}");
+        }
+    }
+
+    #[test]
+    fn accepts_string_shaped_format_alongside_content_encoding() {
+        numeric_accept("type: string\nformat: uri-reference\ncontentEncoding: base64");
     }
 
     #[test]
