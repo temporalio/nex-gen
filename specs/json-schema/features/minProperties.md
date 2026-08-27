@@ -57,8 +57,8 @@ Loader behavior:
   and no others. The count keywords own this duty because the count is what
   makes the combination decidable, so the capping keyword's own spec need not
   restate it. The mirror duty for the upper bound is in [[maxProperties]].
-  *(Status: unimplemented for the [[propertyNames]] cap — a `minProperties`
-  above an `enum` key space currently loads.)*
+  **Status: implemented** for both enumerable forms, including the zero-or-one
+  capacity of `maxLength: 0` after its sibling key assertions are applied.
 
 **Which object is counted, in both directions.** The count is over the **wire
 object at the boundary being validated**: inbound, the raw decoded object before

@@ -54,10 +54,9 @@ Loader behavior:
   present together. The count keywords own this duty because the count is what
   makes the combination decidable, so the forcing keyword's own spec need not
   restate it. The mirror duty — a floor against a capped key space — is in
-  [[minProperties]]. *(Status: unimplemented for the [[dependentRequired]]
-  closure — `dependentRequired: {a: [b, c]}` with `maxProperties: 2` currently
-  loads, though the `required: ["a","b","c"]` spelling of the same three keys is
-  refused.)*
+  [[minProperties]]. **Status: implemented**: the comparison uses the union of
+  the trigger's transitive dependency closure and every always-present
+  [[required]] key.
 
 **Which object is counted, in both directions.** The count is over the **wire
 object at the boundary being validated**: inbound, the raw decoded object before

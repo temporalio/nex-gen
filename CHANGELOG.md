@@ -11,8 +11,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - .NET System Nexus bindings now generate operation-specific workflow outbound
   interceptor points when invoked with `--system-nexus --native-api`.
+- JSON Schema file roots and `$defs` entries that consist solely of a `$ref`
+  now generate aliases for the referenced model in Go, TypeScript, and Python;
+  Java resolves every alias use directly to the target class. Aliases work
+  across files and in operation input/output positions without emitting an
+  empty placeholder model.
 
 ### Changed
+
+- JSON Schema object-count satisfiability checks now reject a
+  `minProperties` floor above a finite `propertyNames` key space and a
+  `maxProperties` cap below the union of always-required keys and a
+  `dependentRequired` closure. Generated Java count comparisons also suffix
+  bounds above the 32-bit literal range with `L`.
 
 ### Deprecated
 
