@@ -1483,12 +1483,14 @@ impl JavaType {
     }
 }
 
-/// The (fully-qualified) Java type a materialized temporal `format` maps to.
-/// `time` stays a `String` because no single `java.time` type holds both an
-/// offset-bearing and an offset-less time-of-day.
+/// The Java type a materialized temporal `format` maps to. `date-time` uses a
+/// generated local-date-time plus owned-offset carrier because `ZoneOffset`
+/// cannot represent the schema's valid ±18:01..±23:59 band. `time` stays a
+/// `String` because no single `java.time` type holds both offset-bearing and
+/// offset-less time-of-day values.
 fn java_temporal_type(kind: crate::json_schema::format::TemporalKind) -> &'static str {
     match kind {
-        crate::json_schema::format::TemporalKind::DateTime => "OffsetDateTime",
+        crate::json_schema::format::TemporalKind::DateTime => "DateTime",
         crate::json_schema::format::TemporalKind::Date => "LocalDate",
         crate::json_schema::format::TemporalKind::Time => "String",
         crate::json_schema::format::TemporalKind::Duration => "Duration",
@@ -1505,13 +1507,12 @@ fn java_temporal_parse_fn(kind: crate::json_schema::format::TemporalKind) -> &'s
     }
 }
 
-/// The `TemporalSupport` static method that serializes this kind (`None` for
-/// `time`, which is already a canonical `String` written directly).
+/// The `TemporalSupport` static method that serializes this kind.
 fn java_temporal_format_fn(kind: crate::json_schema::format::TemporalKind) -> Option<&'static str> {
     match kind {
         crate::json_schema::format::TemporalKind::DateTime => Some("formatDateTime"),
         crate::json_schema::format::TemporalKind::Date => Some("formatDate"),
-        crate::json_schema::format::TemporalKind::Time => None,
+        crate::json_schema::format::TemporalKind::Time => Some("formatTime"),
         crate::json_schema::format::TemporalKind::Duration => Some("formatDuration"),
     }
 }
@@ -3041,6 +3042,9 @@ fn assemble_file(
                 imports.insert(format!("{root_package}.Base64Support"));
             }
         }
+        if body.contains("DateTime") {
+            imports.insert(format!("{root_package}.TemporalSupport.DateTime"));
+        }
     }
     imports.insert("org.jspecify.annotations.Nullable".to_string());
     for (ref_package, ref_class) in model_refs {
@@ -3051,7 +3055,6 @@ fn assemble_file(
     // Materialized-temporal `java.time` field types (imported so the `@Nullable`
     // type-use annotation binds to the simple name, not a package qualifier).
     for (needle, import) in [
-        ("OffsetDateTime", "java.time.OffsetDateTime"),
         ("LocalDate", "java.time.LocalDate"),
         ("Duration", "java.time.Duration"),
     ] {
@@ -5950,7 +5953,7 @@ fn default_expr(field: &FieldPlan, value: &Value) -> Option<String> {
             let literal = java_string_literal(&text.to_ascii_uppercase());
             Some(match kind {
                 crate::json_schema::format::TemporalKind::DateTime => {
-                    format!("OffsetDateTime.parse({literal})")
+                    format!("TemporalSupport.parseDateTimeLiteral({literal})")
                 }
                 crate::json_schema::format::TemporalKind::Date => {
                     format!("LocalDate.parse({literal})")
@@ -6556,10 +6559,7 @@ pub(in crate::generator) fn render_temporal_support_file(package: &str) -> Strin
     output.push_str(&format!("package {package};\n\n"));
     output.push_str("import java.time.Duration;\n");
     output.push_str("import java.time.LocalDate;\n");
-    output.push_str("import java.time.LocalTime;\n");
-    output.push_str("import java.time.OffsetDateTime;\n");
-    output.push_str("import java.time.OffsetTime;\n");
-    output.push_str("import java.time.ZoneOffset;\n");
+    output.push_str("import java.time.LocalDateTime;\n");
     output.push_str("import java.time.format.DateTimeParseException;\n");
     output.push_str("import java.util.List;\n");
     output.push_str("import java.util.regex.Pattern;\n");
@@ -6596,7 +6596,48 @@ pub(in crate::generator) fn render_temporal_support_file(package: &str) -> Strin
     output
 }
 
-const TEMPORAL_SUPPORT_BODY: &str = r####"    private static int daysInMonth(int year, int month) {
+const TEMPORAL_SUPPORT_BODY: &str = r####"    /**
+     * Materialized date-time retaining the local fields and the schema's full
+     * minute offset range. java.time.ZoneOffset stops at +/-18:00.
+     */
+    public static final class DateTime {
+        private final LocalDateTime localDateTime;
+        private final int offsetSeconds;
+
+        public DateTime(LocalDateTime localDateTime, int offsetSeconds) {
+            if (localDateTime == null) {
+                throw new NullPointerException("localDateTime");
+            }
+            this.localDateTime = localDateTime;
+            this.offsetSeconds = offsetSeconds;
+        }
+
+        public LocalDateTime getLocalDateTime() { return localDateTime; }
+        public int getOffsetSeconds() { return offsetSeconds; }
+        public int getYear() { return localDateTime.getYear(); }
+        public int getMonthValue() { return localDateTime.getMonthValue(); }
+        public int getDayOfMonth() { return localDateTime.getDayOfMonth(); }
+        public int getHour() { return localDateTime.getHour(); }
+        public int getMinute() { return localDateTime.getMinute(); }
+        public int getSecond() { return localDateTime.getSecond(); }
+        public int getNano() { return localDateTime.getNano(); }
+
+        @Override
+        public boolean equals(Object other) {
+            if (this == other) return true;
+            if (!(other instanceof DateTime)) return false;
+            DateTime that = (DateTime) other;
+            return offsetSeconds == that.offsetSeconds && localDateTime.equals(that.localDateTime);
+        }
+
+        @Override
+        public int hashCode() { return 31 * localDateTime.hashCode() + offsetSeconds; }
+
+        @Override
+        public String toString() { return TemporalSupport.formatDateTime(this); }
+    }
+
+    private static int daysInMonth(int year, int month) {
         switch (month) {
             case 1: case 3: case 5: case 7: case 8: case 10: case 12:
                 return 31;
@@ -6675,23 +6716,45 @@ const TEMPORAL_SUPPORT_BODY: &str = r####"    private static int daysInMonth(int
         return value.substring(0, dot + 10) + value.substring(end);
     }
 
-    public static @Nullable OffsetDateTime parseDateTime(String value, String path, List<Violation> violations) {
+    private static DateTime dateTimeValue(String value) {
+        String upper = truncateFraction(value).toUpperCase();
+        int offsetSeconds;
+        String local;
+        if (upper.endsWith("Z")) {
+            offsetSeconds = 0;
+            local = upper.substring(0, upper.length() - 1);
+        } else {
+            int offsetStart = upper.length() - 6;
+            int sign = upper.charAt(offsetStart) == '-' ? -1 : 1;
+            int hours = Integer.parseInt(upper.substring(offsetStart + 1, offsetStart + 3));
+            int minutes = Integer.parseInt(upper.substring(offsetStart + 4));
+            offsetSeconds = sign * (hours * 3600 + minutes * 60);
+            local = upper.substring(0, offsetStart);
+        }
+        return new DateTime(LocalDateTime.parse(local), offsetSeconds);
+    }
+
+    public static DateTime parseDateTimeLiteral(String value) {
+        return dateTimeValue(value);
+    }
+
+    public static @Nullable DateTime parseDateTime(String value, String path, List<Violation> violations) {
         if (!DATE_TIME.matcher(value).matches() || !validCalendar(value)) {
             violations.add(new Violation(path, "must be a valid date-time, got \"" + value + "\""));
             return null;
         }
         try {
-            return OffsetDateTime.parse(truncateFraction(value).toUpperCase());
-        } catch (DateTimeParseException e) {
+            return dateTimeValue(value);
+        } catch (DateTimeParseException | NumberFormatException e) {
             violations.add(new Violation(path, "must be a valid date-time, got \"" + value + "\""));
             return null;
         }
     }
 
-    public static String formatDateTime(OffsetDateTime value) {
+    public static String formatDateTime(DateTime value) {
         return String.format("%04d-%02d-%02dT%02d:%02d:%02d", value.getYear(), value.getMonthValue(),
                 value.getDayOfMonth(), value.getHour(), value.getMinute(), value.getSecond())
-                + frac(value.getNano()) + offset(value.getOffset().getTotalSeconds());
+                + frac(value.getNano()) + offset(value.getOffsetSeconds());
     }
 
     public static @Nullable LocalDate parseDate(String value, String path, List<Violation> violations) {
@@ -6711,6 +6774,27 @@ const TEMPORAL_SUPPORT_BODY: &str = r####"    private static int daysInMonth(int
         return String.format("%04d-%02d-%02d", value.getYear(), value.getMonthValue(), value.getDayOfMonth());
     }
 
+    private static String canonicalTime(String value) {
+        String upper = value.toUpperCase();
+        int dot = upper.indexOf('.');
+        if (dot >= 0) {
+            int fractionEnd = dot + 1;
+            while (fractionEnd < upper.length() && Character.isDigit(upper.charAt(fractionEnd))) {
+                fractionEnd++;
+            }
+            int trimmedEnd = fractionEnd;
+            while (trimmedEnd > dot + 1 && upper.charAt(trimmedEnd - 1) == '0') {
+                trimmedEnd--;
+            }
+            String fraction = trimmedEnd == dot + 1 ? "" : upper.substring(dot, trimmedEnd);
+            upper = upper.substring(0, dot) + fraction + upper.substring(fractionEnd);
+        }
+        if (upper.endsWith("+00:00") || upper.endsWith("-00:00")) {
+            upper = upper.substring(0, upper.length() - 6) + "Z";
+        }
+        return upper;
+    }
+
     // time -> validated, canonicalized String (no single java.time type holds
     // both an offset-bearing and an offset-less time-of-day).
     public static @Nullable String parseTime(String value, String path, List<Violation> violations) {
@@ -6718,16 +6802,11 @@ const TEMPORAL_SUPPORT_BODY: &str = r####"    private static int daysInMonth(int
             violations.add(new Violation(path, "must be a valid time, got \"" + value + "\""));
             return null;
         }
-        String upper = truncateFraction(value).toUpperCase();
-        try {
-            OffsetTime t = OffsetTime.parse(upper);
-            return String.format("%02d:%02d:%02d", t.getHour(), t.getMinute(), t.getSecond())
-                    + frac(t.getNano()) + offset(t.getOffset().getTotalSeconds());
-        } catch (DateTimeParseException e) {
-            LocalTime t = LocalTime.parse(upper);
-            return String.format("%02d:%02d:%02d", t.getHour(), t.getMinute(), t.getSecond())
-                    + frac(t.getNano());
-        }
+        return canonicalTime(value);
+    }
+
+    public static String formatTime(String value) {
+        return canonicalTime(value);
     }
 
     public static @Nullable Duration parseDuration(String value, String path, List<Violation> violations) {
@@ -6765,10 +6844,13 @@ const TEMPORAL_SUPPORT_BODY: &str = r####"    private static int daysInMonth(int
     // counterpart of the matching `parse*` above: without it the emitted wire
     // is a string this module's own parser rejects.
 
-    private static void checkOffset(String name, Object value, ZoneOffset offset, String path, List<Violation> violations) {
-        if (offset.getTotalSeconds() % 60 != 0) {
+    private static void checkOffset(String name, Object value, int offsetSeconds, String path, List<Violation> violations) {
+        if (offsetSeconds % 60 != 0) {
             violations.add(new Violation(path, "must be a valid " + name + ", got " + value
-                    + ": the UTC offset " + offset + " is not a whole number of minutes"));
+                    + ": the UTC offset is not a whole number of minutes"));
+        } else if (offsetSeconds < -(23 * 60 + 59) * 60 || offsetSeconds > (23 * 60 + 59) * 60) {
+            violations.add(new Violation(path, "must be a valid " + name + ", got " + value
+                    + ": the UTC offset is outside -23:59 through +23:59"));
         }
     }
 
@@ -6780,9 +6862,9 @@ const TEMPORAL_SUPPORT_BODY: &str = r####"    private static int daysInMonth(int
         }
     }
 
-    public static void checkDateTime(OffsetDateTime value, String path, List<Violation> violations) {
+    public static void checkDateTime(DateTime value, String path, List<Violation> violations) {
         checkYear("date-time", value, value.getYear(), path, violations);
-        checkOffset("date-time", value, value.getOffset(), path, violations);
+        checkOffset("date-time", value, value.getOffsetSeconds(), path, violations);
     }
 
     public static void checkDate(LocalDate value, String path, List<Violation> violations) {
@@ -6795,11 +6877,6 @@ const TEMPORAL_SUPPORT_BODY: &str = r####"    private static int daysInMonth(int
         if (!TIME.matcher(value).matches()) {
             violations.add(new Violation(path, "must be a valid time, got \"" + value + "\""));
             return;
-        }
-        try {
-            checkOffset("time", value, OffsetTime.parse(value.toUpperCase()).getOffset(), path, violations);
-        } catch (DateTimeParseException e) {
-            // Offset-less; the grammar allows it and there is no offset to hold.
         }
     }
 

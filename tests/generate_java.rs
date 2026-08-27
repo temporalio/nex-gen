@@ -637,7 +637,7 @@ fn java_json_emits_runtime_support_for_nested_materialized_values() {
     // The serialize-side representability predicate exists for **every**
     // materialized kind, not just the calendar year floor (`09#3`).
     for expected in [
-        "public static void checkDateTime(OffsetDateTime value, String path, List<Violation> violations) {",
+        "public static void checkDateTime(DateTime value, String path, List<Violation> violations) {",
         "public static void checkDate(LocalDate value, String path, List<Violation> violations) {",
         "public static void checkTime(String value, String path, List<Violation> violations) {",
         "public static void checkDuration(Duration value, String path, List<Violation> violations) {",
@@ -2147,12 +2147,13 @@ properties:
         support.contains("(\\\\.[0-9]+)?"),
         "the pinned fraction must stay unbounded\n{support}"
     );
-    // Both parsers that can see a fraction truncate before handing it to
-    // `java.time`; `parseDate` has no fraction to truncate.
+    // The typed date-time carrier truncates to LocalDateTime's nanoseconds;
+    // string-carried time keeps every digit and uses owned string arithmetic.
     for expected in [
         "private static String truncateFraction(String value) {",
-        "return OffsetDateTime.parse(truncateFraction(value).toUpperCase());",
         "String upper = truncateFraction(value).toUpperCase();",
+        "return new DateTime(LocalDateTime.parse(local), offsetSeconds);",
+        "return canonicalTime(value);",
     ] {
         assert!(support.contains(expected), "{expected}\n{support}");
     }

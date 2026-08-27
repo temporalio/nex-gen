@@ -1395,6 +1395,13 @@ final class JsonSchemaShowcaseRoundTripTest {
                 CONVERTER.toPayload(new ItemRules(java.util.Arrays.asList("bad", "bad"))));
         assertItemRuleOrder(messageChain(itemSerialize));
 
+        RuntimeException requiredArray = assertThrows(RuntimeException.class, () ->
+                CONVERTER.toPayload(new ItemRules(null)));
+        assertTrue(messageChain(requiredArray).contains("values"), messageChain(requiredArray));
+        RuntimeException requiredString = assertThrows(RuntimeException.class, () ->
+                CONVERTER.toPayload(new Address(null, null, null, new java.util.LinkedHashMap<>())));
+        assertTrue(messageChain(requiredString).contains("street"), messageChain(requiredString));
+
         // Closed value-set (const/enum) members carry no serialize-side check:
         // their value class can only hold a known constant, so an out-of-set
         // value cannot be constructed in memory (a compile-time guarantee). The

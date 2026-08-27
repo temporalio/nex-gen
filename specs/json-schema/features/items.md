@@ -230,9 +230,9 @@ encoder as the in-memory collection.
   other three targets can each hold an empty reference on a required
   non-nullable array (Java `null`, Python `None`, TypeScript
   `undefined`/`null`), and there the serialize side must **reject** rather than
-  write an emptiness the schema forbids. *(Status: unimplemented — Java omits
-  the key, TypeScript and Python assign the empty reference straight through;
-  none of the three raises the violation this clause requires.)* The decision itself is owned by
+  write an emptiness the schema forbids. Each emits an `expected array` or
+  `required` violation before conversion/iteration, so an invalid native value
+  remains inside the aggregate rather than throwing from the host runtime. The decision itself is owned by
   [[required]] + [[nullability]], recorded here because the array type is where
   it bites.
 
