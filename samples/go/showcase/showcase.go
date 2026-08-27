@@ -429,20 +429,20 @@ func unmarshalShowcaseDetail(raw json.RawMessage, path string, errs *[]Violation
 	return nil, false
 }
 
-// ShowcaseIDOrName is one of: string, integer.
-type ShowcaseIDOrName interface {
-	isShowcaseIDOrName()
+// ShowcaseIdOrName is one of: string, integer.
+type ShowcaseIdOrName interface {
+	isShowcaseIdOrName()
 	Validate() error
 }
 
-// ShowcaseIDOrNameString wraps a string value admissible in the ShowcaseIDOrName union.
-type ShowcaseIDOrNameString string
+// ShowcaseIdOrNameString wraps a string value admissible in the ShowcaseIdOrName union.
+type ShowcaseIdOrNameString string
 
-func (ShowcaseIDOrNameString) isShowcaseIDOrName() {}
+func (ShowcaseIdOrNameString) isShowcaseIdOrName() {}
 
 // Validate checks v against every constraint and returns a PayloadValidationError
 // listing any violations.
-func (v ShowcaseIDOrNameString) Validate() error {
+func (v ShowcaseIdOrNameString) Validate() error {
 	var errs []Violation
 	if n := utf8.RuneCountInString(string(v)); n < 3 {
 		errs = append(errs, Violation{"", fmt.Sprintf("must have length >= 3, got %d", n)})
@@ -453,14 +453,14 @@ func (v ShowcaseIDOrNameString) Validate() error {
 	return nil
 }
 
-// ShowcaseIDOrNameInteger wraps a int64 value admissible in the ShowcaseIDOrName union.
-type ShowcaseIDOrNameInteger int64
+// ShowcaseIdOrNameInteger wraps a int64 value admissible in the ShowcaseIdOrName union.
+type ShowcaseIdOrNameInteger int64
 
-func (ShowcaseIDOrNameInteger) isShowcaseIDOrName() {}
+func (ShowcaseIdOrNameInteger) isShowcaseIdOrName() {}
 
 // Validate checks v against every constraint and returns a PayloadValidationError
 // listing any violations.
-func (v ShowcaseIDOrNameInteger) Validate() error {
+func (v ShowcaseIdOrNameInteger) Validate() error {
 	var errs []Violation
 	if int64(v) < -integerCap || int64(v) > integerCap {
 		errs = append(errs, Violation{"", "exceeds ±(2^53-1) integer cap"})
@@ -474,7 +474,7 @@ func (v ShowcaseIDOrNameInteger) Validate() error {
 	return nil
 }
 
-func unmarshalShowcaseIDOrName(raw json.RawMessage, path string, errs *[]Violation) (ShowcaseIDOrName, bool) {
+func unmarshalShowcaseIdOrName(raw json.RawMessage, path string, errs *[]Violation) (ShowcaseIdOrName, bool) {
 	trimmed := bytes.TrimSpace(raw)
 	if len(trimmed) == 0 {
 		*errs = append(*errs, Violation{path, "expected one of: string, integer"})
@@ -487,7 +487,7 @@ func unmarshalShowcaseIDOrName(raw json.RawMessage, path string, errs *[]Violati
 			*errs = append(*errs, Violation{path, "expected string"})
 			return nil, false
 		}
-		v := ShowcaseIDOrNameString(s)
+		v := ShowcaseIdOrNameString(s)
 		mergeNested(errs, path, v.Validate())
 		return v, true
 	case '-', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9':
@@ -503,7 +503,7 @@ func unmarshalShowcaseIDOrName(raw json.RawMessage, path string, errs *[]Violati
 			*errs = append(*errs, Violation{path, err.Error()})
 			return nil, false
 		}
-		v := ShowcaseIDOrNameInteger(iv)
+		v := ShowcaseIdOrNameInteger(iv)
 		mergeNested(errs, path, v.Validate())
 		return v, true
 	}
@@ -552,7 +552,7 @@ func (v ShowcaseMeasurementsArray) Validate() error {
 	return nil
 }
 
-var showcaseMeasurementsStringPattern = regexp.MustCompile("^[a-z]+$")
+var _nexgenJsonSchemaPattern5e5b612d7a5d2b24 = regexp.MustCompile("^[a-z]+$")
 
 // ShowcaseMeasurementsString wraps a string value admissible in the
 // ShowcaseMeasurements union.
@@ -564,7 +564,7 @@ func (ShowcaseMeasurementsString) isShowcaseMeasurements() {}
 // listing any violations.
 func (v ShowcaseMeasurementsString) Validate() error {
 	var errs []Violation
-	if !showcaseMeasurementsStringPattern.MatchString(string(v)) {
+	if !_nexgenJsonSchemaPattern5e5b612d7a5d2b24.MatchString(string(v)) {
 		errs = append(errs, Violation{"", fmt.Sprintf("must match pattern %q, got %q", "^[a-z]+$", string(v))})
 	}
 	if len(errs) > 0 {
@@ -1635,7 +1635,7 @@ func (m Attributes) MarshalJSON() ([]byte, error) {
 	return json.Marshal(out)
 }
 
-var blobIndexValueContentEncoding = regexp.MustCompile("^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/][AQgw]==|[A-Za-z0-9+/]{2}[AEIMQUYcgkosw048]=)?$")
+var _nexgenJsonSchemaBase64ContentEncoding = regexp.MustCompile("^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/][AQgw]==|[A-Za-z0-9+/]{2}[AEIMQUYcgkosw048]=)?$")
 
 // BlobIndex A typed map of materialized base64 byte strings.
 type BlobIndex struct {
@@ -1669,7 +1669,7 @@ func (m *BlobIndex) UnmarshalJSON(data []byte) error {
 			continue
 		}
 		if s, ok := parseStringField(&v, path, true, false, &errs); ok {
-			if value, ok := decodeBase64(path, s, blobIndexValueContentEncoding, &errs); ok {
+			if value, ok := decodeBase64(path, s, _nexgenJsonSchemaBase64ContentEncoding, &errs); ok {
 				m.AdditionalProperties[k] = value
 			}
 		}
@@ -2650,18 +2650,15 @@ func (m Settings) MarshalJSON() ([]byte, error) {
 	return json.Marshal(out)
 }
 
-var showcaseSkuPattern = regexp.MustCompile("^[A-Z]{2,4}$")
-var showcasePhrasePattern = regexp.MustCompile("^[^\\t\\n\\x0B\\f\\r ]+[\\t\\n\\x0B\\f\\r ][^\\t\\n\\x0B\\f\\r ]+$")
-var showcaseRequestIDFormat = regexp.MustCompile("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
-var showcaseContactEmailFormat = regexp.MustCompile("^[a-zA-Z0-9!#$%&'*+/=?^_`{|}~-]+(?:\\.[a-zA-Z0-9!#$%&'*+/=?^_`{|}~-]+)*@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+$")
-var showcaseHostFormat = regexp.MustCompile("^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$")
-var showcaseHomepageFormat = regexp.MustCompile("^(?:[A-Za-z][A-Za-z0-9+.-]*:(?://(?:(?:[A-Za-z0-9._~!$&'()*+,;=:-]|%[0-9A-Fa-f][0-9A-Fa-f])*@)?(?:(?:\\[(?:([0-9a-fA-F]{1,4}:){6}([0-9a-fA-F]{1,4}:[0-9a-fA-F]{1,4}|((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])))|::([0-9a-fA-F]{1,4}:){5}([0-9a-fA-F]{1,4}:[0-9a-fA-F]{1,4}|((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])))|([0-9a-fA-F]{1,4})?::([0-9a-fA-F]{1,4}:){4}([0-9a-fA-F]{1,4}:[0-9a-fA-F]{1,4}|((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])))|(([0-9a-fA-F]{1,4}:){0,1}[0-9a-fA-F]{1,4})?::([0-9a-fA-F]{1,4}:){3}([0-9a-fA-F]{1,4}:[0-9a-fA-F]{1,4}|((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])))|(([0-9a-fA-F]{1,4}:){0,2}[0-9a-fA-F]{1,4})?::([0-9a-fA-F]{1,4}:){2}([0-9a-fA-F]{1,4}:[0-9a-fA-F]{1,4}|((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])))|(([0-9a-fA-F]{1,4}:){0,3}[0-9a-fA-F]{1,4})?::([0-9a-fA-F]{1,4}:)([0-9a-fA-F]{1,4}:[0-9a-fA-F]{1,4}|((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])))|(([0-9a-fA-F]{1,4}:){0,4}[0-9a-fA-F]{1,4})?::([0-9a-fA-F]{1,4}:[0-9a-fA-F]{1,4}|((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])))|(([0-9a-fA-F]{1,4}:){0,5}[0-9a-fA-F]{1,4})?::[0-9a-fA-F]{1,4}|(([0-9a-fA-F]{1,4}:){0,6}[0-9a-fA-F]{1,4})?::)\\]|\\[v[0-9A-Fa-f]+\\.[A-Za-z0-9._~!$&'()*+,;=:-]+\\])|(?:[A-Za-z0-9._~!$&'()*+,;=-]|%[0-9A-Fa-f][0-9A-Fa-f])*)(?::[0-9]*)?(?:/(?:[A-Za-z0-9._~!$&'()*+,;=:@-]|%[0-9A-Fa-f][0-9A-Fa-f])*)*|/(?:(?:[A-Za-z0-9._~!$&'()*+,;=:@-]|%[0-9A-Fa-f][0-9A-Fa-f])+(?:/(?:[A-Za-z0-9._~!$&'()*+,;=:@-]|%[0-9A-Fa-f][0-9A-Fa-f])*)*)?|(?:[A-Za-z0-9._~!$&'()*+,;=:@-]|%[0-9A-Fa-f][0-9A-Fa-f])+(?:/(?:[A-Za-z0-9._~!$&'()*+,;=:@-]|%[0-9A-Fa-f][0-9A-Fa-f])*)*)?(?:\\?(?:(?:[A-Za-z0-9._~!$&'()*+,;=:@-]|%[0-9A-Fa-f][0-9A-Fa-f])|[/?])*)?(?:#(?:(?:[A-Za-z0-9._~!$&'()*+,;=:@-]|%[0-9A-Fa-f][0-9A-Fa-f])|[/?])*)?)$")
-var showcaseGatewayFormat = regexp.MustCompile("^(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])$")
-var showcaseBlobContentEncoding = regexp.MustCompile("^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/][AQgw]==|[A-Za-z0-9+/]{2}[AEIMQUYcgkosw048]=)?$")
-var showcaseUrlBlobContentEncoding = regexp.MustCompile("^(?:[A-Za-z0-9_-]{4})*(?:[A-Za-z0-9_-][AQgw]|[A-Za-z0-9_-]{2}[AEIMQUYcgkosw048])?$")
-var showcaseLinksItemFormat = regexp.MustCompile("^(?:[A-Za-z][A-Za-z0-9+.-]*:(?://(?:(?:[A-Za-z0-9._~!$&'()*+,;=:-]|%[0-9A-Fa-f][0-9A-Fa-f])*@)?(?:(?:\\[(?:([0-9a-fA-F]{1,4}:){6}([0-9a-fA-F]{1,4}:[0-9a-fA-F]{1,4}|((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])))|::([0-9a-fA-F]{1,4}:){5}([0-9a-fA-F]{1,4}:[0-9a-fA-F]{1,4}|((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])))|([0-9a-fA-F]{1,4})?::([0-9a-fA-F]{1,4}:){4}([0-9a-fA-F]{1,4}:[0-9a-fA-F]{1,4}|((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])))|(([0-9a-fA-F]{1,4}:){0,1}[0-9a-fA-F]{1,4})?::([0-9a-fA-F]{1,4}:){3}([0-9a-fA-F]{1,4}:[0-9a-fA-F]{1,4}|((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])))|(([0-9a-fA-F]{1,4}:){0,2}[0-9a-fA-F]{1,4})?::([0-9a-fA-F]{1,4}:){2}([0-9a-fA-F]{1,4}:[0-9a-fA-F]{1,4}|((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])))|(([0-9a-fA-F]{1,4}:){0,3}[0-9a-fA-F]{1,4})?::([0-9a-fA-F]{1,4}:)([0-9a-fA-F]{1,4}:[0-9a-fA-F]{1,4}|((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])))|(([0-9a-fA-F]{1,4}:){0,4}[0-9a-fA-F]{1,4})?::([0-9a-fA-F]{1,4}:[0-9a-fA-F]{1,4}|((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])))|(([0-9a-fA-F]{1,4}:){0,5}[0-9a-fA-F]{1,4})?::[0-9a-fA-F]{1,4}|(([0-9a-fA-F]{1,4}:){0,6}[0-9a-fA-F]{1,4})?::)\\]|\\[v[0-9A-Fa-f]+\\.[A-Za-z0-9._~!$&'()*+,;=:-]+\\])|(?:[A-Za-z0-9._~!$&'()*+,;=-]|%[0-9A-Fa-f][0-9A-Fa-f])*)(?::[0-9]*)?(?:/(?:[A-Za-z0-9._~!$&'()*+,;=:@-]|%[0-9A-Fa-f][0-9A-Fa-f])*)*|/(?:(?:[A-Za-z0-9._~!$&'()*+,;=:@-]|%[0-9A-Fa-f][0-9A-Fa-f])+(?:/(?:[A-Za-z0-9._~!$&'()*+,;=:@-]|%[0-9A-Fa-f][0-9A-Fa-f])*)*)?|(?:[A-Za-z0-9._~!$&'()*+,;=:@-]|%[0-9A-Fa-f][0-9A-Fa-f])+(?:/(?:[A-Za-z0-9._~!$&'()*+,;=:@-]|%[0-9A-Fa-f][0-9A-Fa-f])*)*)?(?:\\?(?:(?:[A-Za-z0-9._~!$&'()*+,;=:@-]|%[0-9A-Fa-f][0-9A-Fa-f])|[/?])*)?(?:#(?:(?:[A-Za-z0-9._~!$&'()*+,;=:@-]|%[0-9A-Fa-f][0-9A-Fa-f])|[/?])*)?)$")
-var showcaseBlobsItemContentEncoding = regexp.MustCompile("^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/][AQgw]==|[A-Za-z0-9+/]{2}[AEIMQUYcgkosw048]=)?$")
-var showcaseWildcardPattern = regexp.MustCompile("a[^\\n]b")
+var _nexgenJsonSchemaPattern5e5b412d5a5d7b322c347d24 = regexp.MustCompile("^[A-Z]{2,4}$")
+var _nexgenJsonSchemaPattern5e5b5e5c745c6e5c7830425c665c72205d2b5b5c745c6e5c7830425c665c72205d5b5e5c745c6e5c7830425c665c72205d2b24 = regexp.MustCompile("^[^\\t\\n\\x0B\\f\\r ]+[\\t\\n\\x0B\\f\\r ][^\\t\\n\\x0B\\f\\r ]+$")
+var _nexgenJsonSchemaUuidFormat = regexp.MustCompile("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+var _nexgenJsonSchemaEmailFormat = regexp.MustCompile("^[a-zA-Z0-9!#$%&'*+/=?^_`{|}~-]+(?:\\.[a-zA-Z0-9!#$%&'*+/=?^_`{|}~-]+)*@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+$")
+var _nexgenJsonSchemaHostnameFormat = regexp.MustCompile("^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$")
+var _nexgenJsonSchemaUriFormat = regexp.MustCompile("^(?:[A-Za-z][A-Za-z0-9+.-]*:(?://(?:(?:[A-Za-z0-9._~!$&'()*+,;=:-]|%[0-9A-Fa-f][0-9A-Fa-f])*@)?(?:(?:\\[(?:([0-9a-fA-F]{1,4}:){6}([0-9a-fA-F]{1,4}:[0-9a-fA-F]{1,4}|((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])))|::([0-9a-fA-F]{1,4}:){5}([0-9a-fA-F]{1,4}:[0-9a-fA-F]{1,4}|((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])))|([0-9a-fA-F]{1,4})?::([0-9a-fA-F]{1,4}:){4}([0-9a-fA-F]{1,4}:[0-9a-fA-F]{1,4}|((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])))|(([0-9a-fA-F]{1,4}:){0,1}[0-9a-fA-F]{1,4})?::([0-9a-fA-F]{1,4}:){3}([0-9a-fA-F]{1,4}:[0-9a-fA-F]{1,4}|((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])))|(([0-9a-fA-F]{1,4}:){0,2}[0-9a-fA-F]{1,4})?::([0-9a-fA-F]{1,4}:){2}([0-9a-fA-F]{1,4}:[0-9a-fA-F]{1,4}|((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])))|(([0-9a-fA-F]{1,4}:){0,3}[0-9a-fA-F]{1,4})?::([0-9a-fA-F]{1,4}:)([0-9a-fA-F]{1,4}:[0-9a-fA-F]{1,4}|((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])))|(([0-9a-fA-F]{1,4}:){0,4}[0-9a-fA-F]{1,4})?::([0-9a-fA-F]{1,4}:[0-9a-fA-F]{1,4}|((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])))|(([0-9a-fA-F]{1,4}:){0,5}[0-9a-fA-F]{1,4})?::[0-9a-fA-F]{1,4}|(([0-9a-fA-F]{1,4}:){0,6}[0-9a-fA-F]{1,4})?::)\\]|\\[v[0-9A-Fa-f]+\\.[A-Za-z0-9._~!$&'()*+,;=:-]+\\])|(?:[A-Za-z0-9._~!$&'()*+,;=-]|%[0-9A-Fa-f][0-9A-Fa-f])*)(?::[0-9]*)?(?:/(?:[A-Za-z0-9._~!$&'()*+,;=:@-]|%[0-9A-Fa-f][0-9A-Fa-f])*)*|/(?:(?:[A-Za-z0-9._~!$&'()*+,;=:@-]|%[0-9A-Fa-f][0-9A-Fa-f])+(?:/(?:[A-Za-z0-9._~!$&'()*+,;=:@-]|%[0-9A-Fa-f][0-9A-Fa-f])*)*)?|(?:[A-Za-z0-9._~!$&'()*+,;=:@-]|%[0-9A-Fa-f][0-9A-Fa-f])+(?:/(?:[A-Za-z0-9._~!$&'()*+,;=:@-]|%[0-9A-Fa-f][0-9A-Fa-f])*)*)?(?:\\?(?:(?:[A-Za-z0-9._~!$&'()*+,;=:@-]|%[0-9A-Fa-f][0-9A-Fa-f])|[/?])*)?(?:#(?:(?:[A-Za-z0-9._~!$&'()*+,;=:@-]|%[0-9A-Fa-f][0-9A-Fa-f])|[/?])*)?)$")
+var _nexgenJsonSchemaIpv4Format = regexp.MustCompile("^(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])$")
+var _nexgenJsonSchemaBase64urlContentEncoding = regexp.MustCompile("^(?:[A-Za-z0-9_-]{4})*(?:[A-Za-z0-9_-][AQgw]|[A-Za-z0-9_-]{2}[AEIMQUYcgkosw048])?$")
+var _nexgenJsonSchemaPattern615b5e5c6e5d62 = regexp.MustCompile("a[^\\n]b")
 
 // Showcase
 //
@@ -2712,10 +2709,10 @@ type Showcase struct {
 	// rewrite (Python `\Z` / Java `\z`), so a Unicode space (NBSP) and a trailing newline
 	// are rejected consistently across all four languages.
 	Phrase *string `json:"phrase,omitempty"`
-	// RequestID Optional request identifier; asserted RFC 4122 UUID via `format: uuid`.
+	// RequestId Optional request identifier; asserted RFC 4122 UUID via `format: uuid`.
 	// Stays `string`-typed (format assertion, no materialization); the pinned regex is
 	// validated identically across all four languages.
-	RequestID *string `json:"requestId,omitempty"`
+	RequestId *string `json:"requestId,omitempty"`
 	// ContactEmail Optional contact address; asserted ASCII dot-atom `format: email`
 	// (single `@`, >=2-label domain, total length <= 254, guard-before-regex).
 	ContactEmail *string `json:"contactEmail,omitempty"`
@@ -2780,13 +2777,13 @@ type Showcase struct {
 	Aliases []string `json:"aliases,omitempty"`
 	// Roles Access roles; must contain between one and two "admin" entries.
 	Roles []string `json:"roles,omitempty"`
-	// IDOrName Disjoint-kind union (oneOf sum type): the wire value is either a string of
+	// IdOrName Disjoint-kind union (oneOf sum type): the wire value is either a string of
 	// at least 3 code points or an integer of at least 1, selected by its JSON token. Not
 	// a member of a discriminated union — the token itself is the selector. Each branch
 	// also carries its **own constraints**: once the token selects a branch, the value is
 	// held to everything that branch declares, in both directions, with the union's path
 	// on the violation.
-	IDOrName ShowcaseIDOrName `json:"idOrName,omitempty"`
+	IdOrName ShowcaseIdOrName `json:"idOrName,omitempty"`
 	// Mode A union whose string branch is a **closed value set**: either one of two named
 	// modes or an unbounded non-negative integer. The branch narrows to its own admissible
 	// values (a Go/Java membership check, a TypeScript literal union, a Python `Literal`),
@@ -3014,37 +3011,37 @@ func (m Showcase) Validate() error {
 		}
 	}
 	if m.Sku != nil {
-		if !showcaseSkuPattern.MatchString(*m.Sku) {
+		if !_nexgenJsonSchemaPattern5e5b412d5a5d7b322c347d24.MatchString(*m.Sku) {
 			errs = append(errs, Violation{"sku", fmt.Sprintf("must match pattern %q, got %q", "^[A-Z]{2,4}$", *m.Sku)})
 		}
 	}
 	if m.Phrase != nil {
-		if !showcasePhrasePattern.MatchString(*m.Phrase) {
+		if !_nexgenJsonSchemaPattern5e5b5e5c745c6e5c7830425c665c72205d2b5b5c745c6e5c7830425c665c72205d5b5e5c745c6e5c7830425c665c72205d2b24.MatchString(*m.Phrase) {
 			errs = append(errs, Violation{"phrase", fmt.Sprintf("must match pattern %q, got %q", "^[^\\t\\n\\x0B\\f\\r ]+[\\t\\n\\x0B\\f\\r ][^\\t\\n\\x0B\\f\\r ]+$", *m.Phrase)})
 		}
 	}
-	if m.RequestID != nil {
-		if !showcaseRequestIDFormat.MatchString(*m.RequestID) {
-			errs = append(errs, Violation{"requestId", fmt.Sprintf("must be a valid uuid, got %q", *m.RequestID)})
+	if m.RequestId != nil {
+		if !_nexgenJsonSchemaUuidFormat.MatchString(*m.RequestId) {
+			errs = append(errs, Violation{"requestId", fmt.Sprintf("must be a valid uuid, got %q", *m.RequestId)})
 		}
 	}
 	if m.ContactEmail != nil {
-		if utf8.RuneCountInString(*m.ContactEmail) > 254 || !showcaseContactEmailFormat.MatchString(*m.ContactEmail) {
+		if utf8.RuneCountInString(*m.ContactEmail) > 254 || !_nexgenJsonSchemaEmailFormat.MatchString(*m.ContactEmail) {
 			errs = append(errs, Violation{"contactEmail", fmt.Sprintf("must be a valid email, got %q", *m.ContactEmail)})
 		}
 	}
 	if m.Host != nil {
-		if utf8.RuneCountInString(*m.Host) > 253 || !showcaseHostFormat.MatchString(*m.Host) {
+		if utf8.RuneCountInString(*m.Host) > 253 || !_nexgenJsonSchemaHostnameFormat.MatchString(*m.Host) {
 			errs = append(errs, Violation{"host", fmt.Sprintf("must be a valid hostname, got %q", *m.Host)})
 		}
 	}
 	if m.Homepage != nil {
-		if !showcaseHomepageFormat.MatchString(*m.Homepage) {
+		if !_nexgenJsonSchemaUriFormat.MatchString(*m.Homepage) {
 			errs = append(errs, Violation{"homepage", fmt.Sprintf("must be a valid uri, got %q", *m.Homepage)})
 		}
 	}
 	if m.Gateway != nil {
-		if !showcaseGatewayFormat.MatchString(*m.Gateway) {
+		if !_nexgenJsonSchemaIpv4Format.MatchString(*m.Gateway) {
 			errs = append(errs, Violation{"gateway", fmt.Sprintf("must be a valid ipv4, got %q", *m.Gateway)})
 		}
 	}
@@ -3132,8 +3129,8 @@ func (m Showcase) Validate() error {
 			}
 		}
 	}
-	if m.IDOrName != nil {
-		mergeNested(&errs, "idOrName", m.IDOrName.Validate())
+	if m.IdOrName != nil {
+		mergeNested(&errs, "idOrName", m.IdOrName.Validate())
 	}
 	if m.Mode != nil {
 		mergeNested(&errs, "mode", m.Mode.Validate())
@@ -3203,7 +3200,7 @@ func (m Showcase) Validate() error {
 	}
 	for i0, v0 := range m.Links {
 		p0 := fmt.Sprintf("%s[%d]", "links", i0)
-		if !showcaseLinksItemFormat.MatchString(v0) {
+		if !_nexgenJsonSchemaUriFormat.MatchString(v0) {
 			errs = append(errs, Violation{p0, fmt.Sprintf("must be a valid uri, got %q", v0)})
 		}
 	}
@@ -3358,7 +3355,7 @@ func (m Showcase) Validate() error {
 		}
 	}
 	if m.Wildcard != nil {
-		if !showcaseWildcardPattern.MatchString(*m.Wildcard) {
+		if !_nexgenJsonSchemaPattern615b5e5c6e5d62.MatchString(*m.Wildcard) {
 			errs = append(errs, Violation{"wildcard", fmt.Sprintf("must match pattern %q, got %q", "a[^\\n]b", *m.Wildcard)})
 		}
 	}
@@ -3473,53 +3470,53 @@ func (m *Showcase) UnmarshalJSON(data []byte) error {
 	}
 	if v, ok := parseStringField(get("sku"), "sku", false, false, &errs); ok {
 		m.Sku = &v
-		if !showcaseSkuPattern.MatchString(v) {
+		if !_nexgenJsonSchemaPattern5e5b412d5a5d7b322c347d24.MatchString(v) {
 			errs = append(errs, Violation{"sku", fmt.Sprintf("must match pattern %q, got %q", "^[A-Z]{2,4}$", v)})
 		}
 	}
 	if v, ok := parseStringField(get("phrase"), "phrase", false, false, &errs); ok {
 		m.Phrase = &v
-		if !showcasePhrasePattern.MatchString(v) {
+		if !_nexgenJsonSchemaPattern5e5b5e5c745c6e5c7830425c665c72205d2b5b5c745c6e5c7830425c665c72205d5b5e5c745c6e5c7830425c665c72205d2b24.MatchString(v) {
 			errs = append(errs, Violation{"phrase", fmt.Sprintf("must match pattern %q, got %q", "^[^\\t\\n\\x0B\\f\\r ]+[\\t\\n\\x0B\\f\\r ][^\\t\\n\\x0B\\f\\r ]+$", v)})
 		}
 	}
 	if v, ok := parseStringField(get("requestId"), "requestId", false, false, &errs); ok {
-		m.RequestID = &v
-		if !showcaseRequestIDFormat.MatchString(v) {
+		m.RequestId = &v
+		if !_nexgenJsonSchemaUuidFormat.MatchString(v) {
 			errs = append(errs, Violation{"requestId", fmt.Sprintf("must be a valid uuid, got %q", v)})
 		}
 	}
 	if v, ok := parseStringField(get("contactEmail"), "contactEmail", false, false, &errs); ok {
 		m.ContactEmail = &v
-		if utf8.RuneCountInString(v) > 254 || !showcaseContactEmailFormat.MatchString(v) {
+		if utf8.RuneCountInString(v) > 254 || !_nexgenJsonSchemaEmailFormat.MatchString(v) {
 			errs = append(errs, Violation{"contactEmail", fmt.Sprintf("must be a valid email, got %q", v)})
 		}
 	}
 	if v, ok := parseStringField(get("host"), "host", false, false, &errs); ok {
 		m.Host = &v
-		if utf8.RuneCountInString(v) > 253 || !showcaseHostFormat.MatchString(v) {
+		if utf8.RuneCountInString(v) > 253 || !_nexgenJsonSchemaHostnameFormat.MatchString(v) {
 			errs = append(errs, Violation{"host", fmt.Sprintf("must be a valid hostname, got %q", v)})
 		}
 	}
 	if v, ok := parseStringField(get("homepage"), "homepage", false, false, &errs); ok {
 		m.Homepage = &v
-		if !showcaseHomepageFormat.MatchString(v) {
+		if !_nexgenJsonSchemaUriFormat.MatchString(v) {
 			errs = append(errs, Violation{"homepage", fmt.Sprintf("must be a valid uri, got %q", v)})
 		}
 	}
 	if v, ok := parseStringField(get("gateway"), "gateway", false, false, &errs); ok {
 		m.Gateway = &v
-		if !showcaseGatewayFormat.MatchString(v) {
+		if !_nexgenJsonSchemaIpv4Format.MatchString(v) {
 			errs = append(errs, Violation{"gateway", fmt.Sprintf("must be a valid ipv4, got %q", v)})
 		}
 	}
 	if s, ok := parseStringField(get("blob"), "blob", false, false, &errs); ok {
-		if v, ok := decodeBase64("blob", s, showcaseBlobContentEncoding, &errs); ok {
+		if v, ok := decodeBase64("blob", s, _nexgenJsonSchemaBase64ContentEncoding, &errs); ok {
 			m.Blob = v
 		}
 	}
 	if s, ok := parseStringField(get("urlBlob"), "urlBlob", false, false, &errs); ok {
-		if v, ok := decodeBase64URL("urlBlob", s, showcaseUrlBlobContentEncoding, &errs); ok {
+		if v, ok := decodeBase64URL("urlBlob", s, _nexgenJsonSchemaBase64urlContentEncoding, &errs); ok {
 			m.UrlBlob = v
 		}
 	}
@@ -3684,8 +3681,8 @@ func (m *Showcase) UnmarshalJSON(data []byte) error {
 	if raw := get("idOrName"); raw == nil {
 	} else if isNull(*raw) {
 		errs = append(errs, Violation{"idOrName", "explicit null not allowed"})
-	} else if v, ok := unmarshalShowcaseIDOrName(*raw, "idOrName", &errs); ok {
-		m.IDOrName = v
+	} else if v, ok := unmarshalShowcaseIdOrName(*raw, "idOrName", &errs); ok {
+		m.IdOrName = v
 	}
 	if raw := get("mode"); raw == nil {
 	} else if isNull(*raw) {
@@ -3874,7 +3871,7 @@ func (m *Showcase) UnmarshalJSON(data []byte) error {
 					continue
 				}
 				if value0, ok := parseStringField(&e0, p0, true, false, &errs); ok {
-					if !showcaseLinksItemFormat.MatchString(value0) {
+					if !_nexgenJsonSchemaUriFormat.MatchString(value0) {
 						errs = append(errs, Violation{p0, fmt.Sprintf("must be a valid uri, got %q", value0)})
 					}
 					m.Links = append(m.Links, value0)
@@ -3967,7 +3964,7 @@ func (m *Showcase) UnmarshalJSON(data []byte) error {
 					continue
 				}
 				if s0, ok := parseStringField(&e0, p0, true, false, &errs); ok {
-					if value0, ok := decodeBase64(p0, s0, showcaseBlobsItemContentEncoding, &errs); ok {
+					if value0, ok := decodeBase64(p0, s0, _nexgenJsonSchemaBase64ContentEncoding, &errs); ok {
 						m.Blobs = append(m.Blobs, value0)
 					}
 				}
@@ -4311,7 +4308,7 @@ func (m *Showcase) UnmarshalJSON(data []byte) error {
 	}
 	if v, ok := parseStringField(get("wildcard"), "wildcard", false, false, &errs); ok {
 		m.Wildcard = &v
-		if !showcaseWildcardPattern.MatchString(v) {
+		if !_nexgenJsonSchemaPattern615b5e5c6e5d62.MatchString(v) {
 			errs = append(errs, Violation{"wildcard", fmt.Sprintf("must match pattern %q, got %q", "a[^\\n]b", v)})
 		}
 	}
@@ -4351,8 +4348,8 @@ func (m Showcase) MarshalJSON() ([]byte, error) {
 	if m.Phrase != nil {
 		marshalField(out, "phrase", *m.Phrase, &errs)
 	}
-	if m.RequestID != nil {
-		marshalField(out, "requestId", *m.RequestID, &errs)
+	if m.RequestId != nil {
+		marshalField(out, "requestId", *m.RequestId, &errs)
 	}
 	if m.ContactEmail != nil {
 		marshalField(out, "contactEmail", *m.ContactEmail, &errs)
@@ -4419,8 +4416,8 @@ func (m Showcase) MarshalJSON() ([]byte, error) {
 	if m.Roles != nil {
 		marshalField(out, "roles", m.Roles, &errs)
 	}
-	if m.IDOrName != nil {
-		marshalField(out, "idOrName", m.IDOrName, &errs)
+	if m.IdOrName != nil {
+		marshalField(out, "idOrName", m.IdOrName, &errs)
 	}
 	if m.Mode != nil {
 		marshalField(out, "mode", m.Mode, &errs)
@@ -5206,8 +5203,8 @@ func (m ShowcaseRowsItem) MarshalJSON() ([]byte, error) {
 
 // GetShowcaseInput is generated from the corresponding JSON Schema definition.
 type GetShowcaseInput struct {
-	// ID corresponds to the "id" JSON property.
-	ID string `json:"id"`
+	// Id corresponds to the "id" JSON property.
+	Id string `json:"id"`
 }
 
 // Validate checks m against every constraint and returns a PayloadValidationError
@@ -5243,7 +5240,7 @@ func (m *GetShowcaseInput) UnmarshalJSON(data []byte) error {
 	}
 	_ = get
 	if v, ok := parseStringField(get("id"), "id", true, false, &errs); ok {
-		m.ID = v
+		m.Id = v
 	}
 	if len(errs) > 0 {
 		return newPayloadValidationError(errs)
@@ -5257,7 +5254,7 @@ func (m GetShowcaseInput) MarshalJSON() ([]byte, error) {
 	var errs []Violation
 	addViolations(&errs, m.Validate())
 	out := map[string]json.RawMessage{}
-	marshalField(out, "id", m.ID, &errs)
+	marshalField(out, "id", m.Id, &errs)
 	if len(errs) > 0 {
 		return nil, newPayloadValidationError(errs)
 	}
@@ -5445,8 +5442,6 @@ func (m TextNote) MarshalJSON() ([]byte, error) {
 	return json.Marshal(out)
 }
 
-var tokensValuePattern = regexp.MustCompile("^[a-z]+$")
-
 // Tokens A typed map with a refined *string* member: 2 to 8 code points of lowercase
 // ASCII. Exercises the member-level `minLength`/`maxLength`/`pattern` in every
 // language.
@@ -5467,7 +5462,7 @@ func (m Tokens) Validate() error {
 		if n := utf8.RuneCountInString(v); n > 8 {
 			errs = append(errs, Violation{path, fmt.Sprintf("must have length <= 8, got %d", n)})
 		}
-		if !tokensValuePattern.MatchString(v) {
+		if !_nexgenJsonSchemaPattern5e5b612d7a5d2b24.MatchString(v) {
 			errs = append(errs, Violation{path, fmt.Sprintf("must match pattern %q, got %q", "^[a-z]+$", v)})
 		}
 	}
@@ -5495,7 +5490,7 @@ func (m *Tokens) UnmarshalJSON(data []byte) error {
 			if n := utf8.RuneCountInString(value); n > 8 {
 				errs = append(errs, Violation{path, fmt.Sprintf("must have length <= 8, got %d", n)})
 			}
-			if !tokensValuePattern.MatchString(value) {
+			if !_nexgenJsonSchemaPattern5e5b612d7a5d2b24.MatchString(value) {
 				errs = append(errs, Violation{path, fmt.Sprintf("must match pattern %q, got %q", "^[a-z]+$", value)})
 			}
 			m.AdditionalProperties[k] = value
@@ -5527,8 +5522,8 @@ func (m Tokens) MarshalJSON() ([]byte, error) {
 // value outside it is rejected by the merged constraint. No allOf survives past the
 // loader.
 type Widget struct {
-	// ID corresponds to the "id" JSON property.
-	ID string `json:"id"`
+	// Id corresponds to the "id" JSON property.
+	Id string `json:"id"`
 	// Kind corresponds to the "kind" JSON property.
 	Kind *string `json:"kind,omitempty"`
 	// Name corresponds to the "name" JSON property.
@@ -5596,7 +5591,7 @@ func (m *Widget) UnmarshalJSON(data []byte) error {
 	}
 	_ = get
 	if v, ok := parseStringField(get("id"), "id", true, false, &errs); ok {
-		m.ID = v
+		m.Id = v
 	}
 	if v, ok := parseStringField(get("kind"), "kind", false, false, &errs); ok {
 		m.Kind = &v
@@ -5628,7 +5623,7 @@ func (m Widget) MarshalJSON() ([]byte, error) {
 	for k, v := range m.AdditionalProperties {
 		out[k] = v
 	}
-	marshalField(out, "id", m.ID, &errs)
+	marshalField(out, "id", m.Id, &errs)
 	if m.Kind != nil {
 		marshalField(out, "kind", *m.Kind, &errs)
 	}
@@ -5645,8 +5640,8 @@ func (m Widget) MarshalJSON() ([]byte, error) {
 // WidgetBase A base object folded into Widget via allOf. It stays its own type; Widget
 // copies its fields rather than referencing or subtyping it.
 type WidgetBase struct {
-	// ID corresponds to the "id" JSON property.
-	ID string `json:"id"`
+	// Id corresponds to the "id" JSON property.
+	Id string `json:"id"`
 	// Kind corresponds to the "kind" JSON property.
 	Kind *string `json:"kind,omitempty"`
 	// AdditionalProperties holds unknown members verbatim.
@@ -5693,7 +5688,7 @@ func (m *WidgetBase) UnmarshalJSON(data []byte) error {
 	}
 	_ = get
 	if v, ok := parseStringField(get("id"), "id", true, false, &errs); ok {
-		m.ID = v
+		m.Id = v
 	}
 	if v, ok := parseStringField(get("kind"), "kind", false, false, &errs); ok {
 		m.Kind = &v
@@ -5713,7 +5708,7 @@ func (m WidgetBase) MarshalJSON() ([]byte, error) {
 	for k, v := range m.AdditionalProperties {
 		out[k] = v
 	}
-	marshalField(out, "id", m.ID, &errs)
+	marshalField(out, "id", m.Id, &errs)
 	if m.Kind != nil {
 		marshalField(out, "kind", *m.Kind, &errs)
 	}

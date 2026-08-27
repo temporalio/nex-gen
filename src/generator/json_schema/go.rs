@@ -305,133 +305,145 @@ fn go_unexported(name: &str) -> String {
     }
 }
 
-/// The package-level compiled-regex var name for a `pattern` on `json_name` of
-/// `model_name` — unique per (model, field) so the pattern compiles once at
-/// package init (the load-time gate already proved it compiles). See
-/// `specs/json-schema/features/pattern.md`.
-pub(crate) fn go_pattern_var_name(model_name: &str, json_name: &str) -> String {
-    go_unexported(&format!("{model_name}{}Pattern", go_field_name(json_name)))
+/// A collision-free identifier fragment for an arbitrary normalized pattern.
+/// The full UTF-8 spelling is encoded rather than hashed, so two patterns can
+/// never alias. The leading underscore keeps these generator-owned package
+/// variables outside every authored Go-name family.
+fn go_pattern_var_name(pattern: &str) -> String {
+    let mut name = String::from("_nexgenJsonSchemaPattern");
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    for byte in pattern.as_bytes() {
+        name.push(HEX[(byte >> 4) as usize] as char);
+        name.push(HEX[(byte & 0x0f) as usize] as char);
+    }
+    name
 }
 
-/// Emits the package-level `var <Model><Field>Pattern = regexp.MustCompile(...)`
-/// declarations for every string field of `schema` carrying a `pattern`. The
-/// pattern is the loader-normalized form (`\s`/`\S` already the explicit ASCII
-/// class); Go keeps `$` (RE2 end-anchor is already exception-free).
-fn render_go_pattern_vars(output: &mut String, model: &PlannedJsonType, schema: &Schema) {
+/// Emits each semantic package-level compiled predicate at most once. Patterns
+/// use their lossless encoded spelling; curated formats and encodings use their
+/// fixed names. None of these declarations depends on a member/derived position.
+fn render_go_pattern_vars(
+    output: &mut String,
+    _model: &PlannedJsonType,
+    schema: &Schema,
+    declared: &mut BTreeSet<String>,
+) {
     // A typed map's member carries the same string refinements a property does,
     // under the `Value` position name the loader uses for a member shape.
     if let Ok(Some(value)) = typed_map_value_schema(schema) {
-        render_go_string_vars_recursive(output, &model.model_name, MAP_MEMBER_POSITION, &value);
+        render_go_string_vars_recursive(output, &value, declared);
     }
     // `propertyNames` asserts the key, and its regexes compile once at package
     // init like every other pinned pattern — never inside the key loop.
     if let Some(names) = &schema.property_names {
-        render_go_string_vars(output, &model.model_name, PROPERTY_NAMES_POSITION, names);
+        render_go_string_vars(output, names, declared);
     }
     let Some(properties) = &schema.properties else {
         return;
     };
-    for (json_name, property) in properties {
-        render_go_string_vars_recursive(
-            output,
-            &model.model_name,
-            &property.go_member_name(json_name),
-            property,
-        );
+    for (_json_name, property) in properties {
+        render_go_string_vars_recursive(output, property, declared);
     }
 }
 
 fn render_go_string_vars_recursive(
     output: &mut String,
-    model_name: &str,
-    position: &str,
     schema: &Schema,
+    declared: &mut BTreeSet<String>,
 ) {
-    render_go_string_vars(output, model_name, position, schema);
+    render_go_string_vars(output, schema, declared);
     if let Some(matcher) = &schema.contains {
-        render_go_matcher_vars(output, model_name, position, matcher);
+        render_go_matcher_vars(output, matcher, declared);
     }
     if let Some(items) = &schema.items {
-        render_go_string_vars_recursive(output, model_name, &format!("{position}Item"), items);
+        render_go_string_vars_recursive(output, items, declared);
     }
-}
-
-/// The position a `contains` matcher's compiled regexes live under.
-fn go_contains_position(position: &str) -> String {
-    format!("{position}Contains")
 }
 
 /// Emits the compiled-regex vars a `contains` matcher needs. Like every other
 /// pinned pattern these compile once at package init — never per element inside
 /// the scan loop (P10, `pattern.md`'s compile-once rule).
-fn render_go_matcher_vars(output: &mut String, model_name: &str, position: &str, matcher: &Schema) {
+fn render_go_matcher_vars(output: &mut String, matcher: &Schema, declared: &mut BTreeSet<String>) {
     let matcher = scalar_matcher(matcher);
-    let position = go_contains_position(position);
     if let Some(pattern) = &matcher.pattern {
-        output.push_str("var ");
-        output.push_str(&go_pattern_var_name(model_name, &position));
-        output.push_str(" = regexp.MustCompile(");
-        output.push_str(&go_string_literal(pattern));
-        output.push_str(")\n");
+        let name = go_pattern_var_name(pattern);
+        if declared.insert(name.clone()) {
+            output.push_str("var ");
+            output.push_str(&name);
+            output.push_str(" = regexp.MustCompile(");
+            output.push_str(&go_string_literal(pattern));
+            output.push_str(")\n");
+        }
     }
     if let Some(format) = &matcher.format
         && let Some(check) = crate::json_schema::format::check_for(format)
     {
-        output.push_str("var ");
-        output.push_str(&go_format_var_name(model_name, &position));
-        output.push_str(" = regexp.MustCompile(");
-        output.push_str(&go_string_literal(&check.pattern));
-        output.push_str(")\n");
+        let name = go_format_var_name(format);
+        if declared.insert(name.clone()) {
+            output.push_str("var ");
+            output.push_str(&name);
+            output.push_str(" = regexp.MustCompile(");
+            output.push_str(&go_string_literal(&check.pattern));
+            output.push_str(")\n");
+        }
     }
 }
 
-/// Emits the compiled-regex vars one string schema needs at `position` (a JSON
-/// member name, or the `Value` position of a typed map's member).
-fn render_go_string_vars(output: &mut String, model_name: &str, position: &str, schema: &Schema) {
+/// Emits the compiled-regex vars one string schema needs.
+fn render_go_string_vars(output: &mut String, schema: &Schema, declared: &mut BTreeSet<String>) {
     let schema = nullable_non_null_schema(schema).unwrap_or(schema);
     if schema.ty.as_ref().and_then(Value::as_str) != Some("string") {
         return;
     }
     if let Some(pattern) = &schema.pattern {
-        output.push_str("var ");
-        output.push_str(&go_pattern_var_name(model_name, position));
-        output.push_str(" = regexp.MustCompile(");
-        output.push_str(&go_string_literal(pattern));
-        output.push_str(")\n");
+        let name = go_pattern_var_name(pattern);
+        if declared.insert(name.clone()) {
+            output.push_str("var ");
+            output.push_str(&name);
+            output.push_str(" = regexp.MustCompile(");
+            output.push_str(&go_string_literal(pattern));
+            output.push_str(")\n");
+        }
     }
     if let Some(format) = &schema.format
         && let Some(check) = crate::json_schema::format::check_for(format)
     {
         // Go keeps the `$` end-anchor (RE2 is exception-free); the pinned
         // regex compiles once at package init.
-        output.push_str("var ");
-        output.push_str(&go_format_var_name(model_name, position));
-        output.push_str(" = regexp.MustCompile(");
-        output.push_str(&go_string_literal(&check.pattern));
-        output.push_str(")\n");
+        let name = go_format_var_name(format);
+        if declared.insert(name.clone()) {
+            output.push_str("var ");
+            output.push_str(&name);
+            output.push_str(" = regexp.MustCompile(");
+            output.push_str(&go_string_literal(&check.pattern));
+            output.push_str(")\n");
+        }
     }
     if let Some(encoding) = content_encoding_kind(schema) {
-        output.push_str("var ");
-        output.push_str(&go_content_encoding_var_name(model_name, position));
-        output.push_str(" = regexp.MustCompile(");
-        output.push_str(&go_string_literal(encoding.pattern()));
-        output.push_str(")\n");
+        let name = go_content_encoding_var_name(encoding);
+        if declared.insert(name.clone()) {
+            output.push_str("var ");
+            output.push_str(&name);
+            output.push_str(" = regexp.MustCompile(");
+            output.push_str(&go_string_literal(encoding.pattern()));
+            output.push_str(")\n");
+        }
     }
 }
 
-/// The package-level compiled-regex var name for a `contentEncoding` on
-/// `json_name` of `model_name`. See `specs/json-schema/features/contentEncoding.md`.
-pub(crate) fn go_content_encoding_var_name(model_name: &str, json_name: &str) -> String {
-    go_unexported(&format!(
-        "{model_name}{}ContentEncoding",
-        go_field_name(json_name)
-    ))
+/// The shared package-level compiled-regex var for a `contentEncoding` kind.
+fn go_content_encoding_var_name(
+    encoding: crate::json_schema::content_encoding::Encoding,
+) -> String {
+    format!(
+        "_nexgenJsonSchema{}ContentEncoding",
+        go_field_name(encoding.name())
+    )
 }
 
-/// The package-level compiled-regex var name for a `format` on `json_name` of
-/// `model_name`. See `specs/json-schema/features/format.md`.
-pub(crate) fn go_format_var_name(model_name: &str, json_name: &str) -> String {
-    go_unexported(&format!("{model_name}{}Format", go_field_name(json_name)))
+/// The shared package-level compiled-regex var for a curated `format`.
+fn go_format_var_name(format: &str) -> String {
+    format!("_nexgenJsonSchema{}Format", go_field_name(format))
 }
 
 /// Emits the `format` predicate over `value_expr` (a `string` in scope): the
@@ -583,11 +595,10 @@ fn go_matcher_condition(
     matcher: &Schema,
     elem: &str,
     element_ty: Option<&str>,
-    model_name: &str,
-    position: &str,
+    _model_name: &str,
+    _position: &str,
 ) -> String {
     let matcher = scalar_matcher(matcher);
-    let var_position = go_contains_position(position);
     let is_integer = match matcher.kind {
         Some(ScalarKind::Number) => false,
         Some(ScalarKind::Integer) => element_ty != Some("number"),
@@ -646,10 +657,10 @@ fn go_matcher_condition(
     if let Some(max) = matcher.max_length {
         parts.push(format!("utf8.RuneCountInString({elem}) <= {max}"));
     }
-    if matcher.pattern.is_some() {
+    if let Some(pattern) = &matcher.pattern {
         parts.push(format!(
             "{}.MatchString({elem})",
-            go_pattern_var_name(model_name, &var_position)
+            go_pattern_var_name(pattern)
         ));
     }
     if let Some(format) = &matcher.format
@@ -661,7 +672,7 @@ fn go_matcher_condition(
             .unwrap_or_default();
         parts.push(format!(
             "{length_guard}{}.MatchString({elem})",
-            go_format_var_name(model_name, &var_position)
+            go_format_var_name(format)
         ));
     }
     if parts.is_empty() {
@@ -998,7 +1009,7 @@ fn render_go_property_count_checks(
 /// `specs/json-schema/features/propertyNames.md`.
 fn render_go_property_name_checks(
     output: &mut String,
-    model_name: &str,
+    _model_name: &str,
     map_expr: &str,
     subschema: &Schema,
     indent: &str,
@@ -1051,7 +1062,7 @@ fn render_go_property_name_checks(
         output.push_str(&inner);
         output.push_str(&format!(
             "if !{}.MatchString(k) {{\n",
-            go_pattern_var_name(model_name, PROPERTY_NAMES_POSITION)
+            go_pattern_var_name(pattern)
         ));
         output.push_str(&inner);
         output.push_str(&format!(
@@ -1089,7 +1100,7 @@ fn render_go_property_name_checks(
         }
         condition.push_str(&format!(
             "!{}.MatchString(k)",
-            go_format_var_name(model_name, PROPERTY_NAMES_POSITION)
+            go_format_var_name(&check.name)
         ));
         output.push_str(&inner);
         output.push_str(&format!("if {condition} {{\n"));
@@ -1605,9 +1616,16 @@ fn render_external_models(
     // still resolves to the sealed interface rather than to a bare struct name.
     let declared_unions = collect_go_unions(models, &resolvable, model_names)?;
     let unions = collect_go_unions(&resolvable, &resolvable, model_names)?;
+    let mut declared_regexes = BTreeSet::new();
     if !declared_unions.is_empty() {
         output.push('\n');
-        render_go_unions(&mut output, &declared_unions, models, model_names)?;
+        render_go_unions(
+            &mut output,
+            &declared_unions,
+            models,
+            model_names,
+            &mut declared_regexes,
+        )?;
     }
     if models.iter().any(|model| model_uses_temporal(model)) {
         output.push('\n');
@@ -1622,7 +1640,14 @@ fn render_external_models(
     }
     for model in models {
         output.push('\n');
-        render_model(&mut output, model, models, model_names, &unions)?;
+        render_model(
+            &mut output,
+            model,
+            models,
+            model_names,
+            &unions,
+            &mut declared_regexes,
+        )?;
     }
     // Package use is read off the emitted *code*: a doc comment carries the
     // schema's own prose, and an unused import is a Go compile error, so a
@@ -2314,6 +2339,7 @@ fn render_go_unions(
     unions: &BTreeMap<String, GoUnion>,
     models: &[&PlannedJsonType],
     model_names: &BTreeMap<String, String>,
+    declared_regexes: &mut BTreeSet<String>,
 ) -> Result<()> {
     for union in unions.values() {
         let union_schema = models
@@ -2341,12 +2367,7 @@ fn render_go_unions(
                 // The compiled-regex vars the wrapper's `Validate` references for
                 // a `pattern`/`format` the branch declares, keyed by the wrapper
                 // type itself (`fooStringPattern`).
-                render_go_string_vars_recursive(
-                    output,
-                    &variant.go_type,
-                    UNION_VARIANT_POSITION,
-                    &variant.schema,
-                );
+                render_go_string_vars_recursive(output, &variant.schema, declared_regexes);
                 render_go_schema_doc(
                     output,
                     "",
@@ -2658,6 +2679,7 @@ fn render_model(
     _models: &[&PlannedJsonType],
     model_names: &BTreeMap<String, String>,
     unions: &BTreeMap<String, GoUnion>,
+    declared_regexes: &mut BTreeSet<String>,
 ) -> Result<()> {
     if let Some(reference) = bare_ref_target(model) {
         output.push_str("type ");
@@ -2678,7 +2700,7 @@ fn render_model(
     } else {
         None
     };
-    render_go_pattern_vars(output, model, &schema);
+    render_go_pattern_vars(output, model, &schema, declared_regexes);
     render_go_schema_doc(
         output,
         "",
@@ -3002,7 +3024,7 @@ fn render_validate(
                             output,
                             &wire,
                             &go_violation_path_literal(json_name),
-                            &go_pattern_var_name(&model.model_name, &emitted_position),
+                            &go_pattern_var_name(pattern),
                             pattern,
                             indent,
                         );
@@ -3051,7 +3073,7 @@ fn render_validate(
                         output,
                         &wire,
                         &go_violation_path_literal(json_name),
-                        &go_pattern_var_name(&model.model_name, &emitted_position),
+                        &go_pattern_var_name(pattern),
                         pattern,
                         indent,
                     );
@@ -3063,7 +3085,7 @@ fn render_validate(
                         output,
                         &wire,
                         &go_violation_path_literal(json_name),
-                        &go_format_var_name(&model.model_name, &emitted_position),
+                        &go_format_var_name(format),
                         format,
                         indent,
                     );
@@ -3161,8 +3183,6 @@ fn render_validate(
                 && temporal_kind(property).is_none()
                 && content_encoding_kind(property).is_none()
             {
-                let var_name = go_pattern_var_name(&model.model_name, &emitted_position);
-                let format_var = go_format_var_name(&model.model_name, &emitted_position);
                 if by_value {
                     render_go_string_checks(
                         output,
@@ -3176,7 +3196,7 @@ fn render_validate(
                             output,
                             &field,
                             &go_violation_path_literal(json_name),
-                            &var_name,
+                            &go_pattern_var_name(pattern),
                             pattern,
                             "\t",
                         );
@@ -3186,7 +3206,7 @@ fn render_validate(
                             output,
                             &field,
                             &go_violation_path_literal(json_name),
-                            &format_var,
+                            &go_format_var_name(format),
                             format,
                             "\t",
                         );
@@ -3207,7 +3227,7 @@ fn render_validate(
                             output,
                             &format!("*{field}"),
                             &go_violation_path_literal(json_name),
-                            &var_name,
+                            &go_pattern_var_name(pattern),
                             pattern,
                             "\t\t",
                         );
@@ -3217,7 +3237,7 @@ fn render_validate(
                             output,
                             &format!("*{field}"),
                             &go_violation_path_literal(json_name),
-                            &format_var,
+                            &go_format_var_name(format),
                             format,
                             "\t\t",
                         );
@@ -3589,7 +3609,7 @@ fn render_property_unmarshal(
                 output,
                 "v",
                 &path,
-                &go_pattern_var_name(&model.model_name, &field),
+                &go_pattern_var_name(pattern),
                 pattern,
                 "\t\t",
             );
@@ -3599,7 +3619,7 @@ fn render_property_unmarshal(
                 output,
                 "v",
                 &path,
-                &go_format_var_name(&model.model_name, &field),
+                &go_format_var_name(format),
                 format,
                 "\t\t",
             );
@@ -3825,7 +3845,7 @@ fn render_go_array_items_validate(
                     output,
                     &wire,
                     &element_path,
-                    &go_pattern_var_name(model_name, &item_position),
+                    &go_pattern_var_name(pattern),
                     pattern,
                     &inner,
                 );
@@ -3851,7 +3871,7 @@ fn render_go_array_items_validate(
                     output,
                     &wire,
                     &element_path,
-                    &go_pattern_var_name(model_name, &item_position),
+                    &go_pattern_var_name(pattern),
                     pattern,
                     &inner,
                 );
@@ -4091,7 +4111,7 @@ fn render_go_array_position_unmarshal(
                 output,
                 &format!("s{level}"),
                 &element_path,
-                &go_pattern_var_name(model_name, &item_position),
+                &go_pattern_var_name(pattern),
                 pattern,
                 &format!("{body}\t"),
                 errs.value,
@@ -4107,7 +4127,7 @@ fn render_go_array_position_unmarshal(
         output.push_str(&format!("value{level})\n{body}\t}}\n{body}}}\n"));
     } else if let Some(encoding) = content_encoding_kind(non_null) {
         let decode_fn = go_content_encoding_decode_fn(encoding);
-        let re_var = go_content_encoding_var_name(model_name, &item_position);
+        let re_var = go_content_encoding_var_name(encoding);
         output.push_str(&format!(
             "{body}if s{level}, ok := parseStringField(&{element}, {element_path}, true, false, {errs_ref}); ok {{\n"
         ));
@@ -4125,7 +4145,7 @@ fn render_go_array_position_unmarshal(
                 output,
                 &format!("s{level}"),
                 &element_path,
-                &go_pattern_var_name(model_name, &item_position),
+                &go_pattern_var_name(pattern),
                 pattern,
                 &format!("{body}\t"),
             );
@@ -4218,7 +4238,7 @@ fn render_go_array_position_unmarshal(
 /// value; anything optional or nullable is a pointer.
 fn render_temporal_property_unmarshal(
     output: &mut String,
-    model_name: &str,
+    _model_name: &str,
     json_name: &str,
     field: &str,
     kind: crate::json_schema::format::TemporalKind,
@@ -4247,7 +4267,7 @@ fn render_temporal_property_unmarshal(
             output,
             "s",
             &path,
-            &go_pattern_var_name(model_name, &emitted_position),
+            &go_pattern_var_name(pattern),
             pattern,
             "\t\t",
         );
@@ -4640,7 +4660,7 @@ fn render_go_map_methods(
                     output,
                     "wire",
                     "path",
-                    &go_pattern_var_name(type_name, MAP_MEMBER_POSITION),
+                    &go_pattern_var_name(pattern),
                     pattern,
                     indent,
                 );
@@ -4652,7 +4672,7 @@ fn render_go_map_methods(
                     output,
                     "wire",
                     "path",
-                    &go_format_var_name(type_name, MAP_MEMBER_POSITION),
+                    &go_format_var_name(format),
                     format,
                     indent,
                 );
@@ -4680,7 +4700,7 @@ fn render_go_map_methods(
                         output,
                         "wire",
                         "path",
-                        &go_pattern_var_name(type_name, MAP_MEMBER_POSITION),
+                        &go_pattern_var_name(pattern),
                         pattern,
                         indent,
                     );
@@ -4703,7 +4723,7 @@ fn render_go_map_methods(
                         output,
                         "wire",
                         "path",
-                        &go_pattern_var_name(type_name, MAP_MEMBER_POSITION),
+                        &go_pattern_var_name(pattern),
                         pattern,
                         indent,
                     );
@@ -4838,7 +4858,7 @@ fn render_go_map_methods(
                         output,
                         "s",
                         "path",
-                        &go_pattern_var_name(type_name, MAP_MEMBER_POSITION),
+                        &go_pattern_var_name(pattern),
                         pattern,
                         "\t\t\t",
                     );
@@ -4862,7 +4882,7 @@ fn render_go_map_methods(
                         output,
                         "s",
                         "path",
-                        &go_pattern_var_name(type_name, MAP_MEMBER_POSITION),
+                        &go_pattern_var_name(pattern),
                         pattern,
                         "\t\t\t",
                     );
@@ -4870,10 +4890,7 @@ fn render_go_map_methods(
                 output.push_str("\t\t\tif value, ok := ");
                 output.push_str(go_content_encoding_decode_fn(encoding));
                 output.push_str("(path, s, ");
-                output.push_str(&go_content_encoding_var_name(
-                    type_name,
-                    MAP_MEMBER_POSITION,
-                ));
+                output.push_str(&go_content_encoding_var_name(encoding));
                 output.push_str(", &errs); ok {\n\t\t\t\tm.AdditionalProperties[k] = ");
                 store(output, "value");
                 output.push_str("\n\t\t\t}\n\t\t}\n");
@@ -5070,7 +5087,7 @@ fn render_go_member_checks(
                 output,
                 value_expr,
                 key_expr,
-                &go_pattern_var_name(type_name, position),
+                &go_pattern_var_name(pattern),
                 pattern,
                 indent,
             );
@@ -5080,7 +5097,7 @@ fn render_go_member_checks(
                 output,
                 value_expr,
                 key_expr,
-                &go_format_var_name(type_name, position),
+                &go_format_var_name(format),
                 format,
                 indent,
             );
@@ -5092,10 +5109,6 @@ fn render_go_member_checks(
         );
     }
 }
-
-/// The position name a `propertyNames` subschema contributes to a synthesized
-/// identifier (its compiled-regex vars).
-const PROPERTY_NAMES_POSITION: &str = "propertyName";
 
 /// The position name a typed map's member contributes to a synthesized
 /// identifier — the same `Value` suffix the loader uses when it names an inline
@@ -5869,7 +5882,7 @@ fn go_content_encoding_encode_fn(
 #[allow(clippy::too_many_arguments)]
 fn render_content_encoding_property_unmarshal(
     output: &mut String,
-    model_name: &str,
+    _model_name: &str,
     json_name: &str,
     field: &str,
     encoding: crate::json_schema::content_encoding::Encoding,
@@ -5878,8 +5891,7 @@ fn render_content_encoding_property_unmarshal(
     property: &Schema,
 ) {
     let decode_fn = go_content_encoding_decode_fn(encoding);
-    let emitted_position = property.go_member_name(json_name);
-    let re_var = go_content_encoding_var_name(model_name, &emitted_position);
+    let re_var = go_content_encoding_var_name(encoding);
     let key = go_string_literal(json_name);
     let path = go_violation_path_literal(json_name);
     output.push_str("\tif s, ok := parseStringField(get(");
@@ -5900,7 +5912,7 @@ fn render_content_encoding_property_unmarshal(
             output,
             "s",
             &path,
-            &go_pattern_var_name(model_name, &emitted_position),
+            &go_pattern_var_name(pattern),
             pattern,
             "\t\t",
         );
@@ -5912,7 +5924,7 @@ fn render_content_encoding_property_unmarshal(
             output,
             "s",
             &path,
-            &go_format_var_name(model_name, &emitted_position),
+            &go_format_var_name(format),
             format,
             "\t\t",
         );

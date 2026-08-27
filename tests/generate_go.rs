@@ -2020,7 +2020,9 @@ fn go_json_recursively_converts_and_validates_element_positions() {
     assert!(rendered.contains("p1 := fmt.Sprintf(\"%s[%d]\", p0, i1)"));
     assert!(rendered.contains("parseNumberField(&e1, p1, true, false, &errs)"));
     assert!(rendered.contains("parseDate(p0, s0, &errs)"));
-    assert!(rendered.contains("decodeBase64(path, s, blobMapValueContentEncoding, &errs)"));
+    assert!(
+        rendered.contains("decodeBase64(path, s, _nexgenJsonSchemaBase64ContentEncoding, &errs)")
+    );
     assert!(rendered.contains("mergeNested(&errs, p0, v0.Validate())"));
 
     fs::write(
@@ -2145,9 +2147,13 @@ fn go_json_validates_non_object_union_branch_constraints() {
     let rendered = fs::read_to_string(output_path.join("bc.go")).unwrap();
 
     // The string branch: length, then the pattern through its own compiled var.
-    assert!(rendered.contains("var bcValueStringPattern = regexp.MustCompile(\"^[a-z]+$\")"));
+    assert!(rendered.contains(
+        "var _nexgenJsonSchemaPattern5e5b612d7a5d2b24 = regexp.MustCompile(\"^[a-z]+$\")"
+    ));
     assert!(rendered.contains("must have length >= 3, got %d"));
-    assert!(rendered.contains("if !bcValueStringPattern.MatchString(string(v)) {"));
+    assert!(
+        rendered.contains("if !_nexgenJsonSchemaPattern5e5b612d7a5d2b24.MatchString(string(v)) {")
+    );
     // The integer branch's own bound.
     assert!(rendered.contains("if int64(v) < 1 {"));
     assert!(rendered.contains("must be >= 1, got %v"));
@@ -2247,9 +2253,11 @@ properties:
     // The matcher's regexes compile once at package init, never per element
     // inside the scan loop (`pattern.md`'s compile-once rule).
     assert!(
-        rendered.contains("var matchersHostsContainsPattern = regexp.MustCompile(\"^api\\\\.\")")
+        rendered.contains(
+            "var _nexgenJsonSchemaPattern5e6170695c2e = regexp.MustCompile(\"^api\\\\.\")"
+        )
     );
-    assert!(rendered.contains("matchersHostsContainsPattern.MatchString(e)"));
+    assert!(rendered.contains("_nexgenJsonSchemaPattern5e6170695c2e.MatchString(e)"));
     assert!(
         !rendered.contains("regexp.MustCompile(\"^api\\\\.\").MatchString("),
         "the matcher pattern must not be recompiled per element\n{rendered}"
@@ -3844,6 +3852,79 @@ func TestMaterializedSerializeChecks(t *testing.T) {
         .status()
         .unwrap();
     assert!(test_status.success());
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+/// Array-item and typed-map positions used to synthesize the same package var
+/// spelling as a declared `<name>Item` / `<name>Value` property. Keep all three
+/// compiled-regex families semantic and shared, so arbitrary member spellings
+/// cannot make an otherwise-valid package fail to compile.
+#[test]
+fn go_json_regex_helpers_do_not_collide_with_declared_member_positions() {
+    let temp_dir = unique_output_path("go-json-regex-collisions");
+    fs::create_dir_all(&temp_dir).unwrap();
+    let input_path = temp_dir.join("collision.yaml");
+    fs::write(
+        &input_path,
+        r#"$schema: https://json-schema.org/draft/2020-12/schema
+title: Collision
+type: object
+properties:
+  blobs:
+    type: array
+    items: { type: string, contentEncoding: base64 }
+  blobsItem: { type: string, contentEncoding: base64 }
+  names:
+    type: array
+    items: { type: string, pattern: "^a+$" }
+  namesItem: { type: string, pattern: "^b+$" }
+  contacts:
+    type: array
+    items: { type: string, format: email }
+  contactsItem: { type: string, format: email }
+  values:
+    type: object
+    additionalProperties: { type: string, contentEncoding: base64url }
+  valuesValue: { type: string, contentEncoding: base64url }
+"#,
+    )
+    .unwrap();
+    let output_path = temp_dir.join("collision");
+    generate_to_file(&GenerateRequest {
+        language: nexgen::language::Language::Go,
+        input_paths: vec![input_path],
+        support_paths: Vec::new(),
+        descriptor_paths: Vec::new(),
+        output_path: output_path.clone(),
+        format: false,
+        generate_native_api: false,
+        java_package_name: None,
+        ts_date_time_types: Default::default(),
+    })
+    .unwrap();
+
+    let rendered = fs::read_to_string(output_path.join("collision.go")).unwrap();
+    assert_eq!(
+        rendered
+            .matches("ContentEncoding = regexp.MustCompile")
+            .count(),
+        2
+    );
+    assert_eq!(rendered.matches("Format = regexp.MustCompile").count(), 1);
+    assert_eq!(rendered.matches("var _nexgenJsonSchemaPattern").count(), 2);
+
+    let format_status = Command::new("gofmt")
+        .args(["-w", output_path.to_str().unwrap()])
+        .status()
+        .unwrap();
+    assert!(format_status.success());
+    let build_status = Command::new("go")
+        .args(["test", "./..."])
+        .env("GO111MODULE", "on")
+        .current_dir(&output_path)
+        .status()
+        .unwrap();
+    assert!(build_status.success());
     fs::remove_dir_all(temp_dir).unwrap();
 }
 
