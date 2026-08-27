@@ -87,9 +87,6 @@ fix-it:
   reference needs an implicit merge, so they can neither clone the target into a
   new type nor add a **P15** identifier. See [[allOf]] for the same rule stated
   from the merge side, and [[deprecated]] for the member-marking rule.
-  *(Status: unimplemented — the loader currently admits only the four
-  `x-<lang>-name` keywords here, so a non-conjunct annotation still triggers the
-  fold. The clause is the contract; the gate is the defect.)*
 - **`$id` anywhere** → reject. Fix-it: "remove `$id`; refs resolve by file path
   + JSON pointer." (local-file-only — no URI resolution.) The reject is
   **position-independent**: a root `$id`, a nested one, one on any [[allOf]]
@@ -111,12 +108,9 @@ fix-it:
   inert: a cross-file `$ref` inside it still joins the input closure and renames
   every emitted module. Fix-it: "move the definition to the document's
   `$defs`."
-  *(Status: unimplemented — the raw grammar pass walks such a bucket, so a
-  misspelled keyword inside it still rejects, but no semantic validator reaches
-  it and the bucket itself is accepted.)*
 - **Absolute-path `$ref`**, and a `$ref` that raises the input root above the
   **invocation root** → reject (see Resolution, where both carry a
-  `Status: unimplemented` note).
+  diagnostic with the authored schema location and remedy).
 
 ### Anchors & dynamic references — rejected
 
@@ -181,10 +175,6 @@ standalone applicators — and share one rationale:
   author's choice rather than a consequence of where the checkout sits. The
   diagnostic names the `$ref` that escaped, never the entry file that did not
   change, and never a directory outside the working copy (**P7.2**).
-  *(Status: unimplemented — the root is currently unbounded above, so an upward
-  `$ref` silently lifts it and the emitted layout can encode the checkout's
-  absolute path. The bound is the contract; [[generated-file-layout]] and
-  [[input-files]] defer to it.)*
 - **Reproducible** means exactly that: for a given invocation root, the emitted
   module names, package names and file names are a function of the input files'
   paths *relative to it* and of nothing else — not of where the checkout lives,
@@ -193,8 +183,6 @@ standalone applicators — and share one rationale:
 - An **absolute-path `$ref`** is rejected: the accepted-form table above admits
   only `<relative-path>`, and an absolute reference both escapes the invocation
   root and is unreproducible by construction.
-  *(Status: unimplemented — an absolute `$ref` currently resolves and is
-  followed.)*
 - **Dead `$defs`** (defined but never referenced) are still generated and
   exported — they are intended reusable API surface, not waste.
 
@@ -399,9 +387,9 @@ helper is emitted — the named-type machinery already in place
 | Pointer into non-`$defs` | `{"$ref": "#/properties/x/items"}` — not nameable (P7) |
 | `$id` present | any position — root, nested, or an [[allOf]] conjunct — no URI resolution (local-file-only) |
 | HTTP ref | `{"$ref": "https://example.com/s.json"}` — not local (local-file-only) |
-| Absolute-path ref (**unimplemented**) | `{"$ref": "/abs/other.json"}` — only `<relative-path>` is an accepted form |
-| Ref escaping the invocation root (**unimplemented**) | a `$ref` that raises the input root above the entry path — the layout would encode the checkout's location |
-| `$defs` outside a model position (**unimplemented**) | a `$defs` bucket under a property, `items`, `additionalProperties`, a [[oneOf]] branch or a [[contains]] matcher — unreachable by any `$ref` |
+| Absolute-path ref | `{"$ref": "/abs/other.json"}` — only `<relative-path>` is an accepted form |
+| Ref escaping the invocation root | a `$ref` that raises the input root above the entry path — the layout would encode the checkout's location |
+| `$defs` outside a model position | a `$defs` bucket under a property, `items`, `additionalProperties`, a [[oneOf]] branch or a [[contains]] matcher — unreachable by any `$ref` |
 | `$anchor` / `$dynamicRef` / `$dynamicAnchor` | not in subset (P6) — see Anchors & dynamic references |
 | Unresolvable | missing file or missing `$defs` entry |
 | Unsatisfiable cycle | every edge required + non-nullable + single-valued |

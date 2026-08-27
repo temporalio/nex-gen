@@ -124,8 +124,6 @@ Loader behavior:
   member the author annotated, and — for `deprecated: false`, which means
   exactly what omitting the keyword means — change a member's type with no
   marker and no diagnostic to explain it.
-  *(Status: unimplemented — the fold gate admits only the four `x-<lang>-name`
-  keywords, so today either value of a `deprecated` sibling triggers the fold.)*
 - `deprecated` on a [[nullability]] `null` branch → **reject**, of either
   value: a `null` branch must be exactly `{type: "null"}` with no siblings, an
   invariant [[nullability]] owns and this keyword does not override. To mark a

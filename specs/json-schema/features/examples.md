@@ -96,10 +96,6 @@ Loader behavior:
   implicit merge, so it can neither clone the target into a use-site type
   nor add a P15 identifier ([[ref]], [[allOf]] state the same rule from the
   merge side).
-  *(Status: unimplemented — the fold gate admits only the four
-  `x-<lang>-name` keywords, so today an `examples` sibling triggers the
-  fold; the inert-stripping step runs one statement after the decision it
-  should precede.)*
 - `examples` on a [[nullability]] `null` branch → **reject**: a `null`
   branch must be exactly `{type: "null"}` with no siblings, an invariant
   [[nullability]] owns and an inert annotation does not override. At a

@@ -118,9 +118,6 @@ not conjuncts, so the node stays a plain reference and no merge happens.
   anything about the referenced value — are dropped **before** the fold
   decision, so they can neither clone the target into a new type nor add a
   **P15** identifier.
-  *(Status: unimplemented for this set — the fold gate admits only the four
-  `x-<lang>-name` keywords, so such an annotation still folds. The clause is
-  the contract.)*
 
 Every other sibling folds, and the merged node is therefore a **new standalone
 declaration** whose synthesized name enters **P15** — including a [[title]] or

@@ -195,6 +195,152 @@ where
     }
 }
 
+/// Parses one authored document through a raw-value preflight before lowering
+/// schema positions into [`Schema`]. JSON Schema permits boolean schemas, but
+/// this generator's typed subset does not: without the preflight serde rejects
+/// `properties: {value: true}` or a boolean `oneOf` branch before we can name
+/// the member/branch and give the explicit-`type` remedy.
+fn parse_json_schema_document(path: &Path, input: &str) -> Result<Document> {
+    let raw = serde_yaml::from_str::<Value>(input).map_err(|error| Error::JsonSchemaParse {
+        path: path.to_path_buf(),
+        message: error.to_string(),
+    })?;
+    validate_raw_document_schema_positions(path, &raw)?;
+    serde_yaml::from_str::<Document>(input).map_err(|error| Error::JsonSchemaParse {
+        path: path.to_path_buf(),
+        message: error.to_string(),
+    })
+}
+
+fn validate_raw_document_schema_positions(path: &Path, raw: &Value) -> Result<()> {
+    let Some(document) = raw.as_object() else {
+        return Err(Error::InvalidJsonSchema {
+            path: path.to_path_buf(),
+            reason: "a JSON Schema document must be an object".to_string(),
+        });
+    };
+    validate_raw_schema_position(path, raw, "root schema", false)?;
+    if let Some(services) = document.get("services").and_then(Value::as_object) {
+        for (service_name, service) in services {
+            let Some(operations) = service
+                .as_object()
+                .and_then(|service| service.get("operations"))
+                .and_then(Value::as_object)
+            else {
+                continue;
+            };
+            for (operation_name, operation) in operations {
+                let Some(operation) = operation.as_object() else {
+                    continue;
+                };
+                for label in ["input", "output"] {
+                    if let Some(schema) = operation.get(label) {
+                        validate_raw_schema_position(
+                            path,
+                            schema,
+                            &format!("services.{service_name}.operations.{operation_name}.{label}"),
+                            false,
+                        )?;
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Recurses only through schema-valued positions. Annotation/example/default
+/// payloads are deliberately opaque, so schema-looking data cannot affect
+/// parsing or `$ref` discovery.
+fn validate_raw_schema_position(
+    path: &Path,
+    value: &Value,
+    context: &str,
+    one_of_branch: bool,
+) -> Result<()> {
+    let reject = |reason: String| {
+        Err(Error::InvalidJsonSchema {
+            path: path.to_path_buf(),
+            reason,
+        })
+    };
+    let object = match value {
+        Value::Object(object) => object,
+        Value::Bool(boolean) if one_of_branch => {
+            return reject(format!(
+                "{context}: boolean schema `{boolean}` has no classifiable `oneOf` kind; replace it with a schema object declaring one recognized `type`"
+            ));
+        }
+        Value::Bool(boolean) => {
+            return reject(format!(
+                "{context}: boolean schema `{boolean}` has no supported typed shape; replace it with a schema object declaring an explicit `type`"
+            ));
+        }
+        other if one_of_branch => {
+            return reject(format!(
+                "{context}: a `oneOf` branch must be a schema object declaring one recognized `type`, got {other}"
+            ));
+        }
+        other => {
+            return reject(format!(
+                "{context}: expected a schema object declaring an explicit `type`, got {other}"
+            ));
+        }
+    };
+
+    if let Some(properties) = object.get("properties").and_then(Value::as_object) {
+        for (name, property) in properties {
+            validate_raw_schema_position(
+                path,
+                property,
+                &format!("{context}.properties.{name}"),
+                false,
+            )?;
+        }
+    }
+    // `items` has its own tolerant deserializer so tuple, boolean, and scalar
+    // forms retain the more specific uniform-element diagnostic.
+    if let Some(branches) = object.get("oneOf").and_then(Value::as_array) {
+        for (index, branch) in branches.iter().enumerate() {
+            validate_raw_schema_position(path, branch, &format!("{context}.oneOf[{index}]"), true)?;
+        }
+    }
+    if let Some(defs) = object.get("$defs").and_then(Value::as_object) {
+        for (name, schema) in defs {
+            let def_context = if context == "root schema" {
+                format!("$defs.{name}")
+            } else {
+                format!("{context}.$defs.{name}")
+            };
+            validate_raw_schema_position(path, schema, &def_context, false)?;
+        }
+    }
+    if let Some(Value::Object(_)) = object.get("additionalProperties") {
+        validate_raw_schema_position(
+            path,
+            &object["additionalProperties"],
+            &format!("{context}.additionalProperties"),
+            false,
+        )?;
+    }
+    // `allOf: true` is a supported identity branch and `allOf: false` gets the
+    // conjunction-specific unsatisfiable diagnostic later. Object branches can
+    // still contain typed positions which need this preflight.
+    if let Some(branches) = object.get("allOf").and_then(Value::as_array) {
+        for (index, branch) in branches.iter().enumerate() {
+            if branch.is_object() {
+                validate_raw_schema_position(
+                    path,
+                    branch,
+                    &format!("{context}.allOf[{index}]"),
+                    false,
+                )?;
+            }
+        }
+    }
+    Ok(())
+}
+
 impl Schema {
     fn is_bare_ref(&self) -> bool {
         self.reference.is_some()
@@ -372,11 +518,7 @@ fn expand_json_schema_sources(input_paths: &[PathBuf]) -> Result<Vec<JsonSource>
         let input = source_inputs
             .get(&path)
             .expect("queued JSON schema source should be present");
-        let document =
-            serde_yaml::from_str::<Document>(input).map_err(|error| Error::JsonSchemaParse {
-                path: path.clone(),
-                message: error.to_string(),
-            })?;
+        let document = parse_json_schema_document(&path, input)?;
         // Diagnose malformed/unknown authored grammar before following refs it
         // may have placed in a position that is not a schema at all.
         validate_raw_document_grammar(&path, &document)?;
@@ -984,11 +1126,7 @@ fn parse_json_documents(
     }
     let mut docs = IndexMap::new();
     for (path, input) in sources {
-        let doc =
-            serde_yaml::from_str::<Document>(&input).map_err(|error| Error::JsonSchemaParse {
-                path: path.clone(),
-                message: error.to_string(),
-            })?;
+        let doc = parse_json_schema_document(&path, &input)?;
         docs.insert(canonical(&path), (path, doc));
     }
 
@@ -1512,7 +1650,7 @@ fn validate_schema_keyword_allowlist(path: &Path, schema: &Schema, context: &str
             return Err(Error::InvalidJsonSchema {
                 path: path.to_path_buf(),
                 reason: format!(
-                    "{context}: OpenAPI `discriminator` is not supported; express a closed object union with `oneOf` branches carrying one shared required `const` property"
+                    "{context}: OpenAPI `discriminator` is not yet supported; express a closed object union with `oneOf` branches carrying one shared required `const` property"
                 ),
             });
         }
@@ -4408,7 +4546,7 @@ fn validate_schema_refs(
 ) -> Result<()> {
     validate_schema_common(path, schema, context)?;
     if let Some(reference) = &schema.reference {
-        let _ = resolve_ref(path, canonical_path, reference, docs, models)?;
+        let _ = resolve_ref_at(path, canonical_path, reference, context, docs, models)?;
         return Ok(());
     }
     if let Some(properties) = &schema.properties {
@@ -4588,11 +4726,12 @@ fn resolve_branch_schema(
     branch: &Schema,
     path: &Path,
     canonical_path: &Path,
+    context: &str,
     docs: &IndexMap<PathBuf, (PathBuf, Document)>,
     models: &BTreeMap<TypeKey, JsonModel>,
 ) -> Result<Schema> {
     if let Some(reference) = &branch.reference {
-        let target = resolve_ref(path, canonical_path, reference, docs, models)?;
+        let target = resolve_ref_at(path, canonical_path, reference, context, docs, models)?;
         Ok(target.schema.clone())
     } else {
         Ok(branch.clone())
@@ -4745,6 +4884,11 @@ fn hoist_inline_object_shapes(
     docs: &mut IndexMap<PathBuf, (PathBuf, Document)>,
 ) -> Result<()> {
     for (path, doc) in docs.values_mut() {
+        // Definitions inserted by this pass remain in `doc.defs` on later
+        // fixpoint iterations. Keep their authored origins separately so a
+        // collision with another synthesized shape does not falsely claim the
+        // first name was authored in `$defs`.
+        let mut synthesized_origins = BTreeMap::<String, String>::new();
         // The type name the file's root schema derives from its file name, when
         // the file has a root type at all (a Nexus-document envelope and a
         // definitions-only file have none). A synthesized name that coincides
@@ -4819,14 +4963,23 @@ fn hoist_inline_object_shapes(
                     });
                 }
                 if defs.contains_key(&name) {
+                    let detail = synthesized_origins.get(&name).map_or_else(
+                        || format!("is already declared in `$defs`"),
+                        |previous_origin| {
+                            format!(
+                                "was already synthesized for the inline shape at `{previous_origin}`"
+                            )
+                        },
+                    );
                     return Err(Error::InvalidJsonSchema {
                         path: path.to_path_buf(),
                         reason: format!(
-                            "the name `{name}` synthesized for the inline shape at `{origin}` is already declared in `$defs`; rename either one, name the inline shape with an `{}` override where it takes one (a `oneOf` branch, an array element, a map member), or move it into `$defs` under a name of your own and `$ref` it (P15 — the generator never auto-mangles)",
+                            "the name `{name}` synthesized for the inline shape at `{origin}` {detail}; rename either one, name the inline shape with an `{}` override where it takes one (a `oneOf` branch, an array element, a map member), or move it into `$defs` under a distinct name and `$ref` it (P15 — the generator never auto-mangles)",
                             lang_name_keyword(language).unwrap_or("x-<lang>-name"),
                         ),
                     });
                 }
+                synthesized_origins.insert(name.clone(), origin);
                 defs.insert(name, schema);
             }
         }
@@ -5309,9 +5462,11 @@ fn validate_one_of(
     let mut resolved_schemas: Vec<Schema> = Vec::with_capacity(branches.len());
     let mut object_schemas: Vec<Schema> = Vec::new();
     let mut non_object_schemas: Vec<Schema> = Vec::new();
-    for branch in branches {
-        let resolved = resolve_branch_schema(branch, path, canonical_path, docs, models)?;
-        let kind = one_of_branch_kind(branch, &resolved, path, context)?;
+    for (index, branch) in branches.iter().enumerate() {
+        let branch_context = format!("{context}.oneOf[{index}]");
+        let resolved =
+            resolve_branch_schema(branch, path, canonical_path, &branch_context, docs, models)?;
+        let kind = one_of_branch_kind(branch, &resolved, path, &branch_context)?;
         if kind == BranchKind::Null
             && branch
                 != &(Schema {
@@ -5357,7 +5512,7 @@ fn validate_one_of(
         if count > 1 {
             if matches!(
                 kind,
-                BranchKind::String | BranchKind::Integer | BranchKind::Number
+                BranchKind::Boolean | BranchKind::String | BranchKind::Integer | BranchKind::Number
             ) {
                 return reject(format!(
                     "{context}: two `oneOf` branches share the `{}` kind; a same-kind scalar choice is an `enum` (or `const` union), not a `oneOf`",
@@ -6183,11 +6338,12 @@ fn normalize_schema(
         // acyclic child reference to one of a model's inherited traits.
         let stack_len = cycle.len();
         if ref_with_siblings {
-            let key = resolve_ref_key(
+            let key = resolve_ref_key_at(
                 path,
                 canonical_path,
                 schema.reference.as_deref().expect("reference is present"),
                 ctx.doc_paths,
+                context,
             )?;
             if !cycle.contains(&key) {
                 cycle.push(key);
@@ -6583,7 +6739,7 @@ fn expand_branches(
     let mut branches = Vec::new();
 
     if let Some(reference) = &schema.reference {
-        let key = resolve_ref_key(path, canonical_path, reference, ctx.doc_paths)?;
+        let key = resolve_ref_key_at(path, canonical_path, reference, ctx.doc_paths, context)?;
         if cycle.contains(&key) {
             return Err(merge_reject(
                 path,
@@ -6598,9 +6754,7 @@ fn expand_branches(
             .ok_or_else(|| {
                 merge_reject(
                     path,
-                    format!(
-                        "{context}: `$ref` `{reference}` does not resolve to a known JSON model"
-                    ),
+                    unresolved_ref_reason(context, reference, &key, type_key_path(&key)),
                 )
             })?
             .clone();
@@ -6645,8 +6799,14 @@ fn expand_branches(
                     if entry_schema == Schema::default() {
                         continue;
                     }
-                    let sub =
-                        expand_branches(path, canonical_path, &entry_schema, ctx, cycle, context)?;
+                    let sub = expand_branches(
+                        path,
+                        canonical_path,
+                        &entry_schema,
+                        ctx,
+                        cycle,
+                        &format!("{context}.allOf[{index}]"),
+                    )?;
                     branches.extend(sub);
                 }
                 _ => {
@@ -7280,7 +7440,7 @@ fn resolve_ref_key(
             return Err(Error::InvalidJsonSchema {
                 path: path.to_path_buf(),
                 reason: format!(
-                    "`$ref` `{reference}` must point at a `$defs` entry or file root; nested targets must follow a `$defs` chain (`#/$defs/Outer/$defs/Inner`)"
+                    "`$ref` `{reference}` must point at a `$defs` entry or file root; extract the target into `$defs` and reference it there (nested targets follow a `$defs` chain such as `#/$defs/Outer/$defs/Inner`)"
                 ),
             });
         }
@@ -7314,13 +7474,84 @@ fn decode_json_pointer_token(path: &Path, reference: &str, token: &str) -> Resul
                 return Err(Error::InvalidJsonSchema {
                     path: path.to_path_buf(),
                     reason: format!(
-                        "`$ref` `{reference}` contains a trailing `~`, which is an invalid RFC 6901 escape"
+                        "`$ref` `{reference}` contains a trailing `~`, which is an invalid RFC 6901 escape; use `~0` for `~` or `~1` for `/`"
                     ),
                 });
             }
         }
     }
     Ok(decoded)
+}
+
+fn with_ref_schema_context(error: Error, context: &str) -> Error {
+    match error {
+        Error::InvalidJsonSchema { path, reason } => Error::InvalidJsonSchema {
+            path,
+            reason: format!("{context}: {reason}"),
+        },
+        other => other,
+    }
+}
+
+fn resolve_ref_key_at(
+    path: &Path,
+    canonical_path: &Path,
+    reference: &str,
+    doc_paths: &BTreeSet<PathBuf>,
+    context: &str,
+) -> Result<TypeKey> {
+    resolve_ref_key(path, canonical_path, reference, doc_paths)
+        .map_err(|error| with_ref_schema_context(error, context))
+}
+
+fn resolve_ref_at<'a>(
+    path: &Path,
+    canonical_path: &Path,
+    reference: &str,
+    context: &str,
+    docs: &IndexMap<PathBuf, (PathBuf, Document)>,
+    models: &'a BTreeMap<TypeKey, JsonModel>,
+) -> Result<&'a JsonModel> {
+    let doc_paths: BTreeSet<PathBuf> = docs.keys().cloned().collect();
+    let key = resolve_ref_key_at(path, canonical_path, reference, &doc_paths, context)?;
+    if let Some(model) = models.get(&key) {
+        return Ok(model);
+    }
+    let target_path = model_key_path(&key).expect("every ref key names a source path");
+    let target_path = docs
+        .get(target_path)
+        .map(|(source_path, _)| source_path.as_path())
+        .unwrap_or(target_path.as_path());
+    let reason = unresolved_ref_reason(context, reference, &key, target_path);
+    Err(Error::InvalidJsonSchema {
+        path: path.to_path_buf(),
+        reason,
+    })
+}
+
+fn unresolved_ref_reason(
+    context: &str,
+    reference: &str,
+    key: &TypeKey,
+    target_path: &Path,
+) -> String {
+    match key {
+        TypeKey::Root(_) => format!(
+            "{context}: `$ref` `{reference}` targets the root of `{}`, but that file declares no root schema; add a root model or point the reference at one of the file's `$defs` entries",
+            target_path.display(),
+        ),
+        TypeKey::Def(_, names) => {
+            let chain = names
+                .iter()
+                .map(|name| format!("$defs.{name}"))
+                .collect::<Vec<_>>()
+                .join(".");
+            format!(
+                "{context}: `$ref` `{reference}` does not resolve because `{}` declares no `{chain}` entry; add that `$defs` entry or correct the JSON Pointer",
+                target_path.display(),
+            )
+        }
+    }
 }
 
 fn resolve_ref<'a>(
@@ -9226,10 +9457,15 @@ fn validate_member_scope(language: Language, model_full_name: &str, schema: &Sch
         if override_name(language, property).is_none()
             && let Some((ident, reason)) = member_identifier_defect(language, json_name)
         {
+            let subject = if json_name.is_empty() {
+                format!("the empty JSON member name in model `{model_full_name}`")
+            } else {
+                format!("member `{model_full_name}.{json_name}` recases to `{ident}`")
+            };
             return Err(Error::InvalidJsonSchema {
                 path: PathBuf::from("<json-schema>"),
                 reason: format!(
-                    "member `{model_full_name}.{json_name}` recases to `{ident}`, which {reason} in {} output; add an `{}` override with a valid identifier (P15 — the generator never auto-mangles)",
+                    "{subject}, which {reason} in {} output; add an `{}` override with a valid identifier (P15 — the generator never auto-mangles)",
                     language.as_str(),
                     lang_name_keyword(language).unwrap_or("x-<lang>-name"),
                 ),
@@ -10486,7 +10722,7 @@ services:
             "type: object\nproperties: {}\ndiscriminator: { propertyName: kind }",
         );
         assert!(
-            discriminator.contains("OpenAPI `discriminator` is not supported"),
+            discriminator.contains("OpenAPI `discriminator` is not yet supported"),
             "{discriminator}"
         );
     }
@@ -12094,7 +12330,82 @@ $defs:
     fn rejects_unresolvable_defs_ref() {
         let error = numeric_reject("$ref: \"#/$defs/Missing\"");
         assert!(
-            error.contains("does not resolve to a known JSON model"),
+            error.contains("properties.value")
+                && error.contains("declares no `$defs.Missing` entry")
+                && error.contains("add that `$defs` entry")
+                && error.contains("correct the JSON Pointer"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn ref_pointer_rejections_name_the_schema_position_and_remedy() {
+        for (reference, detail, remedy) in [
+            (
+                "#/properties/x",
+                "must point at a `$defs` entry or file root",
+                "extract the target into `$defs`",
+            ),
+            (
+                "#/$defs/bad~",
+                "trailing `~`",
+                "use `~0` for `~` or `~1` for `/`",
+            ),
+            (
+                "#/$defs/bad~2name",
+                "invalid RFC 6901 escape `~2`",
+                "use `~0` for `~` or `~1` for `/`",
+            ),
+        ] {
+            let error = numeric_reject(&format!("$ref: {reference:?}"));
+            assert!(
+                error.contains("properties.value")
+                    && error.contains(detail)
+                    && error.contains(remedy),
+                "{reference}: {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn missing_ref_file_root_names_the_definitions_only_target_and_fix() {
+        let temp = tempfile::tempdir().unwrap();
+        let entry = temp.path().join("entry.yaml");
+        let definitions = temp.path().join("definitions.yaml");
+        fs::write(
+            &entry,
+            r##"
+$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  child: { $ref: "definitions.yaml#" }
+"##,
+        )
+        .unwrap();
+        fs::write(
+            &definitions,
+            r#"
+$schema: https://json-schema.org/draft/2020-12/schema
+$defs:
+  Child:
+    type: object
+    properties:
+      value: { type: string }
+"#,
+        )
+        .unwrap();
+
+        let error = load_api_spec_from_json_schema_for_language_with_inputs(
+            Language::Python,
+            std::slice::from_ref(&entry),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(
+            error.contains("properties.child")
+                && error.contains("definitions.yaml")
+                && error.contains("declares no root schema")
+                && error.contains("point the reference at one of the file's `$defs` entries"),
             "{error}"
         );
     }
@@ -13204,7 +13515,10 @@ $defs:
             "allOf:\n  - { $ref: \"#/$defs/Missing\" }\n  - { type: object, properties: {} }",
         );
         assert!(
-            error.contains("does not resolve to a known JSON model"),
+            error.contains("properties.value.allOf[0]")
+                && error.contains("declares no `$defs.Missing` entry")
+                && error.contains("add that `$defs` entry")
+                && error.contains("correct the JSON Pointer"),
             "{error}"
         );
     }
@@ -13575,6 +13889,28 @@ properties:
         );
         assert!(
             error.contains("ApiValueObject") && error.contains("already declared in `$defs`"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn synthesized_inline_shape_collision_names_both_authored_positions() {
+        let error = reject_for(
+            Language::Go,
+            r#"
+$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  bC:  { type: object, properties: { p: { type: string } } }
+  b_c: { type: object, properties: { q: { type: string } } }
+"#,
+        );
+        assert!(
+            error.contains("root schema.properties.b_c")
+                && error.contains(
+                    "already synthesized for the inline shape at `root schema.properties.bC`"
+                )
+                && !error.contains("already declared in `$defs`"),
             "{error}"
         );
     }
@@ -14005,6 +14341,110 @@ properties:
 "#,
         );
         assert!(error.contains("enum"), "{error}");
+    }
+
+    #[test]
+    fn rejects_two_boolean_branches_with_the_enum_remedy() {
+        let error = union_reject(
+            r#"
+$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  value:
+    oneOf:
+      - { type: string }
+      - { type: boolean, const: true }
+      - { type: boolean, const: false }
+"#,
+        );
+        assert!(
+            error.contains("share the `boolean` kind")
+                && error.contains("enum")
+                && error.contains("not a `oneOf`"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn rejects_boolean_schema_positions_with_a_breadcrumb_and_type_remedy() {
+        for (schema, context, detail) in [
+            (
+                "type: object\nproperties:\n  value: true",
+                "root schema.properties.value",
+                "boolean schema `true`",
+            ),
+            (
+                "type: object\nproperties:\n  value:\n    oneOf:\n      - { type: string }\n      - false",
+                "root schema.properties.value.oneOf[1]",
+                "no classifiable `oneOf` kind",
+            ),
+            (
+                "$defs:\n  Flag: false",
+                "$defs.Flag",
+                "boolean schema `false`",
+            ),
+            (
+                "type: object\nproperties:\n  value: 5",
+                "root schema.properties.value",
+                "expected a schema object",
+            ),
+            (
+                "type: object\nproperties:\n  value: null",
+                "root schema.properties.value",
+                "expected a schema object",
+            ),
+        ] {
+            let error = doc_reject(&format!(
+                "$schema: https://json-schema.org/draft/2020-12/schema\n{schema}"
+            ));
+            assert!(
+                error.contains(context) && error.contains(detail) && error.contains("type"),
+                "{schema}: {error}"
+            );
+            assert!(
+                !error.contains("expected struct Schema"),
+                "{schema}: {error}"
+            );
+        }
+
+        let operation = doc_reject(
+            r#"
+$schema: https://json-schema.org/draft/2020-12/schema
+nexusrpc: "1.0.0"
+services:
+  Example:
+    operations:
+      run:
+        input: true
+        output: { type: object, properties: {} }
+"#,
+        );
+        assert!(
+            operation.contains("services.Example.operations.run.input")
+                && operation.contains("boolean schema `true`")
+                && operation.contains("explicit `type`"),
+            "{operation}"
+        );
+    }
+
+    #[test]
+    fn accepts_schema_objects_where_boolean_schemas_are_rejected() {
+        parse(
+            r#"
+$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  flag: { type: boolean }
+  values:
+    type: object
+    additionalProperties: true
+$defs:
+  Flag:
+    type: object
+    properties:
+      enabled: { type: boolean }
+"#,
+        );
     }
 
     #[test]
@@ -16742,6 +17182,25 @@ properties:
         assert!(error.contains("is not a valid identifier"), "{error}");
     }
 
+    #[test]
+    fn empty_member_identifier_diagnostic_names_the_empty_wire_key() {
+        let error = reject_for(
+            Language::Go,
+            r#"
+$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  "": { type: string }
+"#,
+        );
+        assert!(
+            error.contains("the empty JSON member name in model `Api`")
+                && error.contains("add an `x-go-name` override")
+                && !error.contains("member `Api.` recases to ``"),
+            "{error}"
+        );
+    }
+
     // --- `not` per-form diagnostics (validate_schema_common) ---
 
     #[test]
@@ -17170,7 +17629,13 @@ $defs:
     required: [a]
 "##,
         );
-        assert!(error.contains("unsatisfiable recursion cycle"), "{error}");
+        assert!(
+            error.contains("unsatisfiable recursion cycle `A → B → A`")
+                && error.contains("making an edge optional")
+                && error.contains("nullable")
+                && error.contains("wrapping it in an array"),
+            "{error}"
+        );
     }
 
     /// Every `oneOf` edge used to terminate the mandatory chain, conflating the
@@ -17300,6 +17765,22 @@ $defs:
       children:
         type: array
         items: { $ref: "#/$defs/Tree" }
+    required: [children]
+"##,
+        );
+    }
+
+    #[test]
+    fn accepts_typed_map_wrapped_recursion() {
+        parse(
+            r##"
+$defs:
+  Tree:
+    type: object
+    properties:
+      children:
+        type: object
+        additionalProperties: { $ref: "#/$defs/Tree" }
     required: [children]
 "##,
         );
@@ -17552,7 +18033,10 @@ $defs:
     #[test]
     fn rejects_invalid_rfc6901_escape_in_ref_pointer() {
         let error = numeric_reject("$ref: \"#/$defs/bad~2name\"");
-        assert!(error.contains("invalid RFC 6901 escape"), "{error}");
+        assert!(
+            error.contains("properties.value") && error.contains("invalid RFC 6901 escape"),
+            "{error}"
+        );
     }
 
     #[test]
@@ -17564,7 +18048,7 @@ $defs:
         ] {
             let error = numeric_reject(&format!("$ref: {reference:?}"));
             assert!(
-                error.contains(expected),
+                error.contains("properties.value") && error.contains(expected),
                 "{reference}: expected {expected}, got {error}"
             );
         }
