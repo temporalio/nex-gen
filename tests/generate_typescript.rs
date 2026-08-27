@@ -2932,3 +2932,51 @@ test("an over-capacity fraction truncates instead of throwing", () => {{
         fs::remove_dir_all(temp_dir).unwrap();
     }
 }
+
+#[test]
+fn typescript_json_uses_own_wire_keys_and_prototype_safe_maps() {
+    let temp_dir = unique_output_path("typescript-json-hostile-wire-keys");
+    fs::create_dir_all(&temp_dir).unwrap();
+    let input_path = temp_dir.join("wire-keys.yaml");
+    fs::write(
+        &input_path,
+        r#"$schema: https://json-schema.org/draft/2020-12/schema
+title: WireKeys
+type: object
+required: [content-type]
+properties:
+  content-type: { type: string }
+  toString: { type: string }
+  valueOf: { type: string }
+additionalProperties: true
+dependentRequired:
+  toString: [valueOf]
+"#,
+    )
+    .unwrap();
+    let output_path = temp_dir.join("out");
+    generate_to_file(&GenerateRequest {
+        language: nexgen::language::Language::TypeScript,
+        input_paths: vec![input_path],
+        support_paths: Vec::new(),
+        descriptor_paths: Vec::new(),
+        output_path: output_path.clone(),
+        format: false,
+        generate_native_api: false,
+        java_package_name: None,
+        ts_date_time_types: Default::default(),
+    })
+    .unwrap();
+
+    let models = fs::read_to_string(output_path.join("models.ts")).unwrap();
+    assert!(models.contains("export type WireKeys = {"), "{models}");
+    assert!(
+        models.contains("Object.prototype.hasOwnProperty.call(raw, \"content-type\")"),
+        "{models}"
+    );
+    assert!(models.contains("raw[\"content-type\"]"), "{models}");
+    assert!(models.contains("out[\"content-type\"] ="), "{models}");
+    assert!(models.contains("Object.create(null)"), "{models}");
+    assert!(!models.contains("raw.content-type"), "{models}");
+    fs::remove_dir_all(temp_dir).unwrap();
+}

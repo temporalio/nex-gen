@@ -305,6 +305,35 @@ impl Schema {
     }
 }
 
+fn ts_index_access(object: &str, key: &str) -> String {
+    format!("{object}[{}]", typescript_string_literal(key))
+}
+
+fn ts_has_own(object: &str, key: &str) -> String {
+    format!(
+        "Object.prototype.hasOwnProperty.call({object}, {})",
+        typescript_string_literal(key)
+    )
+}
+
+fn ts_member_conflicts_with_object_prototype(name: &str) -> bool {
+    matches!(
+        name,
+        "constructor"
+            | "hasOwnProperty"
+            | "isPrototypeOf"
+            | "propertyIsEnumerable"
+            | "toLocaleString"
+            | "toString"
+            | "valueOf"
+            | "__defineGetter__"
+            | "__defineSetter__"
+            | "__lookupGetter__"
+            | "__lookupSetter__"
+            | "__proto__"
+    )
+}
+
 fn ts_bound_literal(number: &serde_json::Number, is_integer: bool) -> String {
     if is_integer && let Some(value) = number.as_f64() {
         return (value.trunc() as i64).to_string();
@@ -833,17 +862,14 @@ fn render_ts_dependent_required(
         return;
     };
     for (trigger, deps) in dependent_required {
+        if deps.is_empty() {
+            continue;
+        }
         output.push_str(indent);
-        output.push_str(&format!(
-            "if ({obj_expr}[{}] !== undefined) {{\n",
-            typescript_string_literal(trigger)
-        ));
+        output.push_str(&format!("if ({}) {{\n", ts_has_own(obj_expr, trigger)));
         for dep in deps {
             output.push_str(indent);
-            output.push_str(&format!(
-                "  if ({obj_expr}[{}] === undefined) {{\n",
-                typescript_string_literal(dep)
-            ));
+            output.push_str(&format!("  if (!{}) {{\n", ts_has_own(obj_expr, dep)));
             output.push_str(indent);
             output.push_str(&format!(
                 "    violations.push({{ path: {}, reason: `property \"{dep}\" is required when \"{trigger}\" is present` }});\n",
@@ -3063,15 +3089,24 @@ fn render_model_interface(output: &mut String, model: &PlannedJsonType) -> Resul
         return Ok(());
     }
     render_ts_schema_doc(output, "", &schema);
-    output.push_str("export interface ");
+    let use_type_alias = schema.properties.as_ref().is_some_and(|properties| {
+        properties.iter().any(|(json_name, property)| {
+            ts_member_conflicts_with_object_prototype(&property.ts_member_name(json_name))
+        })
+    });
+    output.push_str(if use_type_alias {
+        "export type "
+    } else {
+        "export interface "
+    });
     output.push_str(&model.model_name);
-    output.push_str(" {\n");
+    output.push_str(if use_type_alias { " = {\n" } else { " {\n" });
 
     if let Some(shape) = ts_map_shape(&schema)? {
         output.push_str("  additionalProperties: Record<string, ");
         output.push_str(&shape.value_annotation);
         output.push_str(">;\n");
-        output.push_str("}\n");
+        output.push_str(if use_type_alias { "};\n" } else { "}\n" });
         return Ok(());
     }
 
@@ -3099,7 +3134,7 @@ fn render_model_interface(output: &mut String, model: &PlannedJsonType) -> Resul
         output.push_str(">;\n");
     }
 
-    output.push_str("}\n");
+    output.push_str(if use_type_alias { "};\n" } else { "}\n" });
     Ok(())
 }
 
@@ -3317,7 +3352,9 @@ fn render_model_serializer_body(
             "  const violations: {DEFINITIONS_NAMESPACE}.Violation[] = [];\n"
         ));
     }
-    output.push_str("  const out: Record<string, unknown> = {};\n");
+    output.push_str(
+        "  const out: Record<string, unknown> = Object.create(null) as Record<string, unknown>;\n",
+    );
 
     if let Some(shape) = ts_map_shape(&schema)? {
         output.push_str(
@@ -3378,8 +3415,8 @@ fn render_model_serializer_body(
                 };
             if required.contains(json_name) {
                 render_ts_serialize_property_check(output, json_name, property, "  ");
-                output.push_str("  out.");
-                output.push_str(json_name);
+                output.push_str("  ");
+                output.push_str(&ts_index_access("out", json_name));
                 output.push_str(" = ");
                 output.push_str(&assignment);
                 output.push_str(";\n");
@@ -3388,8 +3425,8 @@ fn render_model_serializer_body(
                 output.push_str(&field_name);
                 output.push_str(" !== undefined) {\n");
                 render_ts_serialize_property_check(output, json_name, property, "    ");
-                output.push_str("    out.");
-                output.push_str(json_name);
+                output.push_str("    ");
+                output.push_str(&ts_index_access("out", json_name));
                 output.push_str(" = ");
                 output.push_str(&assignment);
                 output.push_str(";\n");
@@ -3442,7 +3479,9 @@ fn render_map_parser_body(output: &mut String, schema: &Schema, shape: &TsMapSha
     }
     output.push_str("  const additionalProperties: Record<string, ");
     output.push_str(&shape.value_annotation);
-    output.push_str("> = {};\n");
+    output.push_str("> = Object.create(null) as Record<string, ");
+    output.push_str(&shape.value_annotation);
+    output.push_str(">;\n");
     output.push_str("  for (const key of keys) {\n");
     match &shape.value_schema {
         // Untyped members are carried verbatim, `null` included (P13).
@@ -3496,17 +3535,13 @@ fn render_property_parser(
     output.push_str(&annotation);
     output.push_str(";\n");
 
+    let has_own = ts_has_own("raw", json_name);
+    let raw_access = ts_index_access("raw", json_name);
     if required {
         if allows_null(property) {
-            output.push_str("  if (raw.");
-            output.push_str(json_name);
-            output.push_str(" === undefined) {\n");
+            output.push_str(&format!("  if (!{has_own}) {{\n"));
         } else {
-            output.push_str("  if (raw.");
-            output.push_str(json_name);
-            output.push_str(" === undefined || raw.");
-            output.push_str(json_name);
-            output.push_str(" === null) {\n");
+            output.push_str(&format!("  if (!{has_own} || {raw_access} === null) {{\n"));
         }
         output.push_str("    violations.push({ path: '");
         output.push_str(json_name);
@@ -3516,19 +3551,13 @@ fn render_property_parser(
         output.push_str("  }\n");
     } else {
         if allows_null(property) {
-            output.push_str("  if (raw.");
-            output.push_str(json_name);
-            output.push_str(" !== undefined) {\n");
+            output.push_str(&format!("  if ({has_own}) {{\n"));
         } else {
-            output.push_str("  if (raw.");
-            output.push_str(json_name);
-            output.push_str(" === null) {\n");
+            output.push_str(&format!("  if ({has_own} && {raw_access} === null) {{\n"));
             output.push_str("    violations.push({ path: '");
             output.push_str(json_name);
             output.push_str("', reason: 'explicit null not allowed' });\n");
-            output.push_str("  } else if (raw.");
-            output.push_str(json_name);
-            output.push_str(" !== undefined) {\n");
+            output.push_str(&format!("  }} else if ({has_own}) {{\n"));
         }
         render_property_value_parser(output, model, models, json_name, property, &field_name)?;
         output.push_str("  }\n");
@@ -3545,7 +3574,7 @@ fn render_property_value_parser(
     property: &Schema,
     field_name: &str,
 ) -> Result<()> {
-    let raw_expr = format!("raw.{json_name}");
+    let raw_expr = ts_index_access("raw", json_name);
     let path_expr = typescript_string_literal(json_name);
     let materialized = is_materialized_property(property);
     if !materialized && let Some(const_value) = &property.const_value {
@@ -4232,7 +4261,9 @@ fn render_open_object_collection(
         .unwrap_or_else(|| "unknown".to_string());
     output.push_str("  const additionalProperties: Record<string, ");
     output.push_str(&annotation);
-    output.push_str("> = {};\n");
+    output.push_str("> = Object.create(null) as Record<string, ");
+    output.push_str(&annotation);
+    output.push_str(">;\n");
     output.push_str("  for (const key of Object.keys(raw)) {\n");
     output.push_str("    if (!");
     output.push_str(&declared_fields_const_name(&model.model_name));
@@ -4820,7 +4851,10 @@ fn typescript_object_key(name: &str) -> String {
 }
 
 fn typescript_string_literal(value: &str) -> String {
-    format!("{value:?}")
+    serde_json::to_string(value)
+        .expect("a Rust string is always JSON-serializable")
+        .replace('\u{2028}', "\\u2028")
+        .replace('\u{2029}', "\\u2029")
 }
 
 fn typescript_value_literal(value: &Value) -> Result<String> {
