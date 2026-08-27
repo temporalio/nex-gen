@@ -14,7 +14,7 @@ namespace Nexgen.TypeRoundtripService
 
     [Temporalio.Converters.TemporalTransferTypeConverter(typeof(ActivityOptions.TransferTypeConverter))]
     [GeneratedCode("nexgen", null)]
-    public class ActivityOptions
+    public record ActivityOptions
     {
         public ActivityOptions(Temporalio.Common.RetryPolicy retryPolicy)
         {
@@ -22,7 +22,7 @@ namespace Nexgen.TypeRoundtripService
         }
 
         public string? TaskQueue { get; init; }
-        public Temporalio.Common.RetryPolicy RetryPolicy { get; }
+        public Temporalio.Common.RetryPolicy RetryPolicy { get; init; }
         public System.TimeSpan? ScheduleToCloseTimeout { get; init; }
         public Temporalio.Common.Priority? Priority { get; init; }
 
@@ -68,7 +68,7 @@ namespace Nexgen.TypeRoundtripService
 
     [Temporalio.Converters.TemporalTransferTypeConverter(typeof(FailureContainer.TransferTypeConverter))]
     [GeneratedCode("nexgen", null)]
-    public class FailureContainer
+    public record FailureContainer
     {
         public System.Exception? Failure { get; init; }
 

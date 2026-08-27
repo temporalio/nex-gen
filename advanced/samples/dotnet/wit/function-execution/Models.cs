@@ -11,7 +11,7 @@ namespace Nexgen.FunctionExecution
 {
 
     [GeneratedCode("nexgen", null)]
-    public class ExecuteCountedFunctionRequest
+    public record ExecuteCountedFunctionRequest
     {
         public ExecuteCountedFunctionRequest(string function, string name, int count)
         {
@@ -20,30 +20,30 @@ namespace Nexgen.FunctionExecution
             Count = count;
         }
 
-        public string Function { get; }
+        public string Function { get; init; }
         /// <summary>
         /// The name argument for the function.
         /// </summary>
-        public string Name { get; }
+        public string Name { get; init; }
         /// <summary>
         /// The count argument for the function.
         /// </summary>
-        public int Count { get; }
+        public int Count { get; init; }
     }
 
     [GeneratedCode("nexgen", null)]
-    public class ExecuteCountedFunctionResult
+    public record ExecuteCountedFunctionResult
     {
         public ExecuteCountedFunctionResult(string value)
         {
             Value = value;
         }
 
-        public string Value { get; }
+        public string Value { get; init; }
     }
 
     [GeneratedCode("nexgen", null)]
-    public class ExecuteFunctionRequest
+    public record ExecuteFunctionRequest
     {
         public ExecuteFunctionRequest(string function, string name, bool enabled)
         {
@@ -52,30 +52,30 @@ namespace Nexgen.FunctionExecution
             Enabled = enabled;
         }
 
-        public string Function { get; }
+        public string Function { get; init; }
         /// <summary>
         /// The name argument for the function.
         /// </summary>
-        public string Name { get; }
+        public string Name { get; init; }
         /// <summary>
         /// The enabled argument for the function.
         /// </summary>
-        public bool Enabled { get; }
+        public bool Enabled { get; init; }
     }
 
     [GeneratedCode("nexgen", null)]
-    public class ExecuteFunctionResult
+    public record ExecuteFunctionResult
     {
         public ExecuteFunctionResult(string value)
         {
             Value = value;
         }
 
-        public string Value { get; }
+        public string Value { get; init; }
     }
 
     [GeneratedCode("nexgen", null)]
-    public class ExecuteNamedFunctionRequest
+    public record ExecuteNamedFunctionRequest
     {
         public ExecuteNamedFunctionRequest(string function, string name, bool enabled)
         {
@@ -84,37 +84,37 @@ namespace Nexgen.FunctionExecution
             Enabled = enabled;
         }
 
-        public string Function { get; }
+        public string Function { get; init; }
         /// <summary>
         /// The name argument for the function.
         /// </summary>
-        public string Name { get; }
+        public string Name { get; init; }
         /// <summary>
         /// The enabled argument for the function.
         /// </summary>
-        public bool Enabled { get; }
+        public bool Enabled { get; init; }
     }
 
     [GeneratedCode("nexgen", null)]
-    public class ExecuteNamedFunctionResult
+    public record ExecuteNamedFunctionResult
     {
         public ExecuteNamedFunctionResult(string value)
         {
             Value = value;
         }
 
-        public string Value { get; }
+        public string Value { get; init; }
     }
 
     [GeneratedCode("nexgen", null)]
-    public class ExecuteNamedVarargsFunctionRequest
+    public record ExecuteNamedVarargsFunctionRequest
     {
         public ExecuteNamedVarargsFunctionRequest(string function)
         {
             Function = function;
         }
 
-        public string Function { get; }
+        public string Function { get; init; }
         /// <summary>
         /// Arguments for the function.
         /// </summary>
@@ -122,25 +122,25 @@ namespace Nexgen.FunctionExecution
     }
 
     [GeneratedCode("nexgen", null)]
-    public class ExecuteNamedVarargsFunctionResult
+    public record ExecuteNamedVarargsFunctionResult
     {
         public ExecuteNamedVarargsFunctionResult(string value)
         {
             Value = value;
         }
 
-        public string Value { get; }
+        public string Value { get; init; }
     }
 
     [GeneratedCode("nexgen", null)]
-    public class ExecuteVarargsFunctionRequest
+    public record ExecuteVarargsFunctionRequest
     {
         public ExecuteVarargsFunctionRequest(string function)
         {
             Function = function;
         }
 
-        public string Function { get; }
+        public string Function { get; init; }
         /// <summary>
         /// Arguments for the function.
         /// </summary>
@@ -148,14 +148,14 @@ namespace Nexgen.FunctionExecution
     }
 
     [GeneratedCode("nexgen", null)]
-    public class ExecuteVarargsFunctionResult
+    public record ExecuteVarargsFunctionResult
     {
         public ExecuteVarargsFunctionResult(string value)
         {
             Value = value;
         }
 
-        public string Value { get; }
+        public string Value { get; init; }
     }
 
 }

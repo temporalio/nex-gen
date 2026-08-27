@@ -325,9 +325,9 @@ fn dotnet_renders_nexus_service_interface_and_resources() {
     assert!(rendered.contains("public abstract record NotificationTarget"));
     assert!(rendered.contains("public sealed record Email(string Value) : NotificationTarget;"));
     assert!(rendered.contains("public sealed record None : NotificationTarget;"));
-    assert!(rendered.contains("public class User"));
+    assert!(rendered.contains("public record User"));
     assert!(rendered.contains("public class GetUserOptions"));
-    assert!(rendered.contains("internal class GetUserRequest"));
+    assert!(rendered.contains("internal record GetUserRequest"));
     assert!(rendered.contains("using System.Threading.Tasks;"));
     assert!(
         rendered.contains("private static async Task<User> GetUserAsync(GetUserRequest request)")
@@ -438,7 +438,7 @@ fn dotnet_renders_proto_backed_temporal_types() {
     assert!(rendered.contains("using System.CodeDom.Compiler;"));
     assert!(rendered.contains("[GeneratedCode(\"nexgen\", null)]\n    [NexusService(\"temporal.api.workflowservice.v1.WorkflowService\")]\n    internal interface IWorkflowService"));
     assert!(rendered.contains(
-        "[GeneratedCode(\"nexgen\", null)]\n    internal class SignalWithStartWorkflowRequest"
+        "[GeneratedCode(\"nexgen\", null)]\n    internal record SignalWithStartWorkflowRequest"
     ));
     assert!(rendered.contains(
         "[GeneratedCode(\"nexgen\", null)]\n    public class SignalWithStartWorkflowOptions"
@@ -458,19 +458,24 @@ fn dotnet_renders_proto_backed_temporal_types() {
     assert!(
         rendered.contains("public SignalWithStartWorkflowOptions(string id, string taskQueue)")
     );
-    assert!(rendered.contains("internal SignalWithStartWorkflowRequest(string workflow, string id, string taskQueue, string signal)"));
+    assert!(rendered.contains("internal SignalWithStartWorkflowRequest(string workflow, string id, string taskQueue, string signal, string @namespace)"));
     assert!(rendered.contains("public string Id { get; set; }\n"));
     assert!(rendered.contains("public string TaskQueue { get; set; }\n"));
-    assert!(rendered.contains("public string Workflow { get; }\n"));
-    assert!(rendered.contains("public string Id { get; }\n"));
-    assert!(rendered.contains("public string TaskQueue { get; }\n"));
-    assert!(rendered.contains("public string Signal { get; }\n"));
+    assert!(rendered.contains("public string Workflow { get; init; }\n"));
+    assert!(rendered.contains("public string Id { get; init; }\n"));
+    assert!(rendered.contains("public string TaskQueue { get; init; }\n"));
+    assert!(rendered.contains("public string Signal { get; init; }\n"));
+    assert!(rendered.contains(
+        "new SignalWithStartWorkflowRequest(workflow, options.Id, options.TaskQueue, signal, Nexgen.Support.TemporalWorkflowContext.WorkflowNamespace())"
+    ));
+    assert!(rendered.contains("wire.SignalName, wire.Namespace)"));
+    assert!(!rendered.contains("get => _namespace"));
     assert!(!rendered.contains("default!"));
     assert!(!rendered.contains("required "));
-    assert!(rendered.contains("internal class SignalWithStartWorkflowRequest"));
-    assert!(!rendered.contains("public class SignalWithStartWorkflowRequest"));
-    assert!(rendered.contains("internal class UserMetadata"));
-    assert!(!rendered.contains("public class UserMetadata"));
+    assert!(rendered.contains("internal record SignalWithStartWorkflowRequest"));
+    assert!(!rendered.contains("public record SignalWithStartWorkflowRequest"));
+    assert!(rendered.contains("internal record UserMetadata"));
+    assert!(!rendered.contains("public record UserMetadata"));
     assert!(!rendered.contains("IReadOnlyCollection<object?>? Args { get; set; }"));
     assert!(!rendered.contains("IReadOnlyCollection<object?>? SignalArgs { get; set; }"));
     assert!(rendered.contains("SignalWithStartWorkflowAsync<TWorkflow, TResult>(Expression<Func<TWorkflow, Task<TResult>>> workflow, Expression<Func<TWorkflow, Task>> signal, SignalWithStartWorkflowOptions options)"));
@@ -492,7 +497,7 @@ fn dotnet_renders_proto_backed_temporal_types() {
         )
     );
     assert!(rendered.contains(
-        "options.TaskQueue, Nexgen.Support.TemporalFunctionNames.SignalName(signalMethod))"
+        "options.TaskQueue, Nexgen.Support.TemporalFunctionNames.SignalName(signalMethod), Nexgen.Support.TemporalWorkflowContext.WorkflowNamespace())"
     ));
     assert!(rendered.contains("Args = workflowArgs"));
     assert!(rendered.contains("Args = args"));

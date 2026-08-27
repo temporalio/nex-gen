@@ -14,6 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `cargo build-examples` now rebuilds both WIT and JSON Schema samples by
   default. Use `--format wit` or `--format json-schema` for focused generation;
   the separate `cargo build-json-examples` command has been removed.
+- .NET WIT models now generate as immutable records with init-only properties.
+  Generated callers explicitly provide values supplied by `@nexus.source`;
+  wire deserialization retains the value carried by the request.
 
 ### Deprecated
 

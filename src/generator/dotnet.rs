@@ -539,6 +539,7 @@ impl<'a> ApiPlanner<'a> {
                         operation,
                         request_plan,
                         self.api_plan,
+                        self.support_namespace,
                         None,
                     );
                 }
@@ -614,7 +615,7 @@ impl<'a> ApiPlanner<'a> {
         output.push('\n');
         let access = self.model_access(model);
         output.push_str(access);
-        output.push_str(" class ");
+        output.push_str(" record ");
         let type_name = csharp_type_name(&model.name);
         output.push_str(&type_name);
         let type_parameters = self
@@ -639,41 +640,16 @@ impl<'a> ApiPlanner<'a> {
             output.push_str(&self.model_field_type(model, field_name, field));
             output.push(' ');
             output.push_str(&field_property_name(field));
-            if field.required {
-                output.push_str(" { get; }\n");
-            } else {
-                output.push_str(" { get; init; }\n");
-            }
+            output.push_str(" { get; init; }\n");
         }
-        for (_field_name, field, source_expr) in model.sourced_fields() {
+        for (_field_name, field, _source_expr) in model.sourced_fields() {
             render_field_xml_doc(output, "    ", field);
             let property_name = field_property_name(field);
-            let backing_field_name = format!(
-                "_{}",
-                csharp_parameter_name(&field.name).trim_start_matches('@')
-            );
-            output.push_str("    private ");
-            output.push_str(&nullable_type(&self.field_type(field)));
-            output.push(' ');
-            output.push_str(&backing_field_name);
-            output.push_str(";\n");
             output.push_str("    public ");
             output.push_str(&self.field_type(field));
             output.push(' ');
             output.push_str(&property_name);
-            output.push_str("\n    {\n");
-            output.push_str("        get => ");
-            output.push_str(&backing_field_name);
-            output.push_str(" ?? ");
-            output.push_str(&qualify_dotnet_support_call(
-                source_expr,
-                self.support_namespace,
-            ));
-            output.push_str(";\n");
-            output.push_str("        init => ");
-            output.push_str(&backing_field_name);
-            output.push_str(" = value;\n");
-            output.push_str("    }\n");
+            output.push_str(" { get; init; }\n");
         }
         if self.external_models.model_needs_wire_method(model) {
             if model.public_fields().next().is_some() || model.sourced_fields().next().is_some() {
@@ -953,7 +929,8 @@ impl<'a> ApiPlanner<'a> {
             .model_fields()
             .filter(|(_, field)| field.required)
             .collect::<Vec<_>>();
-        if required_fields.is_empty() {
+        let sourced_fields = model.sourced_fields().collect::<Vec<_>>();
+        if required_fields.is_empty() && sourced_fields.is_empty() {
             return;
         }
         output.push_str("    ");
@@ -961,16 +938,34 @@ impl<'a> ApiPlanner<'a> {
         output.push(' ');
         output.push_str(type_name);
         output.push('(');
-        for (index, (field_name, field)) in required_fields.iter().enumerate() {
-            if index > 0 {
+        let mut has_parameter = false;
+        for (field_name, field) in &required_fields {
+            if has_parameter {
                 output.push_str(", ");
             }
+            has_parameter = true;
             output.push_str(&self.model_field_type(model, field_name, field));
             output.push(' ');
             output.push_str(&csharp_parameter_name(&field.name));
         }
+        for (_, field, _) in &sourced_fields {
+            if has_parameter {
+                output.push_str(", ");
+            }
+            has_parameter = true;
+            output.push_str(&self.field_type(field));
+            output.push(' ');
+            output.push_str(&csharp_parameter_name(&field.name));
+        }
         output.push_str(")\n    {\n");
-        for (_, field) in required_fields {
+        for (_, field) in &required_fields {
+            output.push_str("        ");
+            output.push_str(&field_property_name(field));
+            output.push_str(" = ");
+            output.push_str(&csharp_parameter_name(&field.name));
+            output.push_str(";\n");
+        }
+        for (_, field, _) in &sourced_fields {
             output.push_str("        ");
             output.push_str(&field_property_name(field));
             output.push_str(" = ");
@@ -1141,12 +1136,18 @@ impl<'a> ApiPlanner<'a> {
             let request_expr = resource_method_request_model_init_expr(
                 request_plan,
                 self.api_plan,
+                self.support_namespace,
                 None,
                 ResourceMethodRequestInitKind::AllFields,
             )
             .or_else(|| {
-                resource_method_operation_call_args(operation, request_plan, self.api_plan)
-                    .and_then(|args| (args.len() == 1).then(|| args[0].clone()))
+                resource_method_operation_call_args(
+                    operation,
+                    request_plan,
+                    self.api_plan,
+                    self.support_namespace,
+                )
+                .and_then(|args| (args.len() == 1).then(|| args[0].clone()))
             })
             .expect("bound resource operation should have a renderable request plan");
             output.push_str("        var request = ");
@@ -3032,29 +3033,33 @@ fn render_flattened_method_body(
             )
         })
         .collect::<Vec<_>>();
-    output.push('(');
-    output.push_str(
-        &field_exprs
-            .iter()
-            .filter(|(_, field, _)| field.required)
-            .map(|(_, _, expr)| expr.as_str())
-            .collect::<Vec<_>>()
-            .join(", "),
+    let mut constructor_args = field_exprs
+        .iter()
+        .filter(|(_, field, _)| field.required)
+        .map(|(_, _, expr)| expr.clone())
+        .collect::<Vec<_>>();
+    constructor_args.extend(
+        model
+            .sourced_fields()
+            .map(|(_, _, source_expr)| qualify_dotnet_support_call(source_expr, support_namespace)),
     );
+    output.push('(');
+    output.push_str(&constructor_args.join(", "));
     output.push(')');
     let optional_field_exprs = field_exprs
         .iter()
         .filter(|(_, field, _)| !field.required)
+        .map(|(_, field, expr)| (*field, expr.clone()))
         .collect::<Vec<_>>();
     if optional_field_exprs.is_empty() {
         output.push_str(";\n");
     } else {
         output.push_str("\n        {\n");
-        for (_, field, expr) in optional_field_exprs {
+        for (field, expr) in optional_field_exprs {
             output.push_str("            ");
             output.push_str(&field_property_name(field));
             output.push_str(" = ");
-            output.push_str(expr);
+            output.push_str(&expr);
             output.push_str(",\n");
         }
         output.push_str("        };\n");
@@ -3263,6 +3268,7 @@ fn nested_model_init_expr(
                 )
             })
             .collect(),
+        Vec::new(),
     );
     if field.required {
         init_expr
@@ -3274,11 +3280,13 @@ fn nested_model_init_expr(
 fn model_init_expr(
     type_name: &str,
     field_exprs: Vec<(&RecordFieldSpec<PlannedFamily>, String)>,
+    sourced_field_exprs: Vec<String>,
 ) -> String {
     let constructor_args = field_exprs
         .iter()
         .filter(|(field, _)| field.required)
         .map(|(_, expr)| expr.as_str())
+        .chain(sourced_field_exprs.iter().map(String::as_str))
         .collect::<Vec<_>>()
         .join(", ");
     let assignments = field_exprs
@@ -3574,12 +3582,14 @@ fn render_resource_method_operation_body(
     operation: &PlannedOperation,
     request_plan: &RequestPlan,
     api_plan: &PlannedSpec,
+    support_namespace: Option<&str>,
     endpoint_expr: Option<&str>,
 ) {
     let operation_method_name = format!("{}Async", csharp_type_name(&operation.name));
     let operation_class_name = dotnet_operations_class_name(service);
-    let args = resource_method_operation_call_args(operation, request_plan, api_plan)
-        .expect("bound resource operation should have a renderable request plan");
+    let args =
+        resource_method_operation_call_args(operation, request_plan, api_plan, support_namespace)
+            .expect("bound resource operation should have a renderable request plan");
     if args.len() == 1 {
         output.push_str("        var request = ");
         output.push_str(&args[0]);
@@ -3608,6 +3618,7 @@ fn resource_method_operation_call_args(
     operation: &PlannedOperation,
     request_plan: &RequestPlan,
     api_plan: &PlannedSpec,
+    support_namespace: Option<&str>,
 ) -> Option<Vec<String>> {
     let model = api_plan_record_for_request_name(
         api_plan,
@@ -3626,12 +3637,14 @@ fn resource_method_operation_call_args(
                 request_plan,
                 model,
                 api_plan,
+                support_namespace,
             );
         }
         if model_has_options_fields(model, api_plan)
             && let Some(expr) = resource_method_request_model_init_expr(
                 request_plan,
                 api_plan,
+                support_namespace,
                 Some(&operation_options_type_name(operation)),
                 ResourceMethodRequestInitKind::OptionsFields,
             )
@@ -3643,6 +3656,7 @@ fn resource_method_operation_call_args(
     resource_method_request_model_init_expr(
         request_plan,
         api_plan,
+        support_namespace,
         None,
         ResourceMethodRequestInitKind::AllFields,
     )
@@ -3654,6 +3668,7 @@ fn resource_method_flattened_operation_call_args(
     request_plan: &RequestPlan,
     model: &PlannedModel,
     api_plan: &PlannedSpec,
+    support_namespace: Option<&str>,
 ) -> Option<Vec<String>> {
     let source_exprs = resource_method_request_field_exprs(request_plan, model, api_plan)?;
     let overload = flattened_overloads(model)
@@ -3690,6 +3705,7 @@ fn resource_method_flattened_operation_call_args(
         args.push(resource_method_request_model_init_expr(
             request_plan,
             api_plan,
+            support_namespace,
             Some(&operation_options_type_name(operation)),
             ResourceMethodRequestInitKind::OptionsFields,
         )?);
@@ -3706,6 +3722,7 @@ enum ResourceMethodRequestInitKind {
 fn resource_method_request_model_init_expr(
     request_plan: &RequestPlan,
     api_plan: &PlannedSpec,
+    support_namespace: Option<&str>,
     type_name_override: Option<&str>,
     init_kind: ResourceMethodRequestInitKind,
 ) -> Option<String> {
@@ -3733,9 +3750,16 @@ fn resource_method_request_model_init_expr(
             resource_method_request_value_expr(&field.value, api_plan)?,
         ));
     }
+    let sourced_field_exprs = type_name_override.is_none().then(|| {
+        model
+            .sourced_fields()
+            .map(|(_, _, source_expr)| qualify_dotnet_support_call(source_expr, support_namespace))
+            .collect()
+    });
     Some(model_init_expr(
         type_name_override.unwrap_or(&csharp_type_name(&model.name)),
         field_exprs,
+        sourced_field_exprs.unwrap_or_default(),
     ))
 }
 
@@ -3799,6 +3823,7 @@ fn resource_method_request_value_expr(
         RequestPlan::Construct { .. } => resource_method_request_model_init_expr(
             request_plan,
             api_plan,
+            None,
             None,
             ResourceMethodRequestInitKind::AllFields,
         ),
