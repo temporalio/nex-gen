@@ -3013,7 +3013,10 @@ fn go_json_bare_ref_root_is_a_runtime_alias_for_operation_io() {
         service.contains("Echo nexus.OperationReference[Alternate, Alternate]"),
         "{service}"
     );
-    assert!(service.contains("Item Alternate `json:\"item\"`"), "{service}");
+    assert!(
+        service.contains("Item Alternate `json:\"item\"`"),
+        "{service}"
+    );
     fs::write(
         output_path.join("alias_runtime_test.go"),
         r#"package aliases
