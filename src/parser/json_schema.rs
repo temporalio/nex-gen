@@ -3292,8 +3292,8 @@ fn validate_object_constraints(path: &Path, schema: &Schema, context: &str) -> R
 /// value-set primitives). See `specs/json-schema/features/const.md` and
 /// `specs/json-schema/features/enum.md` for the authoritative rules. Both keep their
 /// values in the schema `extra` map for the backends; this rejects statically
-/// unsatisfiable / unsupported / degenerate forms with fix-its and enforces the
-/// P15 synthesized-name (value → identifier) collision rule.
+/// unsatisfiable / unsupported / degenerate forms with fix-its. Target-specific
+/// value-to-identifier checks belong to the emitted-name manifest, not here.
 fn validate_const_enum(path: &Path, schema: &Schema, context: &str) -> Result<()> {
     let has_const = schema.extra.contains_key("const");
     let has_enum = schema.extra.contains_key("enum");
@@ -3365,15 +3365,6 @@ fn validate_const_enum(path: &Path, schema: &Schema, context: &str) -> Result<()
                 ));
             }
         }
-        // Stage 3: the value must encode to a non-empty legal identifier token
-        // (Go defined-type const / Java value-class constant). An empty token
-        // (e.g. the string `"-"`) is rejected — unless a value-constant override
-        // supplies the identifier verbatim.
-        if encode_value_identifier(value).is_none() && !value_has_constant_override(schema, value) {
-            return reject(format!(
-                "{context}: `{source}` value {value} does not encode to a legal identifier (its token is empty); this value cannot name a Go/Java constant"
-            ));
-        }
         Ok(())
     };
 
@@ -3418,25 +3409,10 @@ fn validate_const_enum(path: &Path, schema: &Schema, context: &str) -> Result<()
                 ));
             }
         }
-        // P15: two members whose identifier encodings collide (wire-distinct but
-        // fold to the same Go/Java constant name) → reject. A member that carries
-        // a value-constant override names its constant verbatim, so it does not
-        // participate in the shared-token fold (the per-language P15 pass guards
-        // the verbatim name instead).
-        let mut seen: BTreeMap<String, Value> = BTreeMap::new();
-        for value in members {
-            if value_has_constant_override(schema, value) {
-                continue;
-            }
-            if let Some(token) = encode_value_identifier(value)
-                && let Some(previous) = seen.insert(token.clone(), value.clone())
-                && &previous != value
-            {
-                return reject(format!(
-                    "{context}: `enum` members {previous} and {value} both encode to the identifier `{token}` (a name collision); they cannot each name a distinct Go/Java constant"
-                ));
-            }
-        }
+        // Value-to-identifier legality and collisions are target-specific P15
+        // concerns: only Go and Java synthesize constants. They are checked on
+        // the resolved emitted model by `build_name_manifest`, alongside every
+        // other identifier in the actual target scope.
         // A `default` alongside `enum` must itself be a member of the set.
         if let Some(default) = schema.extra.get("default")
             && !members
@@ -3474,28 +3450,6 @@ fn json_values_equal(a: &Value, b: &Value) -> bool {
             }
         }
         _ => a == b,
-    }
-}
-
-/// Encodes a scalar `const`/`enum` value to its readable identifier token
-/// (the shared Go/Java value-constant front-end, in a case-normalized form used
-/// for the P15 collision pass). Returns `None` when the value has no legal token
-/// (e.g. a string of only separators, such as `"-"`). Numbers keep their
-/// decimal point as `_` (so `3_14` stays distinct from `314`) and encode a
-/// leading sign as `Neg`; booleans encode as `True`/`False`.
-fn encode_value_identifier(value: &Value) -> Option<String> {
-    match value {
-        Value::String(text) => {
-            let token = text.to_upper_camel_case();
-            if token.is_empty() { None } else { Some(token) }
-        }
-        Value::Bool(flag) => Some(if *flag { "True" } else { "False" }.to_string()),
-        Value::Number(number) => {
-            let decimal = crate::json_schema::scalar::value_token_decimal(number);
-            let token = decimal.replace('-', "Neg").replace('.', "_");
-            if token.is_empty() { None } else { Some(token) }
-        }
-        _ => None,
     }
 }
 
@@ -7196,8 +7150,8 @@ fn schema_closed_values(schema: &Schema) -> Vec<Value> {
 /// constant, and an `x-<lang>-enum-names` entry (keyed by the wire value's
 /// string form) replaces an enum member's constant. Mirrors
 /// `go_value_constant_override` in `src/generator/json/go.rs` so the P15
-/// collision pass and emission agree — keep the two lookups identical (const
-/// gates on `const`, else enum by string key).
+/// collision pass and emission agree — keep the lookups identical (const gates
+/// on `const`, else enum by its canonical value key).
 fn value_constant_override<'a>(
     language: Language,
     schema: &'a Schema,
@@ -7221,8 +7175,8 @@ fn value_constant_override<'a>(
     }
 }
 
-/// The `x-<lang>-enum-names` map key for one closed value: the value's JSON wire
-/// spelling (`"active"`, `"1"`, `"1.5"`, `"true"`).
+/// The `x-<lang>-enum-names` map key for one closed value: the string itself,
+/// the canonical shortest decimal for a number, or a boolean's JSON spelling.
 ///
 /// All three lookups — this one and the Go/Java emitters' — used to match only
 /// `Value::String`, so a numeric or boolean member could never be renamed: the
@@ -7232,23 +7186,9 @@ pub(crate) fn enum_names_lookup_key(value: &Value) -> Option<String> {
     match value {
         Value::String(text) => Some(text.clone()),
         Value::Bool(flag) => Some(flag.to_string()),
-        Value::Number(number) => Some(number.to_string()),
+        Value::Number(number) => Some(crate::json_schema::scalar::value_token_decimal(number)),
         _ => None,
     }
-}
-
-/// Whether a `const`/`enum` value carries a value-constant override
-/// (`x-<lang>-const-name` / `x-<lang>-enum-names`) for any constant-synthesizing
-/// target (Go/Java). Such a value names its constant verbatim, so it bypasses
-/// the shared-token empty/collision checks in `validate_const_enum` — the
-/// verbatim name is the only way to admit a value whose encoding is empty (e.g.
-/// `"-"`) or folds onto another member's (e.g. `"user"`/`"USER"`), per the spec.
-/// The per-language P15 pass (`collect_synthesized_top_level`) then guards the
-/// verbatim names.
-fn value_has_constant_override(schema: &Schema, value: &Value) -> bool {
-    [Language::Go, Language::Java]
-        .into_iter()
-        .any(|language| value_constant_override(language, schema, value).is_some())
 }
 
 /// The Go value-constant suffix for a scalar value (mirrors `go_value_suffix`).
@@ -7256,7 +7196,9 @@ fn go_value_suffix_for(value: &Value) -> String {
     match value {
         Value::String(text) => text.to_upper_camel_case(),
         Value::Bool(flag) => if *flag { "True" } else { "False" }.to_string(),
-        Value::Number(number) => number.to_string().replace('-', "Neg").replace('.', "_"),
+        Value::Number(number) => crate::json_schema::scalar::value_token_decimal(number)
+            .replace('-', "Neg")
+            .replace('.', "_"),
         _ => String::new(),
     }
 }
@@ -7299,11 +7241,23 @@ fn validate_overrides_in_schema(language: Language, schema: &Schema, context: &s
     if let Some(keyword) = lang_const_name_keyword(language)
         && let Some(value) = schema.extra.get(keyword)
     {
+        if !schema.extra.contains_key("const") {
+            return Err(Error::InvalidJsonSchema {
+                path: PathBuf::from("<json-schema>"),
+                reason: format!("{context}: `{keyword}` is only valid beside `const`"),
+            });
+        }
         validate_override(language, keyword, value, context)?;
     }
     if let Some(keyword) = lang_enum_names_keyword(language)
         && let Some(value) = schema.extra.get(keyword)
     {
+        if !schema.extra.contains_key("enum") {
+            return Err(Error::InvalidJsonSchema {
+                path: PathBuf::from("<json-schema>"),
+                reason: format!("{context}: `{keyword}` is only valid beside `enum`"),
+            });
+        }
         let Some(map) = value.as_object() else {
             return Err(Error::InvalidJsonSchema {
                 path: PathBuf::from("<json-schema>"),
@@ -7312,6 +7266,24 @@ fn validate_overrides_in_schema(language: Language, schema: &Schema, context: &s
         };
         for entry in map.values() {
             validate_override(language, keyword, entry, context)?;
+        }
+        let member_keys = schema
+            .extra
+            .get("enum")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(enum_names_lookup_key)
+            .collect::<BTreeSet<_>>();
+        for key in map.keys() {
+            if !member_keys.contains(key) {
+                return Err(Error::InvalidJsonSchema {
+                    path: PathBuf::from("<json-schema>"),
+                    reason: format!(
+                        "{context}: `{keyword}` key {key:?} does not name an `enum` member; use the member's canonical JSON spelling"
+                    ),
+                });
+            }
         }
     }
     if let Some(properties) = &schema.properties {
@@ -7580,11 +7552,25 @@ pub(crate) fn build_name_manifest(
             .iter()
             .filter(|service| in_scope(&service.module_key))
         {
-            top.insert(
-                language,
-                service.code_ident(language),
-                service.origin_label(),
-            )?;
+            let service_ident = service.code_ident(language);
+            top.insert(language, service_ident.clone(), service.origin_label())?;
+            // Go's native API mode adds two package declarations whose spelling
+            // is fixed by the service identifier. The loader deliberately has
+            // one mode-independent accept set, so reserve them even when this
+            // invocation will not render the optional native client.
+            if language == Language::Go {
+                let client_ident = format!("{service_ident}Client");
+                top.insert(
+                    language,
+                    client_ident.clone(),
+                    format!("{} native client", service.origin_label()),
+                )?;
+                top.insert(
+                    language,
+                    format!("New{client_ident}"),
+                    format!("{} native client constructor", service.origin_label()),
+                )?;
+            }
         }
         if !matches!(language, Language::TypeScript | Language::Python)
             && services.iter().any(|service| in_scope(&service.module_key))
@@ -7856,17 +7842,34 @@ fn collect_synthesized_top_level(
             defined_type.clone(),
             format!("`{model_full_name}.{json_name}` closed-value type"),
         )?;
+        let remedy = if values.len() == 1 {
+            lang_const_name_keyword(language).unwrap_or("x-<lang>-const-name")
+        } else {
+            lang_enum_names_keyword(language).unwrap_or("x-<lang>-enum-names")
+        };
         for value in &values {
             // An `x-go-const-name` / `x-go-enum-names` override replaces the
             // whole value-constant identifier verbatim (mirrors the generator).
             let const_ident = match value_constant_override(language, property, value) {
                 Some(name) => name.to_string(),
-                None => format!("{defined_type}{}", go_value_suffix_for(value)),
+                None => {
+                    let suffix = go_value_suffix_for(value);
+                    if suffix.is_empty() {
+                        return Err(Error::InvalidJsonSchema {
+                            path: PathBuf::from("<json-schema>"),
+                            reason: format!(
+                                "`{model_full_name}.{json_name}` value {value} does not encode to a legal Go constant identifier; provide an `{remedy}` override"
+                            ),
+                        });
+                    }
+                    format!("{defined_type}{suffix}")
+                }
             };
-            top.insert(
+            top.insert_with_remedy(
                 language,
                 const_ident,
                 format!("`{model_full_name}.{json_name}` value constant for {value}"),
+                remedy,
             )?;
         }
     }
@@ -7921,6 +7924,16 @@ fn collect_java_nested_scope(model_full_name: &str, schema: &Schema) -> Result<(
         };
         let mut constants = Namespace::default();
         for value in &values {
+            if value_constant_override(language, property, value).is_none()
+                && java_value_token(value).is_empty()
+            {
+                return Err(Error::InvalidJsonSchema {
+                    path: PathBuf::from("<json-schema>"),
+                    reason: format!(
+                        "`{model_full_name}.{json_name}` value {value} does not encode to a legal Java constant identifier; provide an `{remedy}` override"
+                    ),
+                });
+            }
             let const_ident = java_value_constant_name(property, value);
             constants.insert_with_remedy(
                 language,
@@ -7969,20 +7982,24 @@ fn java_value_constant_name(property: &Schema, value: &Value) -> String {
     if let Some(name) = value_constant_override(Language::Java, property, value) {
         return name.to_string();
     }
-    let token = match value {
-        Value::String(text) => text.to_shouty_snake_case(),
-        Value::Bool(flag) => if *flag { "TRUE" } else { "FALSE" }.to_string(),
-        Value::Number(number) => crate::json_schema::scalar::value_token_decimal(number)
-            .replace('-', "NEG_")
-            .replace('.', "_"),
-        _ => String::new(),
-    };
+    let token = java_value_token(value);
     let needs_guard =
         matches!(value, Value::Number(_)) || !token.starts_with(|c: char| c.is_ascii_alphabetic());
     if needs_guard {
         format!("V_{token}")
     } else {
         token
+    }
+}
+
+fn java_value_token(value: &Value) -> String {
+    match value {
+        Value::String(text) => text.to_shouty_snake_case(),
+        Value::Bool(flag) => if *flag { "TRUE" } else { "FALSE" }.to_string(),
+        Value::Number(number) => crate::json_schema::scalar::value_token_decimal(number)
+            .replace('-', "NEG_")
+            .replace('.', "_"),
+        _ => String::new(),
     }
 }
 
@@ -10625,17 +10642,24 @@ properties:
     }
 
     #[test]
-    fn rejects_encoded_name_collision_enum() {
-        // `user-admin` and `user_admin` are distinct on the wire but both encode
-        // to the identifier `UserAdmin` (P15 collision).
-        let error = const_enum_reject("type: string\nenum: [user-admin, user_admin]");
-        assert!(error.contains("collision"), "{error}");
-    }
-
-    #[test]
-    fn rejects_unencodable_const_value() {
-        let error = const_enum_reject("type: string\nconst: \"-\"");
-        assert!(error.contains("legal identifier"), "{error}");
+    fn value_token_collisions_are_checked_per_emitted_target() {
+        let input = r#"
+$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  value: { type: string, enum: [user-admin, user_admin] }
+"#;
+        for language in [Language::Go, Language::Java] {
+            let error = reject_for(language, input);
+            assert!(
+                error.contains("collision") && error.contains("enum-names"),
+                "{language:?}: {error}"
+            );
+        }
+        for language in [Language::TypeScript, Language::Python] {
+            parse_for(language, input)
+                .unwrap_or_else(|error| panic!("{language:?} emits no value constant: {error}"));
+        }
     }
 
     #[test]
@@ -10678,12 +10702,6 @@ properties:
     fn rejects_composite_enum_member() {
         let error = const_enum_reject("type: object\nenum: [{ a: 1 }]");
         assert!(error.contains("composite"), "{error}");
-    }
-
-    #[test]
-    fn rejects_unencodable_enum_member() {
-        let error = const_enum_reject("type: string\nenum: [\"-\", x]");
-        assert!(error.contains("legal identifier"), "{error}");
     }
 
     // ---- `allOf` load-time merge (specs/json-schema/features/allOf.md) ----
@@ -12614,6 +12632,73 @@ properties:
     }
 
     #[test]
+    fn value_token_legality_is_target_scoped_and_names_the_remedy() {
+        let input = r#"
+$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  marker: { type: string, const: "-" }
+"#;
+        for language in [Language::Go, Language::Java] {
+            let error = reject_for(language, input);
+            assert!(
+                error.contains("does not encode") && error.contains("const-name"),
+                "{language:?}: {error}"
+            );
+        }
+        for language in [Language::TypeScript, Language::Python] {
+            parse_for(language, input).unwrap_or_else(|error| {
+                panic!("{language:?} emits a literal, not a constant: {error}")
+            });
+        }
+    }
+
+    #[test]
+    fn go_numeric_value_constant_uses_the_canonical_decimal_token() {
+        let input = r##"
+$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  ratio: { type: number, const: 1.0 }
+  clash: { $ref: "#/$defs/ApiRatio1" }
+$defs:
+  ApiRatio1: { type: object, properties: { value: { type: string } } }
+"##;
+        let error = reject_for(Language::Go, input);
+        assert!(
+            error.contains("collision") && error.contains("ApiRatio1"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn active_value_constant_overrides_validate_placement_and_member_keys() {
+        let unmatched = r#"
+$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  ratio:
+    type: number
+    enum: [1.0, 2.5]
+    x-go-enum-names: { "1.0": One }
+"#;
+        let error = reject_for(Language::Go, unmatched);
+        assert!(error.contains("does not name an `enum` member"), "{error}");
+
+        let canonical = unmatched.replace("\"1.0\"", "\"1\"");
+        parse_for(Language::Go, &canonical).expect("canonical numeric key selects the member");
+
+        let wrong_keyword = r#"
+$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  marker: { type: string, enum: [a, b], x-go-const-name: Marker }
+"#;
+        let error = reject_for(Language::Go, wrong_keyword);
+        assert!(error.contains("only valid beside `const`"), "{error}");
+    }
+
+    #[test]
     fn rejects_type_name_collision_between_defs() {
         // Two `$defs` keys that recase to the same type identifier (`userProfile`
         // and `user_profile` → both `UserProfile`) collide in the package scope.
@@ -13078,6 +13163,29 @@ services:
             assert!(
                 error.contains(imported) && error.contains("service-file import"),
                 "{language:?}: {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn reserves_go_native_service_client_and_constructor_identifiers() {
+        for declared in ["ChatClient", "NewChatClient"] {
+            let input = format!(
+                r##"
+$schema: https://json-schema.org/draft/2020-12/schema
+nexusrpc: "1.0.0"
+services:
+  Chat:
+    operations:
+      ping: {{ input: {{ $ref: "#/$defs/{declared}" }} }}
+$defs:
+  {declared}: {{ type: object, properties: {{ value: {{ type: string }} }} }}
+"##
+            );
+            let error = reject_for(Language::Go, &input);
+            assert!(
+                error.contains(declared) && error.contains("native client"),
+                "{declared}: {error}"
             );
         }
     }
@@ -13723,13 +13831,14 @@ properties:
     /// while rendering. Pin every scalar kind so a change to one copy has to be
     /// a deliberate change to the contract.
     #[test]
-    fn enum_names_lookup_key_is_the_json_wire_spelling() {
+    fn enum_names_lookup_key_is_the_canonical_json_spelling() {
         use serde_json::json;
         for (value, expected) in [
             (json!("active"), Some("active")),
             (json!(""), Some("")),
             (json!(1), Some("1")),
             (json!(-2), Some("-2")),
+            (json!(1.0), Some("1")),
             (json!(1.5), Some("1.5")),
             (json!(true), Some("true")),
             (json!(false), Some("false")),
