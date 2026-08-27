@@ -1603,9 +1603,6 @@ fn render_ts_field_checks_at_depth(
             render_ts_numeric_checks(output, value_expr, path_expr, schema, indent, true);
         }
         Some("array") => {
-            if schema.has_array_constraints() {
-                render_ts_array_checks(output, value_expr, path_expr, schema, indent, depth, true);
-            }
             if let Some(items) = schema.items.as_deref()
                 && field_needs_serialize_check(items)
             {
@@ -1640,6 +1637,9 @@ fn render_ts_field_checks_at_depth(
                 }
                 output.push_str(indent);
                 output.push_str("});\n");
+            }
+            if schema.has_array_constraints() {
+                render_ts_array_checks(output, value_expr, path_expr, schema, indent, depth, true);
             }
         }
         _ => {}

@@ -127,6 +127,14 @@ export interface Extras {
 }
 
 /**
+ * Closed array elements are enforced before the array-level predicates, so indexed
+ * violations precede minItems and uniqueItems deterministically.
+ */
+export interface ItemRules {
+  values: "fixed"[];
+}
+
+/**
  * Arbitrary string key/value labels (typed map).
  */
 export interface Labels {
@@ -1683,6 +1691,139 @@ export const extrasTransferTypeConverter =
           path: "",
           reason: `must have at most 4 properties, got ${keys.length}`,
         });
+      }
+      if (violations.length) {
+        throw __nexgenDefinitions.payloadValidationError(violations);
+      }
+      return out;
+    }
+  })();
+
+export const itemRulesTransferTypeConverter =
+  new (class implements TransferTypeConverter<ItemRules> {
+    public fromTransferType(raw: unknown): ItemRules {
+      const violations: __nexgenDefinitions.Violation[] = [];
+      if (!__nexgenDefinitions.isPlainObject(raw)) {
+        throw __nexgenDefinitions.payloadValidationError([
+          { path: "", reason: "expected object" },
+        ]);
+      }
+
+      let values: "fixed"[] = undefined as unknown as "fixed"[];
+      if (
+        !Object.prototype.hasOwnProperty.call(raw, "values") ||
+        raw["values"] === null
+      ) {
+        violations.push({ path: "values", reason: "required" });
+      } else {
+        if (!Array.isArray(raw["values"])) {
+          violations.push({ path: "values", reason: "expected array" });
+        } else {
+          values = [];
+          raw["values"].forEach((element: unknown, index: number) => {
+            let item: "fixed" = undefined as unknown as "fixed";
+            if (typeof element !== "string") {
+              violations.push({ path: `values[${index}]`, reason: "expected string" });
+            } else if (element !== "fixed") {
+              violations.push({
+                path: `values[${index}]`,
+                reason: `must equal "fixed"`,
+              });
+            } else {
+              item = element as "fixed";
+            }
+            if (item !== undefined) {
+              values!.push(item);
+            }
+          });
+          if (raw["values"].length < 3) {
+            violations.push({
+              path: "values",
+              reason: `must have at least 3 items, got ${raw["values"].length}`,
+            });
+          }
+          {
+            const seen = new Map<unknown, number>();
+            raw["values"].forEach((element, index) => {
+              if (seen.has(element)) {
+                violations.push({
+                  path: "values",
+                  reason: `duplicate items: element at index ${index} equals index ${seen.get(element)}`,
+                });
+              } else {
+                seen.set(element, index);
+              }
+            });
+          }
+        }
+      }
+
+      for (const key of Object.keys(raw)) {
+        if (key !== "values") {
+          violations.push({
+            path: __nexgenDefinitions.memberPath(key),
+            reason: "unknown field",
+          });
+        }
+      }
+
+      if (violations.length) {
+        throw __nexgenDefinitions.payloadValidationError(violations);
+      }
+      const out: ItemRules = { values };
+      return out;
+    }
+
+    public toTransferType(value: ItemRules): unknown {
+      if (!__nexgenDefinitions.isPlainObject(value)) {
+        throw __nexgenDefinitions.payloadValidationError([
+          { path: "", reason: "expected object" },
+        ]);
+      }
+      const violations: __nexgenDefinitions.Violation[] = [];
+      const out: Record<string, unknown> = Object.create(null) as Record<
+        string,
+        unknown
+      >;
+      if (value.values === undefined || value.values === null) {
+        violations.push({ path: "values", reason: "required" });
+      } else {
+        if (!Array.isArray(value.values)) {
+          violations.push({ path: "values", reason: "expected array" });
+        } else {
+          value.values.forEach((element, index) => {
+            if (!(typeof element === "string")) {
+              violations.push({ path: `values[${index}]`, reason: "expected string" });
+            } else {
+              if (element !== "fixed") {
+                violations.push({
+                  path: `values[${index}]`,
+                  reason: `must equal "fixed"`,
+                });
+              }
+            }
+          });
+          if (value.values.length < 3) {
+            violations.push({
+              path: "values",
+              reason: `must have at least 3 items, got ${value.values.length}`,
+            });
+          }
+          {
+            const seen = new Map<unknown, number>();
+            value.values.forEach((element, index) => {
+              if (seen.has(element)) {
+                violations.push({
+                  path: "values",
+                  reason: `duplicate items: element at index ${index} equals index ${seen.get(element)}`,
+                });
+              } else {
+                seen.set(element, index);
+              }
+            });
+          }
+        }
+        out["values"] = value.values;
       }
       if (violations.length) {
         throw __nexgenDefinitions.payloadValidationError(violations);
@@ -5258,6 +5399,12 @@ export const showcaseTransferTypeConverter =
           if (!Array.isArray(value.tags)) {
             violations.push({ path: "tags", reason: "expected array" });
           } else {
+            value.tags.forEach((element, index) => {
+              if (!(typeof element === "string")) {
+                violations.push({ path: `tags[${index}]`, reason: "expected string" });
+              } else {
+              }
+            });
             if (value.tags.length < 1) {
               violations.push({
                 path: "tags",
@@ -5270,12 +5417,6 @@ export const showcaseTransferTypeConverter =
                 reason: `must have at most 5 items, got ${value.tags.length}`,
               });
             }
-            value.tags.forEach((element, index) => {
-              if (!(typeof element === "string")) {
-                violations.push({ path: `tags[${index}]`, reason: "expected string" });
-              } else {
-              }
-            });
           }
           out["tags"] = value.tags;
         }
@@ -5287,6 +5428,15 @@ export const showcaseTransferTypeConverter =
           if (!Array.isArray(value.aliases)) {
             violations.push({ path: "aliases", reason: "expected array" });
           } else {
+            value.aliases.forEach((element, index) => {
+              if (!(typeof element === "string")) {
+                violations.push({
+                  path: `aliases[${index}]`,
+                  reason: "expected string",
+                });
+              } else {
+              }
+            });
             {
               const seen = new Map<unknown, number>();
               value.aliases.forEach((element, index) => {
@@ -5300,15 +5450,6 @@ export const showcaseTransferTypeConverter =
                 }
               });
             }
-            value.aliases.forEach((element, index) => {
-              if (!(typeof element === "string")) {
-                violations.push({
-                  path: `aliases[${index}]`,
-                  reason: "expected string",
-                });
-              } else {
-              }
-            });
           }
           out["aliases"] = value.aliases;
         }
@@ -5320,6 +5461,12 @@ export const showcaseTransferTypeConverter =
           if (!Array.isArray(value.roles)) {
             violations.push({ path: "roles", reason: "expected array" });
           } else {
+            value.roles.forEach((element, index) => {
+              if (!(typeof element === "string")) {
+                violations.push({ path: `roles[${index}]`, reason: "expected string" });
+              } else {
+              }
+            });
             {
               const matchCount = value.roles.filter(
                 (element) => typeof element === "string" && element === "admin",
@@ -5337,12 +5484,6 @@ export const showcaseTransferTypeConverter =
                 });
               }
             }
-            value.roles.forEach((element, index) => {
-              if (!(typeof element === "string")) {
-                violations.push({ path: `roles[${index}]`, reason: "expected string" });
-              } else {
-              }
-            });
           }
           out["roles"] = value.roles;
         }
@@ -5524,6 +5665,21 @@ export const showcaseTransferTypeConverter =
             if (!Array.isArray(value.measurements as number[])) {
               violations.push({ path: "measurements", reason: "expected array" });
             } else {
+              (value.measurements as number[]).forEach((element, index) => {
+                if (!(typeof element === "number")) {
+                  violations.push({
+                    path: `measurements[${index}]`,
+                    reason: "expected number",
+                  });
+                } else {
+                  if (!Number.isFinite(element)) {
+                    violations.push({
+                      path: `measurements[${index}]`,
+                      reason: `must be a finite number, got ${element}`,
+                    });
+                  }
+                }
+              });
               if ((value.measurements as number[]).length < 1) {
                 violations.push({
                   path: "measurements",
@@ -5543,21 +5699,6 @@ export const showcaseTransferTypeConverter =
                   }
                 });
               }
-              (value.measurements as number[]).forEach((element, index) => {
-                if (!(typeof element === "number")) {
-                  violations.push({
-                    path: `measurements[${index}]`,
-                    reason: "expected number",
-                  });
-                } else {
-                  if (!Number.isFinite(element)) {
-                    violations.push({
-                      path: `measurements[${index}]`,
-                      reason: `must be a finite number, got ${element}`,
-                    });
-                  }
-                }
-              });
             }
           }
           if (typeof value.measurements === "string") {
@@ -5936,13 +6077,13 @@ export const showcaseTransferTypeConverter =
             if (!Array.isArray(value.addressListOrLabel as Address[])) {
               violations.push({ path: "addressListOrLabel", reason: "expected array" });
             } else {
+              (value.addressListOrLabel as Address[]).forEach((element, index) => {});
               if ((value.addressListOrLabel as Address[]).length < 1) {
                 violations.push({
                   path: "addressListOrLabel",
                   reason: `must have at least 1 items, got ${(value.addressListOrLabel as Address[]).length}`,
                 });
               }
-              (value.addressListOrLabel as Address[]).forEach((element, index) => {});
             }
           }
           if (typeof value.addressListOrLabel === "string") {
@@ -6350,6 +6491,15 @@ export const showcaseTransferTypeConverter =
           if (!Array.isArray(value.nullableTags)) {
             violations.push({ path: "nullableTags", reason: "expected array" });
           } else {
+            value.nullableTags.forEach((element, index) => {
+              if (!(typeof element === "string")) {
+                violations.push({
+                  path: `nullableTags[${index}]`,
+                  reason: "expected string",
+                });
+              } else {
+              }
+            });
             if (value.nullableTags.length < 1) {
               violations.push({
                 path: "nullableTags",
@@ -6369,15 +6519,6 @@ export const showcaseTransferTypeConverter =
                 }
               });
             }
-            value.nullableTags.forEach((element, index) => {
-              if (!(typeof element === "string")) {
-                violations.push({
-                  path: `nullableTags[${index}]`,
-                  reason: "expected string",
-                });
-              } else {
-              }
-            });
           }
         }
         out["nullableTags"] = value.nullableTags;
@@ -6407,18 +6548,6 @@ export const showcaseTransferTypeConverter =
           if (!Array.isArray(value.integralMeasurements)) {
             violations.push({ path: "integralMeasurements", reason: "expected array" });
           } else {
-            {
-              const matchCount = value.integralMeasurements.filter(
-                (element) =>
-                  typeof element === "number" && Number.isSafeInteger(element),
-              ).length;
-              if (matchCount < 1) {
-                violations.push({
-                  path: "integralMeasurements",
-                  reason: "no element matches the required schema",
-                });
-              }
-            }
             value.integralMeasurements.forEach((element, index) => {
               if (!(typeof element === "number")) {
                 violations.push({
@@ -6434,6 +6563,18 @@ export const showcaseTransferTypeConverter =
                 }
               }
             });
+            {
+              const matchCount = value.integralMeasurements.filter(
+                (element) =>
+                  typeof element === "number" && Number.isSafeInteger(element),
+              ).length;
+              if (matchCount < 1) {
+                violations.push({
+                  path: "integralMeasurements",
+                  reason: "no element matches the required schema",
+                });
+              }
+            }
           }
           out["integralMeasurements"] = value.integralMeasurements;
         }

@@ -2438,16 +2438,6 @@ fn render_go_variant_validate(
     let underlying = variant.synthesized.as_deref().unwrap_or("");
     // The wrapper is a defined type over `underlying`, so every predicate reads
     // the value through a conversion back to it.
-    render_go_member_checks(
-        output,
-        "\t",
-        &format!("{underlying}(v)"),
-        "\"\"",
-        &variant.go_type,
-        UNION_VARIANT_POSITION,
-        &variant.schema,
-        true,
-    );
     if variant.schema.ty.as_ref().and_then(Value::as_str) == Some("array") {
         render_go_array_items_validate(
             output,
@@ -2462,6 +2452,16 @@ fn render_go_variant_validate(
             0,
         );
     }
+    render_go_member_checks(
+        output,
+        "\t",
+        &format!("{underlying}(v)"),
+        "\"\"",
+        &variant.go_type,
+        UNION_VARIANT_POSITION,
+        &variant.schema,
+        true,
+    );
     output.push_str("\tif len(errs) > 0 {\n\t\treturn newPayloadValidationError(errs)\n\t}\n\treturn nil\n}\n\n");
     if variant.schema.ty.as_ref().and_then(Value::as_str) == Some("array")
         && schema_requires_go_wire_conversion(&variant.schema)
@@ -2646,25 +2646,7 @@ fn render_go_scalar_variant_decode(
             return;
         }
     }
-    if underlying.starts_with("[]") {
-        // Item validation renders against a value-owned accumulator. Adapt the
-        // union dispatcher's pointer here without re-running array-level
-        // constraints against the partially converted typed slice.
-        output.push_str("\t\t{\n\t\t\tunionErrs := errs\n\t\t\terrs := *unionErrs\n");
-        render_go_array_items_validate(
-            output,
-            "\t\t\t",
-            "arr",
-            "path",
-            &variant.schema,
-            &variant.go_type,
-            UNION_VARIANT_POSITION,
-            model_names,
-            unions,
-            0,
-        );
-        output.push_str("\t\t\t*unionErrs = errs\n\t\t}\n");
-    } else {
+    if !underlying.starts_with("[]") {
         output.push_str("\t\tmergeNested(errs, path, v.Validate())\n");
     }
     output.push_str("\t\treturn v, true\n");
@@ -3243,6 +3225,20 @@ fn render_validate(
                     output.push_str("\t}\n");
                 }
             }
+            if property.ty.as_ref().and_then(Value::as_str) == Some("array") {
+                render_go_array_items_validate(
+                    output,
+                    "\t",
+                    &field,
+                    &go_violation_path_literal(json_name),
+                    property,
+                    &model.model_name,
+                    &emitted_position,
+                    model_names,
+                    unions,
+                    0,
+                );
+            }
             if property.has_array_constraints()
                 && property.ty.as_ref().and_then(Value::as_str) == Some("array")
             {
@@ -3271,20 +3267,6 @@ fn render_validate(
                     );
                     output.push_str("\t}\n");
                 }
-            }
-            if property.ty.as_ref().and_then(Value::as_str) == Some("array") {
-                render_go_array_items_validate(
-                    output,
-                    "\t",
-                    &field,
-                    &go_violation_path_literal(json_name),
-                    property,
-                    &model.model_name,
-                    &emitted_position,
-                    model_names,
-                    unions,
-                    0,
-                );
             }
             if property.reference.is_some() {
                 if by_value {
@@ -3802,15 +3784,6 @@ fn render_go_array_items_validate(
                 "{inner}if {element} == nil {{\n{inner}\terrs = append(errs, Violation{{{element_path}, \"explicit null not allowed\"}})\n{inner}}} else {{\n"
             ));
         }
-        render_go_array_checks(
-            output,
-            &value_expr,
-            &element_path,
-            non_null,
-            &nested_indent,
-            model_name,
-            &item_position,
-        );
         render_go_array_items_validate(
             output,
             &nested_indent,
@@ -3822,6 +3795,15 @@ fn render_go_array_items_validate(
             model_names,
             unions,
             level + 1,
+        );
+        render_go_array_checks(
+            output,
+            &value_expr,
+            &element_path,
+            non_null,
+            &nested_indent,
+            model_name,
+            &item_position,
         );
         if !allows_null(item) {
             output.push_str(&format!("{inner}}}\n"));
@@ -4201,6 +4183,27 @@ fn render_go_array_position_unmarshal(
         }
     }
     output.push_str(&format!("{inner}}}\n"));
+    if errs.value != "errs" && schema_requires_go_validation(item) {
+        // A union dispatcher owns its accumulator by pointer. Validate the
+        // successfully decoded typed elements before the raw array-level
+        // predicates so parse and serialize both report indexed failures first.
+        output.push_str(&format!(
+            "{inner}{{\n{inner}\tunionErrs := errs\n{inner}\terrs := *unionErrs\n"
+        ));
+        render_go_array_items_validate(
+            output,
+            &format!("{inner}\t"),
+            target,
+            path,
+            array,
+            model_name,
+            position,
+            model_names,
+            unions,
+            level,
+        );
+        output.push_str(&format!("{inner}\t*unionErrs = errs\n{inner}}}\n"));
+    }
     if array.has_array_constraints() {
         render_go_raw_array_checks(
             output, &elems, path, array, &inner, level, errs, model_name, position,
@@ -4600,16 +4603,6 @@ fn render_go_map_methods(
             output.push_str(&subject);
             output.push_str(".Validate())\n");
         } else if non_null.ty.as_ref().and_then(Value::as_str) == Some("array") {
-            render_go_member_checks(
-                output,
-                indent,
-                &subject,
-                "path",
-                type_name,
-                MAP_MEMBER_POSITION,
-                non_null,
-                true,
-            );
             render_go_array_items_validate(
                 output,
                 indent,
@@ -4621,6 +4614,16 @@ fn render_go_map_methods(
                 model_names,
                 unions,
                 0,
+            );
+            render_go_member_checks(
+                output,
+                indent,
+                &subject,
+                "path",
+                type_name,
+                MAP_MEMBER_POSITION,
+                non_null,
+                true,
             );
         } else if let Some(encoding) = content_encoding_kind(non_null) {
             output.push_str(indent);

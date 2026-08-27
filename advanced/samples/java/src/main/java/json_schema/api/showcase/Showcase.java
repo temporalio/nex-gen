@@ -2385,12 +2385,6 @@ public final class Showcase {
                 }
             }
             if (value.tags != null) {
-                if (value.tags.size() < 1) {
-                    violations.add(new Violation("tags", "must have at least 1 items, got " + value.tags.size()));
-                }
-                if (value.tags.size() > 5) {
-                    violations.add(new Violation("tags", "must have at most 5 items, got " + value.tags.size()));
-                }
                 for (int validationIndex0 = 0; validationIndex0 < value.tags.size(); validationIndex0++) {
                     String validationValue0 = value.tags.get(validationIndex0);
                     if (validationValue0 == null) {
@@ -2398,8 +2392,21 @@ public final class Showcase {
                     } else {
                     }
                 }
+                if (value.tags.size() < 1) {
+                    violations.add(new Violation("tags", "must have at least 1 items, got " + value.tags.size()));
+                }
+                if (value.tags.size() > 5) {
+                    violations.add(new Violation("tags", "must have at most 5 items, got " + value.tags.size()));
+                }
             }
             if (value.aliases != null) {
+                for (int validationIndex0 = 0; validationIndex0 < value.aliases.size(); validationIndex0++) {
+                    String validationValue0 = value.aliases.get(validationIndex0);
+                    if (validationValue0 == null) {
+                        violations.add(new Violation("aliases" + "[" + validationIndex0 + "]", "explicit null not allowed"));
+                    } else {
+                    }
+                }
                 java.util.Map<Object, Integer> seen = new java.util.HashMap<>();
                 for (int index = 0; index < value.aliases.size(); index++) {
                     Object element = value.aliases.get(index);
@@ -2410,15 +2417,15 @@ public final class Showcase {
                         seen.put(element, index);
                     }
                 }
-                for (int validationIndex0 = 0; validationIndex0 < value.aliases.size(); validationIndex0++) {
-                    String validationValue0 = value.aliases.get(validationIndex0);
+            }
+            if (value.roles != null) {
+                for (int validationIndex0 = 0; validationIndex0 < value.roles.size(); validationIndex0++) {
+                    String validationValue0 = value.roles.get(validationIndex0);
                     if (validationValue0 == null) {
-                        violations.add(new Violation("aliases" + "[" + validationIndex0 + "]", "explicit null not allowed"));
+                        violations.add(new Violation("roles" + "[" + validationIndex0 + "]", "explicit null not allowed"));
                     } else {
                     }
                 }
-            }
-            if (value.roles != null) {
                 int matchCount = 0;
                 for (String element : value.roles) {
                     if (element != null && (true) && ("admin".equals(element))) {
@@ -2430,13 +2437,6 @@ public final class Showcase {
                 }
                 if (matchCount > 2) {
                     violations.add(new Violation("roles", "too many matching items: at most 2, got " + matchCount));
-                }
-                for (int validationIndex0 = 0; validationIndex0 < value.roles.size(); validationIndex0++) {
-                    String validationValue0 = value.roles.get(validationIndex0);
-                    if (validationValue0 == null) {
-                        violations.add(new Violation("roles" + "[" + validationIndex0 + "]", "explicit null not allowed"));
-                    } else {
-                    }
                 }
             }
             if (value.idOrName != null) {
@@ -2625,6 +2625,13 @@ public final class Showcase {
                 }
             }
             if (value.nullableTags != null) {
+                for (int validationIndex0 = 0; validationIndex0 < value.nullableTags.size(); validationIndex0++) {
+                    String validationValue0 = value.nullableTags.get(validationIndex0);
+                    if (validationValue0 == null) {
+                        violations.add(new Violation("nullableTags" + "[" + validationIndex0 + "]", "explicit null not allowed"));
+                    } else {
+                    }
+                }
                 if (value.nullableTags.size() < 1) {
                     violations.add(new Violation("nullableTags", "must have at least 1 items, got " + value.nullableTags.size()));
                 }
@@ -2638,13 +2645,6 @@ public final class Showcase {
                         seen.put(element, index);
                     }
                 }
-                for (int validationIndex0 = 0; validationIndex0 < value.nullableTags.size(); validationIndex0++) {
-                    String validationValue0 = value.nullableTags.get(validationIndex0);
-                    if (validationValue0 == null) {
-                        violations.add(new Violation("nullableTags" + "[" + validationIndex0 + "]", "explicit null not allowed"));
-                    } else {
-                    }
-                }
             }
             if (value.integralMeasurements != null) {
                 for (int finiteIndex0 = 0; finiteIndex0 < value.integralMeasurements.size(); finiteIndex0++) {
@@ -2655,6 +2655,13 @@ public final class Showcase {
                         }
                     }
                 }
+                for (int validationIndex0 = 0; validationIndex0 < value.integralMeasurements.size(); validationIndex0++) {
+                    Double validationValue0 = value.integralMeasurements.get(validationIndex0);
+                    if (validationValue0 == null) {
+                        violations.add(new Violation("integralMeasurements" + "[" + validationIndex0 + "]", "explicit null not allowed"));
+                    } else {
+                    }
+                }
                 int matchCount = 0;
                 for (Double element : value.integralMeasurements) {
                     if (element != null && (Double.isFinite(element) && element == Math.rint(element) && element >= -(double) SpecNumbers.INTEGER_CAP && element <= (double) SpecNumbers.INTEGER_CAP) && (true)) {
@@ -2663,13 +2670,6 @@ public final class Showcase {
                 }
                 if (matchCount < 1) {
                     violations.add(new Violation("integralMeasurements", "no element matches the required schema"));
-                }
-                for (int validationIndex0 = 0; validationIndex0 < value.integralMeasurements.size(); validationIndex0++) {
-                    Double validationValue0 = value.integralMeasurements.get(validationIndex0);
-                    if (validationValue0 == null) {
-                        violations.add(new Violation("integralMeasurements" + "[" + validationIndex0 + "]", "explicit null not allowed"));
-                    } else {
-                    }
                 }
             }
             if (value.byFive != null) {

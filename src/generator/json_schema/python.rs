@@ -2455,7 +2455,6 @@ fn render_py_field_checks(
             render_py_numeric_checks(output, value_expr, path_expr, schema, indent);
         }
         Some("array") => {
-            render_py_array_checks(output, value_expr, path_expr, schema, indent, true)?;
             if let Some(items) = schema.items.as_deref()
                 && py_field_needs_serialize_check(items)
             {
@@ -2504,6 +2503,7 @@ fn render_py_field_checks(
                     output.push_str(&checks);
                 }
             }
+            render_py_array_checks(output, value_expr, path_expr, schema, indent, true)?;
         }
         _ => {}
     }

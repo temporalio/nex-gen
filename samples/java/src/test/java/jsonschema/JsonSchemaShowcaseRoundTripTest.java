@@ -30,6 +30,7 @@ import json_schema.definitions.showcase.Circle;
 import json_schema.definitions.showcase.ContactJava;
 import json_schema.definitions.showcase.Extras;
 import json_schema.definitions.showcase.Labels;
+import json_schema.definitions.showcase.ItemRules;
 import json_schema.definitions.showcase.LinkNote;
 import json_schema.definitions.showcase.Metrics;
 import json_schema.definitions.showcase.Nicknames;
@@ -1385,6 +1386,15 @@ final class JsonSchemaShowcaseRoundTripTest {
                         java.util.Arrays.asList("dup", "dup"))));
         assertTrue(messageChain(array).contains("duplicate items: element at index 1 equals index 0"), messageChain(array));
 
+        // Closed item membership is enforced before array-level predicates in
+        // both directions, yielding one deterministic aggregate.
+        Exception itemParse = assertThrows(Exception.class, () ->
+                MAPPER.readValue("{\"values\":[\"bad\",\"bad\"]}", ItemRules.class));
+        assertItemRuleOrder(messageChain(itemParse));
+        RuntimeException itemSerialize = assertThrows(RuntimeException.class, () ->
+                CONVERTER.toPayload(new ItemRules(java.util.Arrays.asList("bad", "bad"))));
+        assertItemRuleOrder(messageChain(itemSerialize));
+
         // Closed value-set (const/enum) members carry no serialize-side check:
         // their value class can only hold a known constant, so an out-of-set
         // value cannot be constructed in memory (a compile-time guarantee). The
@@ -1437,5 +1447,15 @@ final class JsonSchemaShowcaseRoundTripTest {
             }
         }
         return builder.toString();
+    }
+
+    private static void assertItemRuleOrder(String text) {
+        String[] parts = {"values[0]", "values[1]", "must have at least 3 items", "duplicate items"};
+        int prior = -1;
+        for (String part : parts) {
+            int index = text.indexOf(part);
+            assertTrue(index > prior, text);
+            prior = index;
+        }
     }
 }
