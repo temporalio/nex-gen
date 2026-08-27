@@ -10,7 +10,7 @@ use serde_json::Value;
 use crate::error::{Error, Result};
 // The P15 collision pass names every synthesized identifier through the emitter's
 // own naming helpers, so the load-time check cannot drift from what is emitted.
-use crate::generator::json_schema::python;
+use crate::generator::json_schema::{python, typescript};
 use crate::language::Language;
 use crate::spec::{
     ApiSpec, ExternalTypeBindingSpec, ExternalTypeSpec, JsonModelBindingSpec, JsonModelSpec,
@@ -1382,11 +1382,11 @@ fn validate_raw_document_grammar(path: &Path, doc: &Document) -> Result<()> {
                     "service `{service_name}`: `description` must not be empty or whitespace-only"
                 ));
             }
-            if let Some(control) = service.description.as_deref().and_then(|description| {
-                description
-                    .chars()
-                    .find(|character| *character < ' ' && !matches!(character, '\n' | '\t'))
-            }) {
+            if let Some(control) = service
+                .description
+                .as_deref()
+                .and_then(first_forbidden_doc_control)
+            {
                 return reject(format!(
                     "service `{service_name}`: `description` must not contain control character U+{:04X}",
                     control as u32
@@ -1419,11 +1419,11 @@ fn validate_raw_document_grammar(path: &Path, doc: &Document) -> Result<()> {
                         "operation `{operation_name}`: `description` must not be empty or whitespace-only"
                     ));
                 }
-                if let Some(control) = operation.description.as_deref().and_then(|description| {
-                    description
-                        .chars()
-                        .find(|character| *character < ' ' && !matches!(character, '\n' | '\t'))
-                }) {
+                if let Some(control) = operation
+                    .description
+                    .as_deref()
+                    .and_then(first_forbidden_doc_control)
+                {
                     return reject(format!(
                         "operation `{operation_name}`: `description` must not contain control character U+{:04X}",
                         control as u32
@@ -3175,6 +3175,11 @@ fn validate_default(path: &Path, schema: &Schema, context: &str) -> Result<()> {
 /// contribute a validator; these are pure shape checks (see the feature specs).
 /// `title` becomes the doc-comment summary line, `deprecated` a native marker;
 /// `examples` and `$comment` are accepted and dropped (never leak into output).
+fn first_forbidden_doc_control(text: &str) -> Option<char> {
+    text.chars()
+        .find(|character| *character < ' ' && !matches!(character, '\n' | '\t'))
+}
+
 fn validate_annotations(path: &Path, schema: &Schema, context: &str) -> Result<()> {
     let reject = |reason: String| {
         Err(Error::InvalidJsonSchema {
@@ -3194,6 +3199,12 @@ fn validate_annotations(path: &Path, schema: &Schema, context: &str) -> Result<(
                 "{context}: `title` must be a single line (it is the doc-comment summary); move the prose to `description`"
             ));
         }
+        if let Some(control) = first_forbidden_doc_control(title) {
+            return reject(format!(
+                "{context}: `title` must not contain control character U+{:04X}; remove it or replace it with printable prose",
+                control as u32
+            ));
+        }
     }
     // `description` — the doc body; may span paragraphs, but an empty or
     // whitespace-only string renders a dead doc body (see
@@ -3204,10 +3215,7 @@ fn validate_annotations(path: &Path, schema: &Schema, context: &str) -> Result<(
                 "{context}: `description` must not be empty or whitespace-only; drop it, or give it text"
             ));
         }
-        if let Some(control) = description
-            .chars()
-            .find(|character| *character < ' ' && !matches!(character, '\n' | '\t'))
-        {
+        if let Some(control) = first_forbidden_doc_control(description) {
             return reject(format!(
                 "{context}: `description` must not contain control character U+{:04X}; remove it or replace it with printable prose",
                 control as u32
@@ -8326,11 +8334,10 @@ fn collect_ts_inline_union_serializers<'a>(
             let Some(branches) = &property.one_of else {
                 continue;
             };
-            // A referenced object branch is serialized through the target
-            // model's converter. This is the common inline-union helper path;
-            // array branches with nested conversions are conservatively
-            // included as well so mode-specific materialization cannot change
-            // the loader's accepted namespace.
+            // The emitter synthesizes a helper only for a referenced object
+            // branch or an array branch whose element mapper changes the wire
+            // value. The shared target predicate deliberately does not treat
+            // assertion-only formats (for example `email`) as transforms.
             let needs_helper = branches.iter().any(|branch| {
                 branch.reference.as_ref().is_some_and(|reference| {
                     let reference = reference.trim_start_matches('.');
@@ -8341,7 +8348,12 @@ fn collect_ts_inline_union_serializers<'a>(
                             candidate.schema.ty.as_ref().and_then(Value::as_str) == Some("object")
                         })
                         .unwrap_or(true)
-                }) || ts_schema_may_need_serialization(branch)
+                }) || (branch.ty.as_ref().and_then(Value::as_str) == Some("array")
+                    && typescript::schema_serializes_non_identity(
+                        &serde_json::to_value(branch)
+                            .expect("validated JSON Schema re-serializes for TypeScript planning"),
+                        None,
+                    ))
             });
             if !needs_helper {
                 continue;
@@ -8359,16 +8371,6 @@ fn collect_ts_inline_union_serializers<'a>(
         }
     }
     Ok(())
-}
-
-fn ts_schema_may_need_serialization(schema: &Schema) -> bool {
-    schema.reference.is_some()
-        || schema.extra.contains_key("contentEncoding")
-        || schema.extra.contains_key("format")
-        || schema
-            .items
-            .as_deref()
-            .is_some_and(ts_schema_may_need_serialization)
 }
 
 /// Validate the identifiers that actually coexist in a generated service file.
@@ -14729,6 +14731,44 @@ $defs:
             .expect("x-ts-name moves the inline union serializer with its member");
     }
 
+    #[test]
+    fn inline_union_serializer_manifest_matches_typescript_wire_transforms() {
+        let assertion_only = r##"
+$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  left: { $ref: "#/$defs/Foo" }
+  right: { $ref: "#/$defs/FooBar" }
+$defs:
+  Foo:
+    type: object
+    properties:
+      barBaz:
+        oneOf:
+          - { type: array, items: { type: string, format: email } }
+          - { type: boolean }
+  FooBar:
+    type: object
+    properties:
+      baz:
+        oneOf:
+          - { type: array, items: { type: string, format: email } }
+          - { type: integer }
+"##;
+        parse_for(Language::TypeScript, assertion_only)
+            .expect("email validation does not emit either colliding serializer helper");
+
+        let transforming = assertion_only.replace(
+            "type: string, format: email",
+            "type: string, contentEncoding: base64",
+        );
+        let error = reject_for(Language::TypeScript, &transforming);
+        assert!(
+            error.contains("collision") && error.contains("serializeFooBarBaz"),
+            "{error}"
+        );
+    }
+
     /// A union's synthesized variant wrapper shares the package namespace with
     /// authored types.
     #[test]
@@ -15734,7 +15774,7 @@ properties:
         );
     }
 
-    // --- `description` annotation (validate_annotations) ---
+    // --- rendered documentation annotations (validate_annotations) ---
 
     #[test]
     fn rejects_empty_description() {
@@ -15749,7 +15789,15 @@ properties:
     }
 
     #[test]
-    fn rejects_control_characters_in_descriptions() {
+    fn rejects_control_characters_in_documentation() {
+        let title = doc_reject(
+            "$schema: https://json-schema.org/draft/2020-12/schema\ntype: string\ntitle: \"bad \\0 title\"",
+        );
+        assert!(
+            title.contains("`title`") && title.contains("control character U+0000"),
+            "{title}"
+        );
+
         let schema = doc_reject(
             "$schema: https://json-schema.org/draft/2020-12/schema\ntype: string\ndescription: \"bad \\0 prose\"",
         );

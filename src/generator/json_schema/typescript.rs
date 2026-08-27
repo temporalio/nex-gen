@@ -82,6 +82,86 @@ fn active_repr() -> TsDateTimeTypes {
     TS_DATE_TIME_TYPES.with(Cell::get)
 }
 
+fn value_schema_type_includes(schema: &Value, ty: &str) -> bool {
+    match schema.get("type") {
+        Some(Value::String(value)) => value == ty,
+        Some(Value::Array(values)) => values.iter().any(|value| value.as_str() == Some(ty)),
+        _ => false,
+    }
+}
+
+fn value_temporal_kind_direct(schema: &Value) -> Option<TemporalKind> {
+    if !value_schema_type_includes(schema, "string") {
+        return None;
+    }
+    schema
+        .get("format")
+        .and_then(Value::as_str)
+        .and_then(TemporalKind::from_name)
+}
+
+fn value_content_encoding_direct(schema: &Value) -> bool {
+    value_schema_type_includes(schema, "string")
+        && schema
+            .get("contentEncoding")
+            .and_then(Value::as_str)
+            .and_then(crate::json_schema::content_encoding::Encoding::from_name)
+            .is_some()
+}
+
+fn temporal_serializes_non_identity(kind: TemporalKind, repr: Option<TsDateTimeTypes>) -> bool {
+    match repr {
+        Some(repr) => matches!(
+            (kind, repr),
+            (TemporalKind::DateTime, TsDateTimeTypes::Date)
+                | (TemporalKind::DateTime, TsDateTimeTypes::Temporal)
+                | (TemporalKind::Date, TsDateTimeTypes::Temporal)
+                | (TemporalKind::Duration, TsDateTimeTypes::Temporal)
+        ),
+        // P15 is checked before a rendering mode is selected. Reserve an
+        // identifier if any supported mode can emit it, keeping the accepted
+        // namespace stable across `--date-time-types`.
+        None => !matches!(kind, TemporalKind::Time),
+    }
+}
+
+/// Whether the TypeScript wire serializer changes this schema's in-memory
+/// value. The emitter supplies its active temporal representation; P15 supplies
+/// `None` to ask whether any supported representation can change it. Keeping
+/// both callers on this predicate prevents ordinary assertion-only formats
+/// such as `email` from reserving helpers that are never emitted.
+pub(crate) fn schema_serializes_non_identity(
+    schema: &Value,
+    repr: Option<TsDateTimeTypes>,
+) -> bool {
+    if schema.get("$ref").and_then(Value::as_str).is_some() {
+        return true;
+    }
+    if let Some(kind) = value_temporal_kind_direct(schema) {
+        return temporal_serializes_non_identity(kind, repr);
+    }
+    if value_content_encoding_direct(schema) {
+        return true;
+    }
+    if let Some(branches) = schema.get("oneOf").and_then(Value::as_array)
+        && branches
+            .iter()
+            .any(|branch| value_schema_type_includes(branch, "null"))
+        && let Some(non_null) = branches
+            .iter()
+            .find(|branch| !value_schema_type_includes(branch, "null"))
+        && (non_null.get("$ref").and_then(Value::as_str).is_some()
+            || value_temporal_kind_direct(non_null).is_some()
+            || value_content_encoding_direct(non_null))
+    {
+        return schema_serializes_non_identity(non_null, repr);
+    }
+    value_schema_type_includes(schema, "array")
+        && schema
+            .get("items")
+            .is_some_and(|items| schema_serializes_non_identity(items, repr))
+}
+
 /// The materialized `TemporalKind` of a schema that is directly a temporal string
 /// (the `oneOf[…, null]` wrapper is handled by the callers' recursion).
 /// The materialized `contentEncoding` of a schema that is directly a bytes
@@ -3038,7 +3118,12 @@ fn ts_inline_union_serializer(
     let union = classify_ts_union(property, models)?;
     if !union.variants.iter().any(|variant| {
         variant.converter.is_some()
-            || (variant.is_array && serialize_expr(&variant.schema, "value") != "value")
+            || (variant.is_array
+                && schema_serializes_non_identity(
+                    &serde_json::to_value(&variant.schema)
+                        .expect("decoded TypeScript schema re-serializes"),
+                    Some(active_repr()),
+                ))
     }) {
         return None;
     }

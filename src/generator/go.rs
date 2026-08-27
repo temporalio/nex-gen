@@ -3428,7 +3428,8 @@ pub(in crate::generator) fn render_go_doc_comment(output: &mut String, indent: &
     fn neutralize_directive(line: &str) -> String {
         let trimmed = line.trim_start();
         let leading = &line[..line.len() - trimmed.len()];
-        if let Some(rest) = trimmed.strip_prefix("+build") {
+        if trimmed == "+build" || trimmed.starts_with("+build ") {
+            let rest = &trimmed["+build".len()..];
             format!("{leading}\\+build{rest}")
         } else if let Some(rest) = trimmed.strip_prefix("go:") {
             format!("{leading}go\\:{rest}")

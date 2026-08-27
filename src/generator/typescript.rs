@@ -3298,7 +3298,7 @@ fn render_typescript_default_type_import_if_used(
     name: &str,
     package: &str,
 ) {
-    if !contains_identifier_outside_comments(source, name) {
+    if !contains_identifier_outside_literals(source, name) {
         return;
     }
     output.push_str("import type ");
@@ -3308,40 +3308,107 @@ fn render_typescript_default_type_import_if_used(
     output.push_str("';\n");
 }
 
-/// Type-only default imports must be driven by emitted code, not authored
-/// prose. In particular, a description mentioning Java's `Long` type must not
-/// add an undeclared `long` package dependency to TypeScript output.
-fn contains_identifier_outside_comments(source: &str, identifier: &str) -> bool {
-    let bytes = source.as_bytes();
-    let mut code = String::with_capacity(source.len());
+/// Type-only default imports must be driven by emitted type expressions, not
+/// authored prose or wire literals. Generated modules use only ordinary
+/// strings/templates and regex literals, so this small lexer can distinguish a
+/// real `Long` type occurrence without treating the exact const string
+/// `"Long"` (or a pattern containing it) as a package dependency.
+fn contains_identifier_outside_literals(source: &str, identifier: &str) -> bool {
+    let chars = source.char_indices().collect::<Vec<_>>();
     let mut index = 0;
-    while index < bytes.len() {
-        if bytes[index..].starts_with(b"//") {
-            while index < bytes.len() && bytes[index] != b'\n' {
-                code.push(' ');
-                index += 1;
+    let mut can_start_regex = true;
+    while index < chars.len() {
+        let (start_byte, ch) = chars[index];
+        match ch {
+            '\'' | '"' | '`' => {
+                index = skip_typescript_string(&chars, index, ch);
+                can_start_regex = false;
+                continue;
             }
-        } else if bytes[index..].starts_with(b"/*") {
-            code.push_str("  ");
-            index += 2;
-            while index < bytes.len() && !bytes[index..].starts_with(b"*/") {
-                code.push(if bytes[index] == b'\n' { '\n' } else { ' ' });
-                index += 1;
-            }
-            if index < bytes.len() {
-                code.push_str("  ");
+            '/' if chars.get(index + 1).is_some_and(|(_, next)| *next == '/') => {
                 index += 2;
+                while index < chars.len() && chars[index].1 != '\n' {
+                    index += 1;
+                }
+                continue;
             }
-        } else {
-            let character = source[index..]
-                .chars()
-                .next()
-                .expect("index remains on a UTF-8 boundary");
-            code.push(character);
-            index += character.len_utf8();
+            '/' if chars.get(index + 1).is_some_and(|(_, next)| *next == '*') => {
+                index += 2;
+                while index + 1 < chars.len() {
+                    if chars[index].1 == '*' && chars[index + 1].1 == '/' {
+                        index += 2;
+                        break;
+                    }
+                    index += 1;
+                }
+                continue;
+            }
+            '/' if can_start_regex => {
+                index = skip_typescript_regex(&chars, index);
+                can_start_regex = false;
+                continue;
+            }
+            '/' => {
+                index += 1;
+                can_start_regex = true;
+                continue;
+            }
+            _ => {}
         }
+
+        if is_typescript_identifier_start(ch) {
+            let mut end = index + 1;
+            while end < chars.len() && is_typescript_identifier_char(chars[end].1) {
+                end += 1;
+            }
+            let end_byte = chars
+                .get(end)
+                .map(|(byte, _)| *byte)
+                .unwrap_or(source.len());
+            let token = &source[start_byte..end_byte];
+            if token == identifier {
+                return true;
+            }
+            can_start_regex = matches!(
+                token,
+                "return"
+                    | "throw"
+                    | "case"
+                    | "delete"
+                    | "void"
+                    | "typeof"
+                    | "instanceof"
+                    | "in"
+                    | "of"
+                    | "yield"
+                    | "await"
+                    | "else"
+                    | "do"
+            );
+            index = end;
+            continue;
+        }
+
+        if ch.is_ascii_digit() {
+            index += 1;
+            while index < chars.len()
+                && (chars[index].1.is_ascii_alphanumeric() || matches!(chars[index].1, '.' | '_'))
+            {
+                index += 1;
+            }
+            can_start_regex = false;
+            continue;
+        }
+
+        if ch.is_whitespace() {
+            index += 1;
+            continue;
+        }
+
+        can_start_regex = !matches!(ch, ')' | ']' | '}' | '.');
+        index += 1;
     }
-    contains_identifier(&code, identifier)
+    false
 }
 
 fn contains_identifier(source: &str, identifier: &str) -> bool {
@@ -3428,6 +3495,34 @@ fn skip_typescript_string(chars: &[(usize, char)], start: usize, quote: char) ->
             escaped = true;
         } else if ch == quote {
             return index + 1;
+        }
+        index += 1;
+    }
+    index
+}
+
+fn skip_typescript_regex(chars: &[(usize, char)], start: usize) -> usize {
+    let mut index = start + 1;
+    let mut escaped = false;
+    let mut in_class = false;
+    while index < chars.len() {
+        let ch = chars[index].1;
+        if escaped {
+            escaped = false;
+        } else if ch == '\\' {
+            escaped = true;
+        } else if ch == '[' {
+            in_class = true;
+        } else if ch == ']' {
+            in_class = false;
+        } else if ch == '/' && !in_class {
+            index += 1;
+            while index < chars.len() && is_typescript_identifier_char(chars[index].1) {
+                index += 1;
+            }
+            return index;
+        } else if ch == '\n' || ch == '\r' {
+            return index;
         }
         index += 1;
     }
@@ -6158,6 +6253,7 @@ fn is_typescript_keyword(name: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use super::contains_identifier_outside_literals;
     use std::collections::BTreeMap;
     use std::fs;
     use std::path::Path;
@@ -6174,6 +6270,34 @@ mod tests {
     use crate::language::Language;
     use crate::spec::ApiSpecTree;
     use crate::spec::SupportFragmentSpec;
+
+    #[test]
+    fn default_type_import_scanner_ignores_literals_and_comments() {
+        for source in [
+            "const value = 'Long';",
+            "const value = \"Long\";",
+            "const value = `Long`;",
+            "const value = /Long/;",
+            "const value = /[L]ong\\//u;",
+            "// Long\nconst value = 1;",
+            "/* Long */ const value = 1;",
+        ] {
+            assert!(
+                !contains_identifier_outside_literals(source, "Long"),
+                "literal/comment was treated as code: {source}"
+            );
+        }
+        for source in [
+            "let value: Long;",
+            "return Long.fromValue(value);",
+            "const ratio = value / Long.MAX_VALUE;",
+        ] {
+            assert!(
+                contains_identifier_outside_literals(source, "Long"),
+                "code identifier was missed: {source}"
+            );
+        }
+    }
 
     fn sample_input_path(root: &std::path::Path) -> PathBuf {
         root.join("advanced/samples/inputs/workflow-service.wit")

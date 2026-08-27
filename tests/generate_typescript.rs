@@ -116,6 +116,16 @@ $defs:
       name: { type: string, minLength: 2 }
 "##;
 
+const UNION_ARRAY_ASSERTION_ONLY_SCHEMA: &str = r#"$schema: https://json-schema.org/draft/2020-12/schema
+title: AssertionOnly
+type: object
+properties:
+  contacts:
+    oneOf:
+      - { type: array, items: { type: string, format: email } }
+      - { type: boolean }
+"#;
+
 /// `number` finiteness is an implicit wire constraint at every materialized
 /// position, including branches, nested elements, and typed-map members.
 const NON_FINITE_SCHEMA: &str = r##"$schema: https://json-schema.org/draft/2020-12/schema
@@ -1280,6 +1290,39 @@ fn typescript_json_recursively_converts_union_array_branches() {
     assert!(
         rendered.contains("collect(violations, `[${index}]`, error)"),
         "indexed child failure collection missing\n{rendered}"
+    );
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+#[test]
+fn typescript_json_does_not_emit_union_serializer_for_assertion_only_format() {
+    let temp_dir = unique_output_path("ts-json-union-array-assertion-only");
+    fs::create_dir_all(&temp_dir).unwrap();
+    let input_path = temp_dir.join("probe.yaml");
+    fs::write(&input_path, UNION_ARRAY_ASSERTION_ONLY_SCHEMA).unwrap();
+    let output_path = temp_dir.join("probe");
+
+    generate_to_file(&GenerateRequest {
+        language: nexgen::language::Language::TypeScript,
+        input_paths: vec![input_path],
+        support_paths: Vec::new(),
+        descriptor_paths: Vec::new(),
+        output_path: output_path.clone(),
+        format: false,
+        generate_native_api: false,
+        java_package_name: None,
+        ts_date_time_types: Default::default(),
+    })
+    .unwrap();
+    let rendered = fs::read_to_string(output_path.join("models.ts")).unwrap();
+
+    assert!(
+        rendered.contains("contacts?: string[] | boolean;"),
+        "{rendered}"
+    );
+    assert!(
+        !rendered.contains("function serializeAssertionOnlyContacts"),
+        "{rendered}"
     );
     fs::remove_dir_all(temp_dir).unwrap();
 }
@@ -2968,7 +3011,7 @@ additionalProperties: true
 }
 
 #[test]
-fn typescript_json_description_does_not_trigger_long_import() {
+fn typescript_json_prose_and_wire_literals_do_not_trigger_long_import() {
     let temp_dir = unique_output_path("typescript-json-description-long");
     fs::create_dir_all(&temp_dir).unwrap();
     let input_path = temp_dir.join("description.yaml");
@@ -2980,6 +3023,7 @@ description: Java emits Long here, but TypeScript does not use that type.
 type: object
 properties:
   value: { type: integer }
+  marker: { type: string, const: Long }
 "#,
     )
     .unwrap();
@@ -2999,6 +3043,7 @@ properties:
 
     let models = fs::read_to_string(output_path.join("models.ts")).unwrap();
     assert!(models.contains("Java emits Long here"), "{models}");
+    assert!(models.contains("\"Long\""), "{models}");
     assert!(!models.contains("from 'long'"), "{models}");
     fs::remove_dir_all(temp_dir).unwrap();
 }
