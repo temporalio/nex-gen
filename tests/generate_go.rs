@@ -1717,7 +1717,11 @@ fn go_rejects_inputs_flattening_to_the_same_module_file() {
         .to_string();
     assert!(error.contains("full_name.go"), "{error}");
     assert!(
-        error.contains("conflicts with another generated file"),
+        error.contains("full_name.json") && error.contains("full/name.json"),
+        "{error}"
+    );
+    assert!(
+        error.contains("rename one input file or directory"),
         "{error}"
     );
     fs::remove_dir_all(temp_dir).unwrap();

@@ -717,6 +717,7 @@ fn generate_branch_tree(
     let tree_models = collect_tree_json_models(&leaves);
 
     let mut files = BTreeMap::new();
+    let mut file_origins = BTreeMap::new();
     let mut warnings = Vec::new();
 
     for leaf in &leaves {
@@ -732,7 +733,13 @@ fn generate_branch_tree(
         // the flat package.
         let file_name = go_flat_module_file_name(&leaf.module_path);
         for (_, contents) in generated.files {
-            insert_generated_file(&mut files, file_name.clone(), contents)?;
+            insert_generated_file_with_origin(
+                &mut files,
+                &mut file_origins,
+                file_name.clone(),
+                contents,
+                leaf.source_path.clone(),
+            )?;
         }
     }
 
@@ -805,6 +812,38 @@ fn insert_generated_file(
     if files.insert(path.clone(), contents).is_some() {
         return Err(Error::GeneratedFileConflict { path });
     }
+    Ok(())
+}
+
+fn insert_generated_file_with_origin(
+    files: &mut BTreeMap<PathBuf, String>,
+    origins: &mut BTreeMap<PathBuf, PathBuf>,
+    path: PathBuf,
+    contents: String,
+    origin: PathBuf,
+) -> Result<()> {
+    if path.is_absolute()
+        || path
+            .components()
+            .any(|component| component == std::path::Component::ParentDir)
+    {
+        return Err(Error::InvalidGeneratedPath {
+            path,
+            reason: "generated Go tree paths must be relative and stay within the output directory"
+                .to_string(),
+        });
+    }
+    if let Some(first_origin) = origins.get(&path) {
+        return Err(Error::GeneratedFileOriginConflict {
+            path,
+            first_origin: first_origin.clone(),
+            second_origin: origin,
+            remedy: "rename one input file or directory so their flattened Go file names differ"
+                .to_string(),
+        });
+    }
+    origins.insert(path.clone(), origin);
+    files.insert(path, contents);
     Ok(())
 }
 
