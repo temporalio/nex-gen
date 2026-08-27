@@ -26,7 +26,11 @@ use unsafe_libyaml::{
 
 #[derive(Clone, Debug)]
 enum Node {
-    Scalar { text: String, plain: bool },
+    Scalar {
+        text: String,
+        plain: bool,
+        yaml_string: bool,
+    },
     Sequence(Vec<Node>),
     Mapping(Vec<(Node, Node)>),
     Alias(String),
@@ -37,6 +41,7 @@ enum Event {
     Scalar {
         text: String,
         plain: bool,
+        yaml_string: bool,
         anchor: Option<String>,
     },
     Alias(String),
@@ -120,8 +125,13 @@ impl Documents {
         let local_kind =
             self.effective_kind(source_path, canonical_path, node, &mut BTreeSet::new());
         let effective_kind = intersect_kinds(inherited_kind, local_kind);
+        let nullable_projection = nullable_non_null_node(entries).is_some();
         if effective_kind == Some(SchemaKind::Integer) {
-            if let Some(literal) = fractional_assertion_keyword(entries) {
+            // `const`/`enum` are illegal siblings of every `oneOf`, including
+            // nullability; leave those to the owning sibling diagnostic. The
+            // wrapper-level scalar keyword that legitimately projects is
+            // `default`.
+            if !nullable_projection && let Some(literal) = fractional_assertion_keyword(entries) {
                 return Some(literal);
             }
             // `default` is an annotation with last-wins merge semantics. Check
@@ -236,9 +246,9 @@ impl Documents {
             return None;
         };
         let mut kind = mapping_value(entries, "type")
-            .and_then(scalar)
+            .and_then(yaml_string_scalar)
             .and_then(schema_kind);
-        if let Some(reference) = mapping_value(entries, "$ref").and_then(scalar)
+        if let Some(reference) = mapping_value(entries, "$ref").and_then(yaml_string_scalar)
             && let Some((target_source_path, target_canonical_path, target, identity)) =
                 self.resolve_reference(source_path, canonical_path, reference)
             && visiting_refs.insert(identity.clone())
@@ -262,6 +272,15 @@ impl Documents {
                 );
             }
         }
+        // The only `oneOf` that projects to one effective kind is the exact
+        // nullability wrapper: one exact `{type: "null"}` branch and one non-null
+        // branch, in either order. General unions remain unclassified.
+        if let Some(non_null) = nullable_non_null_node(entries) {
+            kind = intersect_kinds(
+                kind,
+                self.effective_kind(source_path, canonical_path, non_null, visiting_refs),
+            );
+        }
         kind
     }
 
@@ -276,7 +295,7 @@ impl Documents {
             return None;
         };
         let mut default = None;
-        if let Some(reference) = mapping_value(entries, "$ref").and_then(scalar)
+        if let Some(reference) = mapping_value(entries, "$ref").and_then(yaml_string_scalar)
             && let Some((target_source_path, target_canonical_path, target, identity)) =
                 self.resolve_reference(source_path, canonical_path, reference)
             && visiting_refs.insert(identity.clone())
@@ -452,9 +471,18 @@ fn parse_events(input: &str) -> Option<Vec<Event>> {
                 YAML_SCALAR_EVENT => {
                     let scalar = raw.data.scalar;
                     let bytes = slice::from_raw_parts(scalar.value, scalar.length as usize);
+                    let text = String::from_utf8_lossy(bytes).into_owned();
+                    let plain = scalar.style == YAML_PLAIN_SCALAR_STYLE;
+                    let tag = c_string(scalar.tag);
                     Some(Event::Scalar {
-                        text: String::from_utf8_lossy(bytes).into_owned(),
-                        plain: scalar.style == YAML_PLAIN_SCALAR_STYLE,
+                        yaml_string: tag.as_deref() == Some("tag:yaml.org,2002:str")
+                            || !plain
+                            || matches!(
+                                serde_yaml::from_str::<serde_yaml::Value>(&text),
+                                Ok(serde_yaml::Value::String(_))
+                            ),
+                        text,
+                        plain,
                         anchor: c_string(scalar.anchor),
                     })
                 }
@@ -512,11 +540,13 @@ fn parse_node(
         Event::Scalar {
             text,
             plain,
+            yaml_string,
             anchor,
         } => {
             let node = Node::Scalar {
                 text: text.clone(),
                 plain: *plain,
+                yaml_string: *yaml_string,
             };
             remember_anchor(anchors, anchor, &node);
             Some(node)
@@ -557,21 +587,47 @@ fn remember_anchor(anchors: &mut BTreeMap<String, Node>, anchor: &Option<String>
     }
 }
 
-fn scalar(node: &Node) -> Option<&str> {
+fn yaml_string_scalar(node: &Node) -> Option<&str> {
     match node {
-        Node::Scalar { text, .. } => Some(text),
+        Node::Scalar {
+            text,
+            yaml_string: true,
+            ..
+        } => Some(text),
         Node::Alias(anchor) => {
             let _ = anchor;
             None
         }
-        Node::Sequence(_) | Node::Mapping(_) => None,
+        Node::Scalar { .. } | Node::Sequence(_) | Node::Mapping(_) => None,
     }
 }
 
 fn mapping_value<'a>(entries: &'a [(Node, Node)], key: &str) -> Option<&'a Node> {
-    entries
-        .iter()
-        .find_map(|(candidate, value)| (scalar(candidate) == Some(key)).then_some(value))
+    entries.iter().find_map(|(candidate, value)| {
+        (yaml_string_scalar(candidate) == Some(key)).then_some(value)
+    })
+}
+
+fn nullable_non_null_node(entries: &[(Node, Node)]) -> Option<&Node> {
+    let Node::Sequence(branches) = mapping_value(entries, "oneOf")? else {
+        return None;
+    };
+    let [first, second] = branches.as_slice() else {
+        return None;
+    };
+    match (is_exact_null_schema(first), is_exact_null_schema(second)) {
+        (true, false) => Some(second),
+        (false, true) => Some(first),
+        _ => None,
+    }
+}
+
+fn is_exact_null_schema(node: &Node) -> bool {
+    let Node::Mapping(entries) = node else {
+        return false;
+    };
+    entries.len() == 1
+        && mapping_value(entries, "type").and_then(yaml_string_scalar) == Some("null")
 }
 
 fn fractional_assertion_keyword(entries: &[(Node, Node)]) -> Option<String> {
@@ -591,10 +647,16 @@ fn fractional_assertion_keyword(entries: &[(Node, Node)]) -> Option<String> {
 }
 
 fn fractional_numeric_scalar(node: &Node) -> Option<String> {
-    let Node::Scalar { text, plain } = node else {
+    let Node::Scalar {
+        text,
+        plain,
+        yaml_string,
+    } = node
+    else {
         return None;
     };
     if !plain
+        || *yaml_string
         || !matches!(
             serde_yaml::from_str::<serde_yaml::Value>(text),
             Ok(serde_yaml::Value::Number(_))
@@ -659,6 +721,10 @@ mod tests {
             fractional_integer_literal("type: integer\nconst: 4503599627370496.0"),
             None
         );
+        assert_eq!(
+            fractional_integer_literal("type: integer\nconst: !!str 4503599627370496.5"),
+            None
+        );
     }
 
     #[test]
@@ -713,6 +779,53 @@ mod tests {
     }
 
     #[test]
+    fn projects_only_the_exact_nullable_integer_union() {
+        for one_of in [
+            "oneOf:\n  - { type: integer }\n  - { type: \"null\" }",
+            "oneOf:\n  - { type: \"null\" }\n  - { type: integer }",
+        ] {
+            assert!(
+                fractional_integer_literal(&format!("{one_of}\ndefault: 4503599627370496.5"))
+                    .is_some()
+            );
+            assert_eq!(
+                fractional_integer_literal(&format!(
+                    "type: array\nitems:\n{}\ncontains: {{ const: 4503599627370496.5 }}",
+                    one_of
+                        .lines()
+                        .map(|line| format!("  {line}"))
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                )),
+                Some("`const` value 4503599627370496.5".to_string())
+            );
+            assert_eq!(
+                fractional_integer_literal(&format!("{one_of}\ndefault: 4503599627370496.0")),
+                None
+            );
+            for illegal_sibling in ["const: 4503599627370496.5", "enum: [4503599627370496.5]"] {
+                assert_eq!(
+                    fractional_integer_literal(&format!("{one_of}\n{illegal_sibling}")),
+                    None
+                );
+            }
+        }
+
+        // Neither a genuine sum type nor a malformed null branch projects a
+        // scalar kind into the wrapper.
+        for one_of in [
+            "oneOf:\n  - { type: integer }\n  - { type: number }",
+            "oneOf:\n  - { type: integer }\n  - { type: \"null\", description: not-exact }",
+            "oneOf:\n  - { type: integer }\n  - { type: null }",
+        ] {
+            assert_eq!(
+                fractional_integer_literal(&format!("{one_of}\ndefault: 4503599627370496.5")),
+                None
+            );
+        }
+    }
+
+    #[test]
     fn follows_nested_and_aliased_schema_nodes() {
         assert!(
             fractional_integer_literal(
@@ -733,6 +846,12 @@ mod tests {
         assert_eq!(
             fractional_integer_literal(
                 "allOf:\n  - { type: integer }\n  - examples:\n      - type: integer\n        const: 4503599627370496.5"
+            ),
+            None
+        );
+        assert_eq!(
+            fractional_integer_literal(
+                "oneOf:\n  - { type: integer }\n  - { type: \"null\" }\ndefault: 4503599627370496.0\nexamples:\n  - { type: integer, const: 4503599627370496.5 }"
             ),
             None
         );
