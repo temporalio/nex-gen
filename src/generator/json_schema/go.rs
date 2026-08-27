@@ -319,31 +319,11 @@ fn go_pattern_var_name(pattern: &str) -> String {
     name
 }
 
-/// Emits each semantic package-level compiled predicate at most once. Patterns
-/// use their lossless encoded spelling; curated formats and encodings use their
-/// fixed names. None of these declarations depends on a member/derived position.
-fn render_go_pattern_vars(
-    output: &mut String,
-    _model: &PlannedJsonType,
-    schema: &Schema,
-    declared: &mut BTreeSet<String>,
-) {
-    // A typed map's member carries the same string refinements a property does,
-    // under the `Value` position name the loader uses for a member shape.
-    if let Ok(Some(value)) = typed_map_value_schema(schema) {
-        render_go_string_vars_recursive(output, &value, declared);
-    }
-    // `propertyNames` asserts the key, and its regexes compile once at package
-    // init like every other pinned pattern — never inside the key loop.
-    if let Some(names) = &schema.property_names {
-        render_go_string_vars(output, names, declared);
-    }
-    let Some(properties) = &schema.properties else {
-        return;
-    };
-    for (_json_name, property) in properties {
-        render_go_string_vars_recursive(output, property, declared);
-    }
+/// Collects every semantic package-level compiled predicate in one schema.
+/// The declarations are emitted from `definitions.go`, whose census spans the
+/// whole flattened package rather than one input leaf.
+fn render_go_pattern_vars(output: &mut String, schema: &Schema, declared: &mut BTreeSet<String>) {
+    render_go_string_vars_recursive(output, schema, declared);
 }
 
 fn render_go_string_vars_recursive(
@@ -352,11 +332,29 @@ fn render_go_string_vars_recursive(
     declared: &mut BTreeSet<String>,
 ) {
     render_go_string_vars(output, schema, declared);
+    // A typed map's member carries the same string refinements a property does.
+    if let Ok(Some(value)) = typed_map_value_schema(schema) {
+        render_go_string_vars_recursive(output, &value, declared);
+    }
+    // `propertyNames` asserts the key and compiles once at package init.
+    if let Some(names) = &schema.property_names {
+        render_go_string_vars_recursive(output, names, declared);
+    }
     if let Some(matcher) = &schema.contains {
         render_go_matcher_vars(output, matcher, declared);
     }
     if let Some(items) = &schema.items {
         render_go_string_vars_recursive(output, items, declared);
+    }
+    if let Some(branches) = &schema.one_of {
+        for branch in branches {
+            render_go_string_vars_recursive(output, branch, declared);
+        }
+    }
+    if let Some(properties) = &schema.properties {
+        for property in properties.values() {
+            render_go_string_vars_recursive(output, property, declared);
+        }
     }
 }
 
@@ -1616,38 +1614,13 @@ fn render_external_models(
     // still resolves to the sealed interface rather than to a bare struct name.
     let declared_unions = collect_go_unions(models, &resolvable, model_names)?;
     let unions = collect_go_unions(&resolvable, &resolvable, model_names)?;
-    let mut declared_regexes = BTreeSet::new();
     if !declared_unions.is_empty() {
         output.push('\n');
-        render_go_unions(
-            &mut output,
-            &declared_unions,
-            models,
-            model_names,
-            &mut declared_regexes,
-        )?;
-    }
-    if models.iter().any(|model| model_uses_temporal(model)) {
-        output.push('\n');
-        render_go_temporal_helpers(&mut output);
-    }
-    if models
-        .iter()
-        .any(|model| model_uses_content_encoding(model))
-    {
-        output.push('\n');
-        render_go_content_encoding_helpers(&mut output);
+        render_go_unions(&mut output, &declared_unions, models, model_names)?;
     }
     for model in models {
         output.push('\n');
-        render_model(
-            &mut output,
-            model,
-            models,
-            model_names,
-            &unions,
-            &mut declared_regexes,
-        )?;
+        render_model(&mut output, model, models, model_names, &unions)?;
     }
     // Package use is read off the emitted *code*: a doc comment carries the
     // schema's own prose, and an unused import is a Go compile error, so a
@@ -1692,12 +1665,23 @@ fn render_external_models(
     })
 }
 
-/// Renders the shared `definitions.go` file: the schema-independent runtime
-/// (`Violation`/payload-validation failure, `parseSpecInteger`, the (de)serialize
-/// helpers) defined once in the models' own package. The identifiers stay
-/// unexported because the generated model files reference them within the same
-/// package.
-pub(in crate::generator) fn render_definitions_file(package_name: &str) -> String {
+/// Renders the shared `definitions.go` file: the schema-independent runtime and
+/// the semantic regex predicates whose census must span the whole flattened Go
+/// package. The identifiers stay unexported because model files reference them
+/// within that package.
+pub(in crate::generator) fn render_definitions_file(
+    package_name: &str,
+    models: &[PlannedJsonType],
+) -> Result<String> {
+    let uses_temporal = models.iter().any(model_uses_temporal);
+    let uses_content_encoding = models.iter().any(model_uses_content_encoding);
+    let mut semantic_helpers = String::new();
+    let mut declared = BTreeSet::new();
+    for model in models {
+        let schema = decode_schema(model)?;
+        render_go_pattern_vars(&mut semantic_helpers, &schema, &mut declared);
+    }
+
     let mut output = String::new();
     output.push_str(crate::generator::go::GENERATED_HEADER);
     output.push_str("\n\n");
@@ -1706,16 +1690,40 @@ pub(in crate::generator) fn render_definitions_file(package_name: &str) -> Strin
     output.push_str("\n\n");
     output.push_str("import (\n");
     output.push_str("\t\"bytes\"\n");
+    if uses_content_encoding {
+        output.push_str("\t\"encoding/base64\"\n");
+    }
     output.push_str("\t\"encoding/json\"\n");
     output.push_str("\t\"errors\"\n");
+    if uses_temporal || uses_content_encoding {
+        output.push_str("\t\"fmt\"\n");
+    }
     output.push_str("\t\"math\"\n");
     output.push_str("\t\"reflect\"\n");
+    if !semantic_helpers.is_empty() || uses_temporal || uses_content_encoding {
+        output.push_str("\t\"regexp\"\n");
+    }
     output.push_str("\t\"strconv\"\n");
     output.push_str("\t\"strings\"\n");
+    if uses_temporal {
+        output.push_str("\t\"time\"\n");
+    }
     output.push_str("\t\"go.temporal.io/sdk/temporal\"\n");
     output.push_str(")\n\n");
     render_validator_core(&mut output);
-    output
+    if uses_temporal {
+        output.push('\n');
+        render_go_temporal_helpers(&mut output);
+    }
+    if uses_content_encoding {
+        output.push('\n');
+        render_go_content_encoding_helpers(&mut output);
+    }
+    if !semantic_helpers.is_empty() {
+        output.push('\n');
+        output.push_str(&semantic_helpers);
+    }
+    Ok(output)
 }
 
 fn render_validator_core(output: &mut String) {
@@ -2339,7 +2347,6 @@ fn render_go_unions(
     unions: &BTreeMap<String, GoUnion>,
     models: &[&PlannedJsonType],
     model_names: &BTreeMap<String, String>,
-    declared_regexes: &mut BTreeSet<String>,
 ) -> Result<()> {
     for union in unions.values() {
         let union_schema = models
@@ -2364,10 +2371,6 @@ fn render_go_unions(
 
         for variant in &union.variants {
             if let Some(underlying) = &variant.synthesized {
-                // The compiled-regex vars the wrapper's `Validate` references for
-                // a `pattern`/`format` the branch declares, keyed by the wrapper
-                // type itself (`fooStringPattern`).
-                render_go_string_vars_recursive(output, &variant.schema, declared_regexes);
                 render_go_schema_doc(
                     output,
                     "",
@@ -2679,7 +2682,6 @@ fn render_model(
     _models: &[&PlannedJsonType],
     model_names: &BTreeMap<String, String>,
     unions: &BTreeMap<String, GoUnion>,
-    declared_regexes: &mut BTreeSet<String>,
 ) -> Result<()> {
     if let Some(reference) = bare_ref_target(model) {
         output.push_str("type ");
@@ -2700,7 +2702,6 @@ fn render_model(
     } else {
         None
     };
-    render_go_pattern_vars(output, model, &schema, declared_regexes);
     render_go_schema_doc(
         output,
         "",

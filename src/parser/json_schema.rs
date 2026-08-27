@@ -8842,6 +8842,19 @@ pub(crate) fn build_name_manifest(
             )?;
             validate_member_scope(language, model.full_name.as_str(), &model.schema)?;
         }
+        if language == Language::Go {
+            let mut helpers = BTreeSet::new();
+            for model in ns_models.iter().filter(|model| in_scope(&model.module_key)) {
+                collect_go_semantic_helper_idents(&model.schema, false, &mut helpers);
+            }
+            for ident in helpers {
+                top.insert(
+                    language,
+                    ident.clone(),
+                    format!("generated semantic predicate `{ident}`"),
+                )?;
+            }
+        }
         // The fixed runtime boilerplate each generator emits into (or imports
         // into) every module that carries models shares this top-level scope, so
         // a user type/service named after one is a P15 clash — reject it at load
@@ -9228,6 +9241,78 @@ fn validate_identifier_namespace(language: Language, spec: &ApiSpec) -> Result<(
 /// verbatim across all four targets.
 fn recase_type_name(_language: Language, name: &str) -> String {
     name.to_string()
+}
+
+fn go_semantic_pattern_ident(pattern: &str) -> String {
+    let mut name = String::from("_nexgenJsonSchemaPattern");
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    for byte in pattern.as_bytes() {
+        name.push(HEX[(byte >> 4) as usize] as char);
+        name.push(HEX[(byte & 0x0f) as usize] as char);
+    }
+    name
+}
+
+/// Mirrors the Go package-level semantic predicate census. These names are
+/// schema-derived but package-scoped, so they participate in the same run-wide
+/// P15 namespace as authored `x-go-name` bindings.
+fn collect_go_semantic_helper_idents(
+    schema: &Schema,
+    matcher: bool,
+    helpers: &mut BTreeSet<String>,
+) {
+    let is_string = schema.ty.as_ref().and_then(Value::as_str) == Some("string");
+    if matcher || is_string {
+        if let Some(pattern) = schema.extra.get("pattern").and_then(Value::as_str) {
+            helpers.insert(go_semantic_pattern_ident(pattern));
+        }
+        if let Some(format) = schema.extra.get("format").and_then(Value::as_str)
+            && crate::json_schema::format::check_for(format).is_some()
+        {
+            helpers.insert(format!(
+                "_nexgenJsonSchema{}Format",
+                recase_member(Language::Go, format)
+            ));
+        }
+        if !matcher
+            && let Some(encoding) = schema
+                .extra
+                .get("contentEncoding")
+                .and_then(Value::as_str)
+                .and_then(crate::json_schema::content_encoding::Encoding::from_name)
+        {
+            helpers.insert(format!(
+                "_nexgenJsonSchema{}ContentEncoding",
+                recase_member(Language::Go, encoding.name())
+            ));
+        }
+    }
+    if let Some(properties) = &schema.properties {
+        for property in properties.values() {
+            collect_go_semantic_helper_idents(property, false, helpers);
+        }
+    }
+    if let Some(items) = &schema.items {
+        collect_go_semantic_helper_idents(items, false, helpers);
+    }
+    if let Some(branches) = &schema.one_of {
+        for branch in branches {
+            collect_go_semantic_helper_idents(branch, false, helpers);
+        }
+    }
+    if let Some(value) = &schema.additional_properties
+        && value.is_object()
+        && let Ok(value_schema) = serde_json::from_value::<Schema>(value.clone())
+    {
+        collect_go_semantic_helper_idents(&value_schema, false, helpers);
+    }
+    for (keyword, matcher) in [("propertyNames", false), ("contains", true)] {
+        if let Some(value) = schema.extra.get(keyword)
+            && let Ok(child) = serde_json::from_value::<Schema>(value.clone())
+        {
+            collect_go_semantic_helper_idents(&child, matcher, helpers);
+        }
+    }
 }
 
 /// Adds the package/module-scoped identifiers a model synthesizes to the
