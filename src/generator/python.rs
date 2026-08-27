@@ -2911,6 +2911,10 @@ impl PythonModelHoists {
             .is_some_and(|names| names.contains(name))
     }
 
+    fn names_hoisted_from(&self, module_path: &ModulePath) -> impl Iterator<Item = &String> {
+        self.hoisted.get(module_path).into_iter().flatten()
+    }
+
     pub(crate) fn files(&self) -> &BTreeMap<PathBuf, String> {
         &self.files
     }
@@ -4558,6 +4562,17 @@ fn render_python_module_model_runtime_imports(
     wrote_previous_imports: bool,
 ) -> bool {
     let mut imports = BTreeMap::<String, BTreeSet<String>>::new();
+    // A same-module reference becomes cross-module after its target is hoisted.
+    // `module_imports` cannot contain that authored-local edge, so seed it from
+    // the hoist plan and the rendered body's actual symbol use.
+    for name in model_hoists.names_hoisted_from(&api_plan.module_path) {
+        if body_uses_python_symbol(body, name) {
+            imports
+                .entry(root_python_model_hoist_module(&api_plan.module_path))
+                .or_default()
+                .insert(name.clone());
+        }
+    }
     for (module_path, names) in &api_plan.data.module_imports {
         for name in names {
             if !body_uses_python_symbol(body, name) {

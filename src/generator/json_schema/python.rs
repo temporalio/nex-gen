@@ -416,20 +416,60 @@ impl JsonModelHoistPlan {
             graph.insert(full_name.clone(), refs);
         }
 
+        // Hoist whole strongly-connected components, not merely the endpoints
+        // of cross-module edges. An SCC member whose adjacent edges happen to be
+        // intra-module still moves with its siblings; leaving it behind creates
+        // a runtime NameError when it names a class that moved to `_recursive`.
         let mut hoisted_full_names = BTreeSet::new();
-        for (source_name, (source_module, _)) in &models {
-            for target_name in graph.get(source_name).into_iter().flatten() {
-                let Some((target_module, _)) = models.get(target_name) else {
-                    continue;
-                };
-                if source_module == target_module {
-                    continue;
-                }
-                if json_model_can_reach(target_name, source_name, &graph, &mut BTreeSet::new()) {
-                    hoisted_full_names.insert(source_name.clone());
-                    hoisted_full_names.insert(target_name.clone());
-                }
+        for source_name in models.keys() {
+            let component = models
+                .keys()
+                .filter(|target_name| {
+                    json_model_reaches(source_name, target_name, &graph)
+                        && json_model_reaches(target_name, source_name, &graph)
+                })
+                .cloned()
+                .collect::<BTreeSet<_>>();
+            let modules = component
+                .iter()
+                .filter_map(|name| models.get(name).map(|(module, _)| module))
+                .collect::<BTreeSet<_>>();
+            if modules.len() > 1 {
+                hoisted_full_names.extend(component);
             }
+        }
+
+        // Avoid recreating a module-level import cycle through a leaf dependency:
+        // if `_recursive` needs a model from module M while another model in M
+        // imports a hoisted class, move that dependency into `_recursive` too.
+        // Iterate because moving one dependency can expose the same shape at its
+        // own outgoing edges.
+        loop {
+            let consumer_modules = graph
+                .iter()
+                .filter(|(source, targets)| {
+                    !hoisted_full_names.contains(*source)
+                        && targets
+                            .iter()
+                            .any(|target| hoisted_full_names.contains(target))
+                })
+                .filter_map(|(source, _)| models.get(source).map(|(module, _)| module.clone()))
+                .collect::<BTreeSet<_>>();
+            let additions = hoisted_full_names
+                .iter()
+                .flat_map(|source| graph.get(source).into_iter().flatten())
+                .filter(|target| !hoisted_full_names.contains(*target))
+                .filter(|target| {
+                    models
+                        .get(*target)
+                        .is_some_and(|(module, _)| consumer_modules.contains(module))
+                })
+                .cloned()
+                .collect::<BTreeSet<_>>();
+            if additions.is_empty() {
+                break;
+            }
+            hoisted_full_names.extend(additions);
         }
 
         let mut hoisted = BTreeMap::<ModulePath, BTreeSet<String>>::new();
@@ -617,7 +657,18 @@ fn json_schema_ref_full_name(reference: &str) -> Option<String> {
         .map(|(_, fragment)| fragment)
         .unwrap_or(reference);
     let name = fragment.strip_prefix("/$defs/")?;
-    Some(name.replace("~1", "/").replace("~0", "~"))
+    // Planning has already resolved and decoded each RFC 6901 token. Decoding
+    // this full-name identity a second time corrupts authored `~1`/`~0` text and
+    // drops the graph edge for an otherwise valid escaped `$defs` name.
+    Some(name.to_string())
+}
+
+fn json_model_reaches(
+    source: &str,
+    target: &str,
+    graph: &BTreeMap<String, BTreeSet<String>>,
+) -> bool {
+    json_model_can_reach(source, target, graph, &mut BTreeSet::new())
 }
 
 fn json_model_can_reach(
