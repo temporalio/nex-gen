@@ -1775,7 +1775,8 @@ export const itemRulesTransferTypeConverter =
     }
 
     public toTransferType(value: ItemRules): unknown {
-      if (!__nexgenDefinitions.isPlainObject(value)) {
+      const candidate: unknown = value;
+      if (!__nexgenDefinitions.isPlainObject(candidate)) {
         throw __nexgenDefinitions.payloadValidationError([
           { path: "", reason: "expected object" },
         ]);
