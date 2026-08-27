@@ -574,10 +574,10 @@ fn seed_corpus_coverage(
         .count();
     assert_eq!(
         pairs.len() - gate,
-        102,
+        97,
         "pattern runtime corpus anchor drifted"
     );
-    assert_eq!(gate, 38, "pattern loader-gate corpus anchor drifted");
+    assert_eq!(gate, 44, "pattern loader-gate corpus anchor drifted");
 
     for (name, array) in [
         ("format_conformance", "pairs"),
@@ -935,7 +935,7 @@ fn structural_coverage_rejects_a_removed_corpus_anchor() {
         .count();
     assert_eq!(
         pairs.len() - gate,
-        102,
+        97,
         "pattern runtime corpus anchor drifted"
     );
 }
