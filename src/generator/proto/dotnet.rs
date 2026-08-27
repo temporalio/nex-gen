@@ -581,12 +581,34 @@ fn render_model_from_wire_method(
             support_namespace,
         ));
     }
+    let mut has_constructor_argument = !required_fields.is_empty();
+    for (field_name, field, _) in model.sourced_fields() {
+        if has_constructor_argument {
+            output.push_str(", ");
+        }
+        has_constructor_argument = true;
+        output.push_str(&field_from_wire_expr(
+            model,
+            field_name,
+            field,
+            &format!("wire.{}", csharp_type_name(field_name)),
+            api_plan,
+            support_namespace,
+        ));
+    }
     output.push(')');
     let init_fields = model
         .fields
         .iter()
-        .filter(|(_, field)| !field.required)
-        .filter(|(_, field)| field.visibility != crate::spec::RecordFieldVisibility::Omitted)
+        .filter(|(_, field)| {
+            !field.required || matches!(field.visibility, RecordFieldVisibility::Sourced { .. })
+        })
+        .filter(|(_, field)| {
+            !matches!(
+                field.visibility,
+                RecordFieldVisibility::Omitted | RecordFieldVisibility::Sourced { .. }
+            )
+        })
         .collect::<Vec<_>>();
     if init_fields.is_empty() {
         output.push_str(";\n");

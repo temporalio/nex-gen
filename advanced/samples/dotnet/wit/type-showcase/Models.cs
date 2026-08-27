@@ -62,31 +62,31 @@ namespace Nexgen.TypeShowcase
     }
 
     [GeneratedCode("nexgen", null)]
-    internal class DeactivateRequest
+    internal record DeactivateRequest
     {
         internal DeactivateRequest(string userId)
         {
             UserId = userId;
         }
 
-        public string UserId { get; }
+        public string UserId { get; init; }
         public string? Reason { get; init; }
     }
 
     [GeneratedCode("nexgen", null)]
-    internal class GetUserRequest
+    internal record GetUserRequest
     {
         internal GetUserRequest(string userId)
         {
             UserId = userId;
         }
 
-        public string UserId { get; }
+        public string UserId { get; init; }
         public string? ConsistencyToken { get; init; }
     }
 
     [GeneratedCode("nexgen", null)]
-    public class PostalAddress
+    public record PostalAddress
     {
         public PostalAddress(string street, string city, string country)
         {
@@ -95,14 +95,14 @@ namespace Nexgen.TypeShowcase
             Country = country;
         }
 
-        public string Street { get; }
-        public string City { get; }
-        public string Country { get; }
+        public string Street { get; init; }
+        public string City { get; init; }
+        public string Country { get; init; }
         public (double, double)? Coordinates { get; init; }
     }
 
     [GeneratedCode("nexgen", null)]
-    internal class RecordSyncRequest
+    internal record RecordSyncRequest
     {
         internal RecordSyncRequest(string userId, SyncReport report)
         {
@@ -110,12 +110,12 @@ namespace Nexgen.TypeShowcase
             Report = report;
         }
 
-        public string UserId { get; }
-        public SyncReport Report { get; }
+        public string UserId { get; init; }
+        public SyncReport Report { get; init; }
     }
 
     [GeneratedCode("nexgen", null)]
-    internal class RenameRequest
+    internal record RenameRequest
     {
         internal RenameRequest(string userId, string displayName)
         {
@@ -123,12 +123,12 @@ namespace Nexgen.TypeShowcase
             DisplayName = displayName;
         }
 
-        public string UserId { get; }
-        public string DisplayName { get; }
+        public string UserId { get; init; }
+        public string DisplayName { get; init; }
     }
 
     [GeneratedCode("nexgen", null)]
-    internal class SetProfileRequest
+    internal record SetProfileRequest
     {
         internal SetProfileRequest(string userId, UserProfile profile)
         {
@@ -136,12 +136,12 @@ namespace Nexgen.TypeShowcase
             Profile = profile;
         }
 
-        public string UserId { get; }
-        public UserProfile Profile { get; }
+        public string UserId { get; init; }
+        public UserProfile Profile { get; init; }
     }
 
     [GeneratedCode("nexgen", null)]
-    public class SyncReport
+    public record SyncReport
     {
         public SyncReport(IReadOnlyList<(double, double)> route, IReadOnlyList<NexusResult<string, string>> attempts, IReadOnlyDictionary<string, NexusResult<string, string>> regionStatus)
         {
@@ -150,13 +150,13 @@ namespace Nexgen.TypeShowcase
             RegionStatus = regionStatus;
         }
 
-        public IReadOnlyList<(double, double)> Route { get; }
-        public IReadOnlyList<NexusResult<string, string>> Attempts { get; }
-        public IReadOnlyDictionary<string, NexusResult<string, string>> RegionStatus { get; }
+        public IReadOnlyList<(double, double)> Route { get; init; }
+        public IReadOnlyList<NexusResult<string, string>> Attempts { get; init; }
+        public IReadOnlyDictionary<string, NexusResult<string, string>> RegionStatus { get; init; }
     }
 
     [GeneratedCode("nexgen", null)]
-    internal class UpdateEmailRequest
+    internal record UpdateEmailRequest
     {
         internal UpdateEmailRequest(string userId, string email)
         {
@@ -164,12 +164,12 @@ namespace Nexgen.TypeShowcase
             Email = email;
         }
 
-        public string UserId { get; }
-        public string Email { get; }
+        public string UserId { get; init; }
+        public string Email { get; init; }
     }
 
     [GeneratedCode("nexgen", null)]
-    public class UserProfile
+    public record UserProfile
     {
         public UserProfile(IReadOnlyList<string> tags, IReadOnlyDictionary<string, string> metadata, UserCapability capabilities, NexusResult<string, string> syncState, NotificationTarget notificationTarget)
         {
@@ -180,11 +180,11 @@ namespace Nexgen.TypeShowcase
             NotificationTarget = notificationTarget;
         }
 
-        public IReadOnlyList<string> Tags { get; }
-        public IReadOnlyDictionary<string, string> Metadata { get; }
-        public UserCapability Capabilities { get; }
-        public NexusResult<string, string> SyncState { get; }
-        public NotificationTarget NotificationTarget { get; }
+        public IReadOnlyList<string> Tags { get; init; }
+        public IReadOnlyDictionary<string, string> Metadata { get; init; }
+        public UserCapability Capabilities { get; init; }
+        public NexusResult<string, string> SyncState { get; init; }
+        public NotificationTarget NotificationTarget { get; init; }
         public PostalAddress? Address { get; init; }
     }
 

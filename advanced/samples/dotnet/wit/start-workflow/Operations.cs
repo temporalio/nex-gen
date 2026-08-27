@@ -77,7 +77,7 @@ namespace Nexgen.StartWorkflowService
         [GeneratedCode("nexgen", null)]
         public static Task<StartedWorkflow> StartWorkflowAsync(StartWorkflowOptions options)
         {
-            var request = new StartWorkflowRequest(options.Workflow, options.WorkflowId, options.TaskQueue)
+            var request = new StartWorkflowRequest(options.Workflow, options.WorkflowId, options.TaskQueue, Nexgen.Support.TemporalWorkflowContext.WorkflowNamespace())
             {
                 WorkflowStartDelay = options.WorkflowStartDelay,
             };
@@ -96,7 +96,7 @@ namespace Nexgen.StartWorkflowService
         [GeneratedCode("nexgen", null)]
         public static Task<StartedWorkflow> RestartWorkflowAsync(RestartWorkflowOptions options)
         {
-            var request = new StartWorkflowRequest(options.Workflow, options.WorkflowId, options.TaskQueue)
+            var request = new StartWorkflowRequest(options.Workflow, options.WorkflowId, options.TaskQueue, Nexgen.Support.TemporalWorkflowContext.WorkflowNamespace())
             {
                 WorkflowStartDelay = options.WorkflowStartDelay,
             };
@@ -115,7 +115,7 @@ namespace Nexgen.StartWorkflowService
         [GeneratedCode("nexgen", null)]
         public static Task<CancelWorkflowResponse> CancelWorkflowAsync(CancelWorkflowOptions options)
         {
-            var request = new CancelWorkflowRequest(options.WorkflowExecution)
+            var request = new CancelWorkflowRequest(options.WorkflowExecution, Nexgen.Support.TemporalWorkflowContext.WorkflowNamespace())
             {
                 Reason = options.Reason,
             };

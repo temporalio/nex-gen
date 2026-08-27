@@ -23,7 +23,7 @@ namespace Nexgen.GenericModelService
     }
 
     [GeneratedCode("nexgen", null)]
-    public class GenericRequest<ContextT>
+    public record GenericRequest<ContextT>
     {
         public GenericRequest(ContextT context, IReadOnlyList<ContextT> contexts, IReadOnlyDictionary<string, ContextT> byName, Inner<ContextT> nested)
         {
@@ -33,14 +33,14 @@ namespace Nexgen.GenericModelService
             Nested = nested;
         }
 
-        public ContextT Context { get; }
-        public IReadOnlyList<ContextT> Contexts { get; }
-        public IReadOnlyDictionary<string, ContextT> ByName { get; }
-        public Inner<ContextT> Nested { get; }
+        public ContextT Context { get; init; }
+        public IReadOnlyList<ContextT> Contexts { get; init; }
+        public IReadOnlyDictionary<string, ContextT> ByName { get; init; }
+        public Inner<ContextT> Nested { get; init; }
     }
 
     [GeneratedCode("nexgen", null)]
-    public class GenericResponse<ContextT, OutputT, MetadataT>
+    public record GenericResponse<ContextT, OutputT, MetadataT>
     {
         public GenericResponse(ContextT context, OperationCompletionResult<OutputT> completion)
         {
@@ -48,42 +48,42 @@ namespace Nexgen.GenericModelService
             Completion = completion;
         }
 
-        public ContextT Context { get; }
-        public OperationCompletionResult<OutputT> Completion { get; }
+        public ContextT Context { get; init; }
+        public OperationCompletionResult<OutputT> Completion { get; init; }
         public MetadataT? Metadata { get; init; }
     }
 
     [GeneratedCode("nexgen", null)]
-    public class Inner<ContextT>
+    public record Inner<ContextT>
     {
         public Inner(ContextT value)
         {
             Value = value;
         }
 
-        public ContextT Value { get; }
+        public ContextT Value { get; init; }
     }
 
     [GeneratedCode("nexgen", null)]
-    public class OperationCompletionFailure
+    public record OperationCompletionFailure
     {
         public OperationCompletionFailure(string message)
         {
             Message = message;
         }
 
-        public string Message { get; }
+        public string Message { get; init; }
     }
 
     [GeneratedCode("nexgen", null)]
-    public class OperationCompletionSuccess<OutputT>
+    public record OperationCompletionSuccess<OutputT>
     {
         public OperationCompletionSuccess(OutputT output)
         {
             Output = output;
         }
 
-        public OutputT Output { get; }
+        public OutputT Output { get; init; }
     }
 
 }
