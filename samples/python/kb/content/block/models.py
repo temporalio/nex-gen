@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+# pyright: reportUnnecessaryComparison=false, reportUnnecessaryIsInstance=false, reportUnreachable=false
 import dataclasses
 import typing
 import typing_extensions

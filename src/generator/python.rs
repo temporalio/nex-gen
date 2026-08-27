@@ -2265,6 +2265,7 @@ fn render_record_models(
         export_sort_keys: BTreeMap::new(),
         declared_type_parameters: type_parameters,
         allows_private_wire_access: false,
+        has_dynamic_runtime_guards: false,
     })
 }
 
@@ -2905,6 +2906,9 @@ pub(in crate::generator) struct RenderedModelFragments {
     pub(in crate::generator) export_sort_keys: BTreeMap<String, (String, usize)>,
     pub(in crate::generator) declared_type_parameters: BTreeSet<String>,
     pub(in crate::generator) allows_private_wire_access: bool,
+    /// The backend deliberately revalidates values beyond their static model
+    /// annotations at the payload boundary.
+    pub(in crate::generator) has_dynamic_runtime_guards: bool,
 }
 
 impl RenderedModelFragments {
@@ -2924,6 +2928,7 @@ impl RenderedModelFragments {
         }
         self.module_imports.extend(other.module_imports);
         self.allows_private_wire_access |= other.allows_private_wire_access;
+        self.has_dynamic_runtime_guards |= other.has_dynamic_runtime_guards;
         for (module, names) in other.relative_imports {
             self.relative_imports
                 .entry(module)
@@ -4067,6 +4072,11 @@ fn render_models_module(
 
     let mut output = String::new();
     render_generated_file_header(&mut output);
+    if model_fragments.has_dynamic_runtime_guards {
+        output.push_str(
+            "\n# pyright: reportUnnecessaryComparison=false, reportUnnecessaryIsInstance=false, reportUnreachable=false",
+        );
+    }
     output.push('\n');
     let import_scan_body = if model_hoists.is_none() && api_plan.data.module_imports.is_empty() {
         body.clone()
