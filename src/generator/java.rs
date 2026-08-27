@@ -210,7 +210,7 @@ fn render_service_file(
             .into_iter()
             .flatten()
         {
-            if let Some((pkg, class)) = io_type(Some(ty), module, base_package) {
+            if let Some((pkg, class)) = io_type(Some(ty), module, base_package, all_models) {
                 io_packages_by_class.entry(class).or_default().insert(pkg);
             }
         }
