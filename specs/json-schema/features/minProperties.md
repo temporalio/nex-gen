@@ -70,20 +70,15 @@ another object). **P12.2** names the failure mode directly: a predicate that
 counts wire keys on one side and in-memory fields on the other is not
 conformant, however the two sides share code.
 
-**Status: open — the floor and the optional+nullable collapse are
-unreconciled.** An explicit `null` for an optional nullable member is a wire key
-inbound and, in Go, Java and Python, no key outbound (the collapse, **P1**(a));
-TypeScript keeps it. So `{"a": null}` under `minProperties: 1` parses in all
-four, re-serializes in TypeScript, and fails to re-serialize in the other three.
-That is a validation-semantics divergence, which **P1**'s fidelity exceptions do
-not license, so it is a defect and not a licensed consequence: a payload
-accepted at the parse boundary must be re-emittable at the serialize boundary,
-in every target. Closing it needs either presence preservation for
-optional+nullable members in the three collapsing targets ([[nullability]]) or a
-load reject for a count floor over an optional nullable member. Counting
-non-`null` in-memory fields inbound is **not** a resolution — it makes the
-keyword mean two different things and rejects a one-key payload the keyword
-accepts.
+**Optional+nullable reconciliation.** A positive `minProperties` beside an
+optional nullable declared member rejects at load. An explicit `null` for that
+member is a wire key inbound, but Go, Java and Python deliberately collapse it
+to the same in-memory state as absence and omit it outbound; TypeScript retains
+it. Accepting the combination would therefore change validation semantics,
+which **P1**'s fidelity exception does not license. Make the member required or
+non-nullable, or remove the floor. `minProperties: 0` is still accepted because
+it asserts nothing. The check follows bare `$ref` aliases to the nullable
+definition, so moving the wrapper into `$defs` does not evade the rule.
 
 ## Type mapping
 
@@ -140,6 +135,7 @@ an under-floor object; in Python the count is `len(out)` on the dict
 | `> maxProperties` | `minProperties:5, maxProperties:2` |
 | Unsatisfiable on closed object | `properties:{a:{…}}, additionalProperties:false, minProperties:2` |
 | Unsatisfiable against a finite key space | `additionalProperties:true, propertyNames:{type:string, enum:["a","b"]}, minProperties:3` |
+| Optional nullable member loses wire presence | `properties:{a:{oneOf:[{type:string},{type:null}]}}, minProperties:1` |
 
 ### Runtime fixtures (validator)
 
@@ -162,8 +158,9 @@ an under-floor object; in Python the count is `len(out)` on the dict
 - **[[propertyNames]]**: composes freely with the count, and a finite key
   language (an `enum`, a `maxLength: 0`) caps the count the same way a declared
   member set does — reconciled here, per the loader-behavior rule above.
-- **[[nullability]]**: an optional nullable member is counted inbound and
-  omitted outbound in three of four targets; see the open status above.
+- **[[nullability]]**: a positive floor beside an optional nullable declared
+  member rejects at load, preventing the three-target presence collapse from
+  changing the outbound count.
 - **`default`**: `default` is an annotation, not an assertion — a
   default-filled key is never on the wire, so it does **not** count
   toward the floor. The count is taken before default population
