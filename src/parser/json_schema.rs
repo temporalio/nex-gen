@@ -875,6 +875,7 @@ fn api_spec_from_parsed_json_documents(
         let Some(service_specs) = &doc.services else {
             continue;
         };
+        validate_service_key_scope(path, language, service_specs)?;
         for (service_key, service) in service_specs {
             services.push(build_service(
                 path,
@@ -930,6 +931,42 @@ fn api_spec_from_parsed_json_documents(
     };
     validate_identifier_namespace(language, &spec)?;
     Ok(spec)
+}
+
+/// Service keys are still available here in their authored spelling. Preserve
+/// that distinction through the case-mapping check: folding `HTTPService` and
+/// `HttpService` first makes both declarations look like a duplicate insertion
+/// of one origin and silently loses a binding in Python.
+fn validate_service_key_scope(
+    path: &Path,
+    language: Language,
+    services: &IndexMap<String, Service>,
+) -> Result<()> {
+    let mut names = BTreeMap::<String, String>::new();
+    for (service_key, service) in services {
+        let override_name = lang_name_keyword(language)
+            .and_then(|keyword| service.extra.get(keyword))
+            .and_then(Value::as_str);
+        let ident = override_name
+            .map(str::to_string)
+            .unwrap_or_else(|| match language {
+                Language::TypeScript => recase_member(language, service_key),
+                _ => service_key.to_upper_camel_case(),
+            });
+        if let Some(previous) = names.insert(ident.clone(), service_key.clone())
+            && previous != *service_key
+        {
+            return Err(Error::InvalidJsonSchema {
+                path: path.to_path_buf(),
+                reason: format!(
+                    "identifier collision in {} output: services `{previous}` and `{service_key}` both map to `{ident}`; disambiguate with an `{}` override (P15 — the generator never auto-mangles)",
+                    language.as_str(),
+                    lang_name_keyword(language).unwrap_or("x-<lang>-name"),
+                ),
+            });
+        }
+    }
+    Ok(())
 }
 
 fn model_key_path(key: &TypeKey) -> Option<&PathBuf> {
@@ -7502,11 +7539,10 @@ pub(crate) fn build_name_manifest(
     let scopes: Vec<Option<String>> = if scope_is_run_wide(language) {
         vec![None]
     } else {
-        module_keys.into_iter().map(Some).collect()
+        module_keys.iter().cloned().map(Some).collect()
     };
     for scope in &scopes {
         let in_scope = |key: &str| scope.as_deref().is_none_or(|scope| scope == key);
-        let module_key: &str = scope.as_deref().unwrap_or_default();
         let mut top = Namespace::default();
         for model in ns_models.iter().filter(|model| in_scope(&model.module_key)) {
             top.insert(
@@ -7550,23 +7586,87 @@ pub(crate) fn build_name_manifest(
                 service.origin_label(),
             )?;
         }
+        if !matches!(language, Language::TypeScript | Language::Python)
+            && services.iter().any(|service| in_scope(&service.module_key))
+        {
+            for ident in service_import_idents(language) {
+                top.insert(
+                    language,
+                    (*ident).to_string(),
+                    format!("generated service-file import `{ident}`"),
+                )?;
+            }
+        }
         // TypeScript `DEFAULT_<FIELD>` constants share the module scope; make
         // them participate rather than silently coexist (P15). Python surfaces
         // defaults through properties and emits no module-level constant.
         if language == Language::TypeScript {
-            collect_default_constants(language, module_key, &ns_models, &mut top)?;
+            collect_default_constants(
+                language,
+                ns_models.iter().filter(|model| in_scope(&model.module_key)),
+                &mut top,
+            )?;
         }
         // TypeScript additionally emits `<FIELD>_CONST` bindings and a per-model
         // transfer type converter into that same module scope.
         if language == Language::TypeScript {
-            collect_ts_const_constants(module_key, &ns_models, &mut top)?;
-            collect_ts_transfer_type_converters(module_key, &ns_models, &mut top)?;
+            collect_ts_transfer_type_converters(
+                ns_models.iter().filter(|model| in_scope(&model.module_key)),
+                &mut top,
+            )?;
         }
-        // Everything else the Python emitter synthesizes at module scope: the
-        // converter classes, the declared-key frozensets, the union conversion
-        // functions, and the compiled-pattern constants (P15).
-        if language == Language::Python {
-            collect_python_module_idents(module_key, &ns_models, &mut top)?;
+    }
+
+    // TypeScript and Python have two simultaneous scopes: their exported names
+    // meet again in the root barrel (the loop above), while private bindings and
+    // bare imports remain local to each emitted module. Run a second pass with a
+    // fresh namespace per real module so a non-root module is checked without
+    // spuriously making private names in unrelated modules collide.
+    if matches!(language, Language::TypeScript | Language::Python) {
+        for module_key in &module_keys {
+            let group = ns_models
+                .iter()
+                .filter(|model| &model.module_key == module_key)
+                .collect::<Vec<_>>();
+            let mut module = Namespace::default();
+            for model in &group {
+                module.insert(
+                    language,
+                    model.type_ident.clone(),
+                    format!("type `{}`", model.full_name),
+                )?;
+            }
+            for ident in boilerplate_idents(language) {
+                module.insert(
+                    language,
+                    (*ident).to_string(),
+                    format!("generated runtime identifier `{ident}`"),
+                )?;
+            }
+            for service in services
+                .iter()
+                .filter(|service| &service.module_key == module_key)
+            {
+                module.insert(
+                    language,
+                    service.code_ident(language),
+                    service.origin_label(),
+                )?;
+                for ident in service_import_idents(language) {
+                    module.insert(
+                        language,
+                        (*ident).to_string(),
+                        format!("generated service-file import `{ident}`"),
+                    )?;
+                }
+            }
+            if language == Language::TypeScript {
+                collect_default_constants(language, group.iter().copied(), &mut module)?;
+                collect_ts_const_constants(group.iter().copied(), &mut module)?;
+                collect_ts_transfer_type_converters(group.iter().copied(), &mut module)?;
+            } else {
+                collect_python_module_idents(group.iter().copied(), &mut module)?;
+            }
         }
     }
 
@@ -7613,6 +7713,17 @@ fn boilerplate_idents(language: Language) -> &'static [&'static str] {
             "TransferTypeConverter",
         ],
         Language::Java => &["ApplicationFailure", "Violation", "SpecNumbers"],
+        _ => &[],
+    }
+}
+
+/// Bare package/annotation identifiers imported by a generated service file.
+/// These share that file's scope with the service binding itself.
+fn service_import_idents(language: Language) -> &'static [&'static str] {
+    match language {
+        Language::Go | Language::TypeScript => &["nexus"],
+        Language::Python => &["Operation", "service"],
+        Language::Java => &["Operation", "Service"],
         _ => &[],
     }
 }
@@ -8007,6 +8118,38 @@ fn validate_member_scope(language: Language, model_full_name: &str, schema: &Sch
             )?;
         }
     }
+    if language == Language::TypeScript {
+        // Converter parameters/locals share a block with the per-member parse
+        // slots. `undefined`, `eval`, and `arguments` are hazardous bindings in
+        // strict-mode modules even though they are not TypeScript keywords.
+        for local in ["arguments", "eval", "out", "raw", "undefined", "violations"] {
+            scope.insert(
+                language,
+                local.to_string(),
+                format!("generated converter binding `{local}`"),
+            )?;
+        }
+        // An interface member of one of these names conflicts with the
+        // corresponding Object member, and the converter's plain-object
+        // narrowing then observes the intrinsic signature instead of the
+        // schema-declared one.
+        for intrinsic in [
+            "__proto__",
+            "constructor",
+            "hasOwnProperty",
+            "isPrototypeOf",
+            "propertyIsEnumerable",
+            "toLocaleString",
+            "toString",
+            "valueOf",
+        ] {
+            scope.insert(
+                language,
+                intrinsic.to_string(),
+                format!("TypeScript Object member `{intrinsic}`"),
+            )?;
+        }
+    }
     let required: BTreeSet<&str> = schema
         .required
         .as_ref()
@@ -8186,11 +8329,9 @@ fn java_is_nested_level_local(ident: &str) -> bool {
         })
 }
 
-/// TypeScript `DEFAULT_<FIELD>` constants (module scope). The generator names a
-/// default constant `DEFAULT_<FIELD>` when the member is unique
-/// across the module's models, else `DEFAULT_<MODEL>_<FIELD>`. Replicate that name
-/// and enter it into the shared module namespace so a genuine clash rejects (P15)
-/// rather than silently coexisting behind the model-name prefix.
+/// TypeScript `DEFAULT_<FIELD>` constants (exported module scope). The spelling
+/// depends only on the declaring member; a second model claiming it rejects
+/// instead of silently renaming the first declaration after an additive edit.
 ///
 /// The identifier is built from the **emitted member identifier**, so an
 /// `x-ts-name` override on the declaring property moves this constant with it —
@@ -8198,33 +8339,12 @@ fn java_is_nested_level_local(ident: &str) -> bool {
 /// from the JSON name, two members that recase alike would collide here with no
 /// way to author around it: the override would move the members apart while
 /// leaving both constants on the colliding name.
-fn collect_default_constants(
+fn collect_default_constants<'a>(
     language: Language,
-    module_key: &str,
-    models: &[NsModel],
+    models: impl Iterator<Item = &'a NsModel>,
     top: &mut Namespace,
 ) -> Result<()> {
-    let group: Vec<&NsModel> = models
-        .iter()
-        .filter(|model| model.module_key == module_key)
-        .collect();
-    // How many models declare a scalar-default field emitting this identifier.
-    let field_count = |member_ident: &str| -> usize {
-        group
-            .iter()
-            .filter(|model| {
-                model.schema.properties.as_ref().is_some_and(|properties| {
-                    properties.iter().any(|(json_name, property)| {
-                        member_identifier(language, json_name, property) == member_ident
-                            && property.extra.get("default").is_some_and(|default| {
-                                !default.is_null() && !default.is_object() && !default.is_array()
-                            })
-                    })
-                })
-            })
-            .count()
-    };
-    for model in &group {
+    for model in models {
         let Some(properties) = &model.schema.properties else {
             continue;
         };
@@ -8237,14 +8357,11 @@ fn collect_default_constants(
             }
             let member_ident = member_identifier(language, json_name, property);
             let field_shouty = member_ident.to_shouty_snake_case();
-            let ident = if field_count(&member_ident) == 1 {
-                format!("DEFAULT_{field_shouty}")
-            } else {
-                format!(
-                    "DEFAULT_{}_{field_shouty}",
-                    model.type_ident.to_shouty_snake_case()
-                )
-            };
+            // A synthesized name is a function of its own origin only. Prefixing
+            // it with the model name when a later model happens to use the same
+            // member silently renames the already-published constant (P13/P15).
+            // Keep the stable spelling and let Namespace reject the second claim.
+            let ident = format!("DEFAULT_{field_shouty}");
             top.insert(
                 language,
                 ident,
@@ -8265,15 +8382,11 @@ fn collect_default_constants(
 ///
 /// Like the `DEFAULT_` constant, the identifier is built from the **emitted
 /// member identifier**, so an `x-ts-name` override moves it with the member.
-fn collect_ts_const_constants(
-    module_key: &str,
-    models: &[NsModel],
+fn collect_ts_const_constants<'a>(
+    models: impl Iterator<Item = &'a NsModel>,
     top: &mut Namespace,
 ) -> Result<()> {
-    let group: Vec<&NsModel> = models
-        .iter()
-        .filter(|model| model.module_key == module_key)
-        .collect();
+    let group: Vec<&NsModel> = models.collect();
     // How many models declare a `const` member emitting this identifier.
     let field_count = |member_ident: &str| -> usize {
         group
@@ -8341,9 +8454,8 @@ fn collect_ts_const_constants(
 ///   a repeat is deduplication (accepted), while two distinct patterns landing on
 ///   one name — or a user type overridden to that shape — is a collision.
 /// - the converter bodies' own locals ([`PYTHON_CONVERTER_BODY_LOCALS`]).
-fn collect_python_module_idents(
-    module_key: &str,
-    models: &[NsModel],
+fn collect_python_module_idents<'a>(
+    models: impl Iterator<Item = &'a NsModel>,
     top: &mut Namespace,
 ) -> Result<()> {
     let language = Language::Python;
@@ -8360,7 +8472,7 @@ fn collect_python_module_idents(
             format!("generated converter-body local `{local}`"),
         )?;
     }
-    for model in models.iter().filter(|m| m.module_key == module_key) {
+    for model in models {
         let origin = |what: &str| format!("`{}` {what}", model.full_name);
         // A sum-type def is emitted as a `TypeAlias` whose conversion lives in a
         // pair of module-private free functions, so it has no converter class and
@@ -8514,12 +8626,11 @@ fn collect_python_pattern_constants(schema: &Schema, top: &mut Namespace) -> Res
 /// `HttpError` both derive `httpErrorTransferTypeConverter` — so the derived
 /// name has to enter the shared module namespace too, or two models emit the
 /// same `export const` (P15).
-fn collect_ts_transfer_type_converters(
-    module_key: &str,
-    models: &[NsModel],
+fn collect_ts_transfer_type_converters<'a>(
+    models: impl Iterator<Item = &'a NsModel>,
     top: &mut Namespace,
 ) -> Result<()> {
-    for model in models.iter().filter(|model| model.module_key == module_key) {
+    for model in models {
         top.insert(
             Language::TypeScript,
             ts_transfer_type_converter_name(&model.type_ident),
@@ -12811,8 +12922,9 @@ properties:
                 .expect("the override moves the DEFAULT_ constant with the member");
         }
 
-        // Two *models* each declaring a member of that identifier are separated by
-        // the model-name qualification instead, so they load.
+        // A second model may not rename the first model's already-exported
+        // constant. The stable DEFAULT_<FIELD> spelling makes the second claim a
+        // reject; an x-ts-name on either declaring member is the escape hatch.
         let across_models = r##"
 $schema: https://json-schema.org/draft/2020-12/schema
 type: object
@@ -12829,10 +12941,145 @@ $defs:
     properties:
       foo_bar: { type: string, default: "y" }
 "##;
-        parse_for(Language::TypeScript, across_models)
-            .expect("`DEFAULT_<MODEL>_<FIELD>` keeps the two apart");
+        let error = reject_for(Language::TypeScript, across_models);
+        assert!(
+            error.contains("collision") && error.contains("DEFAULT_FOO_BAR"),
+            "{error}"
+        );
         parse_for(Language::Python, across_models)
             .expect("Python emits properties rather than DEFAULT_ constants");
+    }
+
+    #[test]
+    fn checks_exported_and_private_names_at_their_real_multifile_scopes() {
+        let model =
+            |full_name: &str, model_name: &str, module_key: &str, schema: Value| ManifestModel {
+                full_name: full_name.to_string(),
+                local_name: model_name.to_string(),
+                model_name: model_name.to_string(),
+                module_key: module_key.to_string(),
+                schema,
+            };
+        let plain = || serde_json::json!({"type":"object","properties":{}});
+
+        // Exported converter values meet in the root TypeScript barrel even
+        // when their model declarations live in different modules.
+        let converters = vec![
+            model(
+                "a#HTTPError",
+                "HTTPError",
+                "a",
+                serde_json::json!({"type":"object","x-ts-name":"HTTPError","properties":{}}),
+            ),
+            model("b#HttpError", "HttpError", "b", plain()),
+        ];
+        let error = build_name_manifest(Language::TypeScript, &converters, &[])
+            .expect_err("converter exports collide in the root barrel")
+            .to_string();
+        assert!(error.contains("httpErrorTransferTypeConverter"), "{error}");
+
+        // Private Python converter classes are checked in every real module,
+        // but the same private spelling remains legal in two separate modules.
+        let same_module = vec![
+            model(
+                "a#One",
+                "One",
+                "a",
+                serde_json::json!({"type":"object","x-py-name":"Contact","properties":{}}),
+            ),
+            model(
+                "a#Two",
+                "Two",
+                "a",
+                serde_json::json!({"type":"object","x-py-name":"_ContactTransferTypeConverter","properties":{}}),
+            ),
+        ];
+        let error = build_name_manifest(Language::Python, &same_module, &[])
+            .expect_err("private converter collision in a non-root module")
+            .to_string();
+        assert!(error.contains("_ContactTransferTypeConverter"), "{error}");
+
+        let separate_modules = vec![
+            model(
+                "a#One",
+                "One",
+                "a",
+                serde_json::json!({"type":"object","x-py-name":"Contact","properties":{}}),
+            ),
+            model(
+                "b#Two",
+                "Two",
+                "b",
+                serde_json::json!({"type":"object","x-py-name":"ContactTwo","properties":{}}),
+            ),
+        ];
+        build_name_manifest(Language::Python, &separate_modules, &[])
+            .expect("unrelated module-private converter names remain independent");
+    }
+
+    #[test]
+    fn rejects_typescript_member_bindings_and_object_intrinsics() {
+        for member in [
+            "arguments",
+            "eval",
+            "out",
+            "raw",
+            "undefined",
+            "violations",
+            "constructor",
+            "toString",
+        ] {
+            let input = format!(
+                "$schema: https://json-schema.org/draft/2020-12/schema\ntype: object\nadditionalProperties: false\nproperties:\n  {member}: {{ type: string }}\n"
+            );
+            let error = reject_for(Language::TypeScript, &input);
+            assert!(
+                error.contains(member) && error.contains("x-ts-name"),
+                "{member}: {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_service_case_folds_and_service_file_import_collisions() {
+        let folded = r#"
+nexusrpc: "1.0.0"
+services:
+  HTTPService:
+    fqn: example.Alpha
+    operations: { ping: { input: { type: object, properties: {} } } }
+  HttpService:
+    fqn: example.Beta
+    operations: { pong: { input: { type: object, properties: {} } } }
+"#;
+        for language in [
+            Language::Go,
+            Language::TypeScript,
+            Language::Python,
+            Language::Java,
+        ] {
+            let error = reject_for(language, folded);
+            assert!(
+                error.contains("HTTPService") && error.contains("HttpService"),
+                "{language:?}: {error}"
+            );
+        }
+
+        for (language, override_line, imported) in [
+            (Language::Go, "x-go-name: nexus", "nexus"),
+            (Language::TypeScript, "x-ts-name: nexus", "nexus"),
+            (Language::Python, "x-py-name: Operation", "Operation"),
+            (Language::Java, "x-java-name: Service", "Service"),
+        ] {
+            let input = format!(
+                "nexusrpc: \"1.0.0\"\nservices:\n  Alpha:\n    {override_line}\n    operations:\n      ping:\n        input: {{ type: object, properties: {{}} }}\n"
+            );
+            let error = reject_for(language, &input);
+            assert!(
+                error.contains(imported) && error.contains("service-file import"),
+                "{language:?}: {error}"
+            );
+        }
     }
 
     #[test]
@@ -13242,8 +13489,8 @@ properties:
     /// The generated Java deserializer declares the member slots at method
     /// scope, so every local it binds in that body shares the member namespace:
     /// `index` beside any array member emits `variable index is already defined
-    /// in method deserialize(...)`. Java-only — the other three bind nothing of
-    /// the sort.
+    /// in method deserialize(...)`. Most are Java-only; `violations` is also a
+    /// TypeScript converter local and is rejected there independently.
     #[test]
     fn rejects_java_member_colliding_with_a_generated_deserializer_local() {
         for member in [
@@ -13279,10 +13526,17 @@ properties:
                     && error.contains(member),
                 "{member}: {error}"
             );
-            for language in [Language::Go, Language::TypeScript, Language::Python] {
+            for language in [Language::Go, Language::Python] {
                 parse_for(language, &input).unwrap_or_else(|error| {
                     panic!("{member}: {language:?} binds no such local: {error}")
                 });
+            }
+            if member == "violations" {
+                let error = reject_for(Language::TypeScript, &input);
+                assert!(error.contains("generated converter binding"), "{error}");
+            } else {
+                parse_for(Language::TypeScript, &input)
+                    .unwrap_or_else(|error| panic!("{member}: TypeScript should load: {error}"));
             }
             // P15's escape hatch moves the slot, and with it the collision.
             let renamed = input.replace(

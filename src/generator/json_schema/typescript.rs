@@ -4707,12 +4707,15 @@ fn const_const_name(
 }
 
 fn default_const_name(
-    model_name: &str,
+    _model_name: &str,
     field_name: &str,
-    models: &[&PlannedJsonType],
-    kind: ConstNameCollisionKind,
+    _models: &[&PlannedJsonType],
+    _kind: ConstNameCollisionKind,
 ) -> Result<String> {
-    const_name(model_name, field_name, models, kind, "DEFAULT_", "")
+    // This exported name must not depend on unrelated models in the run. The
+    // P15 manifest rejects a second DEFAULT_<FIELD> claimant and points at the
+    // declaring member's x-ts-name escape hatch.
+    Ok(format!("DEFAULT_{}", field_name.to_shouty_snake_case()))
 }
 
 /// Names a synthesized module-scope constant after the **emitted member
@@ -4721,9 +4724,9 @@ fn default_const_name(
 /// (P15, see specs/json-schema/features/default.md). The JSON name still selects
 /// the property; only the identifier is derived from the override.
 ///
-/// Uniqueness is counted over emitted identifiers too. Two members that recase
-/// alike collide here — and the override is what separates them, which it cannot
-/// do if the constant keeps deriving from the JSON name.
+/// Private `_CONST` bindings may use the model name to disambiguate within one
+/// module. Exported `DEFAULT_` bindings take the stable path above: another
+/// claimant rejects rather than changing an existing consumer-facing name.
 fn const_name(
     model_name: &str,
     member_ident: &str,
