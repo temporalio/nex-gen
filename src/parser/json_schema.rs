@@ -1901,6 +1901,12 @@ fn validate_model_schema(path: &Path, schema: &Schema, context: &str) -> Result<
         return validate_schema_tree(path, schema, context);
     }
     if schema.ty.as_ref().and_then(Value::as_str) != Some("object") {
+        // The root/model shape is unsupported, but a closed value set can
+        // carry a more specific authored defect. Raw validation intentionally
+        // leaves `const`/`enum` semantics until after `allOf` normalization;
+        // preserve that owning diagnostic before reporting the broader model
+        // shape restriction.
+        validate_const_enum(path, schema, context)?;
         return Err(Error::InvalidJsonSchema {
             path: path.to_path_buf(),
             reason: format!("{context} must be `type: object`, a `oneOf` union, or a bare `$ref`"),
@@ -3430,8 +3436,14 @@ fn validate_array_constraints(path: &Path, schema: &Schema, context: &str) -> Re
                 || matcher.extra.contains_key("format")
             {
                 Some("string")
+            } else if matcher.extra.contains_key("const") || matcher.extra.contains_key("enum") {
+                // A typeless literal matcher is evaluated in the element
+                // domain. Inferring from the first enum member made
+                // `items: number` + `enum: [2, 1.5]` spuriously become an
+                // integer schema and reject its own fractional member.
+                items_kind
             } else {
-                matcher_const_kind.or(matcher_enum_kind)
+                None
             };
             if let Some(kind) = inferred_kind {
                 validated_matcher.ty = Some(Value::String(kind.to_string()));
