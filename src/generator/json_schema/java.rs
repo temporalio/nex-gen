@@ -1832,7 +1832,8 @@ impl ClosedNameOverrides {
     }
 }
 
-/// The `x-java-enum-names` map key for one closed value: its JSON wire spelling.
+/// The `x-java-enum-names` map key for one closed value: its canonical JSON
+/// spelling.
 ///
 /// Mirrors the loader's `enum_names_lookup_key` (`src/parser/json_schema.rs`),
 /// which validates the same map, and `enum_names_lookup_key` in
@@ -1844,7 +1845,7 @@ fn enum_names_lookup_key(value: &Value) -> Option<String> {
     match value {
         Value::String(text) => Some(text.clone()),
         Value::Bool(flag) => Some(flag.to_string()),
-        Value::Number(number) => Some(number.to_string()),
+        Value::Number(number) => Some(crate::json_schema::scalar::value_token_decimal(number)),
         _ => None,
     }
 }

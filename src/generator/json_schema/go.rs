@@ -6090,13 +6090,14 @@ fn go_value_constant_override<'a>(schema: &'a Schema, value: &Value) -> Option<&
     map.get(&enum_names_lookup_key(value)?).map(String::as_str)
 }
 
-/// The `x-go-enum-names` map key for one closed value: its JSON wire spelling.
+/// The `x-go-enum-names` map key for one closed value: its canonical JSON
+/// spelling, shared with the loader's manifest validation.
 /// Mirrors the loader's `enum_names_lookup_key`, which validates the same map.
 fn enum_names_lookup_key(value: &Value) -> Option<String> {
     match value {
         Value::String(text) => Some(text.clone()),
         Value::Bool(flag) => Some(flag.to_string()),
-        Value::Number(number) => Some(number.to_string()),
+        Value::Number(number) => Some(crate::json_schema::scalar::value_token_decimal(number)),
         _ => None,
     }
 }
