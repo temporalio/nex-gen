@@ -686,13 +686,13 @@ fn render_java_inline_string_checks(
 
 /// The static `Pattern` field name for a `pattern` on the Java field
 /// `java_name` — unique per class, compiled once at class init.
-fn java_pattern_field_name(java_name: &str) -> String {
+pub(crate) fn java_pattern_field_name(java_name: &str) -> String {
     use heck::ToShoutySnakeCase;
     format!("{}_PATTERN", java_name.to_shouty_snake_case())
 }
 
 /// The static `Pattern` field name for a `format` on the Java field `java_name`.
-fn java_format_field_name(java_name: &str) -> String {
+pub(crate) fn java_format_field_name(java_name: &str) -> String {
     use heck::ToShoutySnakeCase;
     format!("{}_FORMAT", java_name.to_shouty_snake_case())
 }
@@ -710,13 +710,13 @@ fn java_pinned_pattern(pattern: &str) -> String {
 
 /// The static `Pattern` field name for a `contains` matcher's `pattern` at the
 /// scope `java_name` (a field, a map member, or a union wrapper).
-fn java_contains_pattern_field_name(java_name: &str) -> String {
+pub(crate) fn java_contains_pattern_field_name(java_name: &str) -> String {
     use heck::ToShoutySnakeCase;
     format!("{}_CONTAINS_PATTERN", java_name.to_shouty_snake_case())
 }
 
 /// The static `Pattern` field name for a `contains` matcher's `format`.
-fn java_contains_format_field_name(java_name: &str) -> String {
+pub(crate) fn java_contains_format_field_name(java_name: &str) -> String {
     use heck::ToShoutySnakeCase;
     format!("{}_CONTAINS_FORMAT", java_name.to_shouty_snake_case())
 }
@@ -2235,7 +2235,7 @@ fn resolve_model_kind(
             // A union-typed field: an inline `oneOf` (nested interface +
             // wrappers) or a `$ref` to a named union def.
             let (ty, union) = if property.one_of.is_some() && is_java_union_schema(property) {
-                let interface = json_name.to_upper_camel_case();
+                let interface = upper_first(&java_name);
                 let union = classify_java_union(&interface, true, property, all_models, context);
                 (
                     JavaType::Union {
@@ -2397,7 +2397,11 @@ pub(in crate::generator) fn render_model_file(
             if property.one_of.is_none() || !is_java_union_schema(property) {
                 continue;
             }
-            let interface = json_name.to_upper_camel_case();
+            let java_name = property
+                .x_java_name
+                .clone()
+                .unwrap_or_else(|| json_name.to_lower_camel_case());
+            let interface = upper_first(&java_name);
             if let Some(union) =
                 classify_java_union(&interface, true, property, all_models, &other_context)
                 && holds_this_model(&union)

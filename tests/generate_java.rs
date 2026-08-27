@@ -481,6 +481,53 @@ fn java_json_validates_non_object_union_branch_constraints() {
 }
 
 #[test]
+fn java_json_inline_union_names_follow_the_emitted_member() {
+    let temp_dir = unique_output_path("java-json-inline-union-member-name");
+    fs::create_dir_all(&temp_dir).unwrap();
+    let input_path = temp_dir.join("renamed.yaml");
+    fs::write(
+        &input_path,
+        r#"$schema: https://json-schema.org/draft/2020-12/schema
+title: RenamedUnion
+type: object
+properties:
+  serializer:
+    x-java-name: payload
+    oneOf:
+      - { type: string }
+      - { type: integer }
+"#,
+    )
+    .unwrap();
+    let output_path = temp_dir.join("renamed");
+    generate_to_file(&GenerateRequest {
+        language: nexgen::language::Language::Java,
+        input_paths: vec![input_path],
+        support_paths: Vec::new(),
+        descriptor_paths: Vec::new(),
+        output_path: output_path.clone(),
+        format: false,
+        generate_native_api: false,
+        java_package_name: Some("renamed".to_string()),
+        ts_date_time_types: Default::default(),
+    })
+    .unwrap();
+
+    let rendered = read_java_files(&output_path);
+    let model = &rendered[&PathBuf::from("Renamed.java")];
+    for expected in [
+        "public interface Payload {",
+        "public static final class PayloadString implements Payload {",
+        "private final @Nullable Payload payload;",
+        "payload = Payload.fromNode(field, \"serializer\", violations, context);",
+    ] {
+        assert!(model.contains(expected), "{expected}\n{model}");
+    }
+    assert!(!model.contains("public interface Serializer {"), "{model}");
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+#[test]
 fn java_json_rejects_non_finite_numbers_in_every_serialize_position() {
     let temp_dir = unique_output_path("java-json-finite-numbers");
     fs::create_dir_all(&temp_dir).unwrap();
