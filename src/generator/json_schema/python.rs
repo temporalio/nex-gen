@@ -13,9 +13,8 @@ use crate::generator::json_schema::build_json_name_manifest;
 use crate::generator::json_schema::register_cross_module_ref_names;
 use crate::generator::python::{
     PythonImports, PythonModelHoists, RenderedModelFragments, WireValueConversion,
-    module_common_prefix_len, python_field_name, python_string_literal,
-    render_generated_file_header, render_named_python_import, render_optional_python_imports,
-    render_python_docstring,
+    module_common_prefix_len, python_field_name, render_generated_file_header,
+    render_named_python_import, render_optional_python_imports, render_python_docstring,
 };
 use crate::json_schema::scalar::{ScalarKind, ScalarMatcher};
 use crate::language::Language;
@@ -84,6 +83,13 @@ struct Schema {
     enum_values: Option<Vec<Value>>,
     #[serde(rename = "x-py-name")]
     x_py_name: Option<String>,
+}
+
+/// JSON's quoted-string grammar is a subset of Python's string-literal grammar.
+/// In particular it uses fixed-width `\uXXXX` escapes instead of Rust
+/// `Debug`'s Python-invalid `\u{...}` spelling.
+fn python_string_literal(value: &str) -> String {
+    serde_json::to_string(value).expect("a Rust string is always JSON-serializable")
 }
 
 impl Schema {
@@ -1811,7 +1817,23 @@ fn render_py_array_checks(
     path_expr: &str,
     schema: &Schema,
     indent: &str,
+    serialize: bool,
 ) -> Result<()> {
+    // `uniqueItems` and `contains` compare the canonical wire value. Native
+    // bytes/temporal elements must therefore be projected before matching on
+    // serialize, just as the parse side already sees raw strings.
+    let values_expr = if serialize
+        && let Some(items) = schema.items.as_deref()
+        && (temporal_kind_direct(nullable_member_schema(items).unwrap_or(items)).is_some()
+            || content_encoding_direct(nullable_member_schema(items).unwrap_or(items)).is_some())
+    {
+        format!(
+            "[{} for element in {array_expr}]",
+            serialize_expr(items, "element", 0)
+        )
+    } else {
+        array_expr.to_string()
+    };
     let length = format!("len({array_expr})");
     if let Some(min) = schema.min_items {
         render_py_violation_if(
@@ -1834,7 +1856,7 @@ fn render_py_array_checks(
     if schema.unique_items == Some(true) {
         output.push_str(indent);
         output.push_str(&format!(
-            "_check_unique_items({array_expr}, {path_expr}, violations)\n"
+            "_check_unique_items({values_expr}, {path_expr}, violations)\n"
         ));
     }
     if let Some(matcher) = &schema.contains {
@@ -1851,7 +1873,7 @@ fn render_py_array_checks(
         };
         output.push_str(indent);
         output.push_str(&format!(
-            "_check_contains({array_expr}, lambda element: {condition}, {effective_min}, {max_arg}, {bounded_min}, {path_expr}, violations)\n"
+            "_check_contains({values_expr}, lambda element: {condition}, {effective_min}, {max_arg}, {bounded_min}, {path_expr}, violations)\n"
         ));
     }
     Ok(())
@@ -2017,6 +2039,11 @@ fn render_py_dependent_required(
         return;
     };
     for (trigger, deps) in dependent_required {
+        // The accepted `{trigger: []}` form is a no-op. Emitting its guard with
+        // no body produces an `IndentationError`; omit the whole predicate.
+        if deps.is_empty() {
+            continue;
+        }
         output.push_str(indent);
         output.push_str(&format!(
             "if {} in {obj_expr}:\n",
@@ -2282,7 +2309,7 @@ fn render_py_field_checks(
             render_py_numeric_checks(output, value_expr, path_expr, schema, indent);
         }
         Some("array") => {
-            render_py_array_checks(output, value_expr, path_expr, schema, indent)?;
+            render_py_array_checks(output, value_expr, path_expr, schema, indent, true)?;
             if let Some(items) = schema.items.as_deref()
                 && py_field_needs_serialize_check(items)
             {
@@ -4945,7 +4972,7 @@ fn render_py_array_elements(
     // outer quote inside an f-string replacement field is PEP 701, which is
     // Python 3.12+, and the declared floor is 3.10.
     let raw_array = format!("typing.cast('list[typing.Any]', {raw_expr})");
-    render_py_array_checks(output, &raw_array, path_expr, schema, &body)?;
+    render_py_array_checks(output, &raw_array, path_expr, schema, &body, false)?;
     Ok(list_local)
 }
 

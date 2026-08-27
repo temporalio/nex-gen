@@ -85,7 +85,13 @@ public final class Address {
     public static final class Serializer extends com.fasterxml.jackson.databind.JsonSerializer<Address> {
         @Override
         public void serialize(Address value, JsonGenerator gen, SerializerProvider serializers) throws IOException {
+            JsonGenerator target = gen;
+            com.fasterxml.jackson.databind.util.TokenBuffer pending = new com.fasterxml.jackson.databind.util.TokenBuffer(gen.getCodec(), false);
+            gen = pending;
             List<Violation> violations = new ArrayList<>();
+            if (value.street == null) {
+                violations.add(new Violation("street", "required"));
+            }
             if (value.zip != null) {
                 if (value.zip < -SpecNumbers.INTEGER_CAP || value.zip > SpecNumbers.INTEGER_CAP) {
                     violations.add(new Violation("zip", "exceeds \u00b1(2^53-1) integer cap"));
@@ -129,6 +135,7 @@ public final class Address {
                 }
             }
             gen.writeEndObject();
+            pending.serialize(target);
         }
     }
 

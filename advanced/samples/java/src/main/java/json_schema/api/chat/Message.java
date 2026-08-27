@@ -148,7 +148,16 @@ public final class Message {
     public static final class Serializer extends com.fasterxml.jackson.databind.JsonSerializer<Message> {
         @Override
         public void serialize(Message value, JsonGenerator gen, SerializerProvider serializers) throws IOException {
+            JsonGenerator target = gen;
+            com.fasterxml.jackson.databind.util.TokenBuffer pending = new com.fasterxml.jackson.databind.util.TokenBuffer(gen.getCodec(), false);
+            gen = pending;
             List<Violation> violations = new ArrayList<>();
+            if (value.kind == null) {
+                violations.add(new Violation("kind", "required"));
+            }
+            if (value.body == null) {
+                violations.add(new Violation("body", "required"));
+            }
             if (value.priority != null) {
                 if (value.priority < -SpecNumbers.INTEGER_CAP || value.priority > SpecNumbers.INTEGER_CAP) {
                     violations.add(new Violation("priority", "exceeds \u00b1(2^53-1) integer cap"));
@@ -172,6 +181,7 @@ public final class Message {
                 gen.writeNumberField("priority", value.priority);
             }
             gen.writeEndObject();
+            pending.serialize(target);
         }
     }
 

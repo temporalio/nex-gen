@@ -66,8 +66,13 @@ public final class ShowcaseAudit {
     public static final class Serializer extends com.fasterxml.jackson.databind.JsonSerializer<ShowcaseAudit> {
         @Override
         public void serialize(ShowcaseAudit value, JsonGenerator gen, SerializerProvider serializers) throws IOException {
+            JsonGenerator target = gen;
+            com.fasterxml.jackson.databind.util.TokenBuffer pending = new com.fasterxml.jackson.databind.util.TokenBuffer(gen.getCodec(), false);
+            gen = pending;
             List<Violation> violations = new ArrayList<>();
-            if (value.by != null) {
+            if (value.by == null) {
+                violations.add(new Violation("by", "required"));
+            } else {
                 int length = value.by.codePointCount(0, value.by.length());
                 if (length < 1) {
                     violations.add(new Violation("by", "must have length >= 1, got " + length));
@@ -99,6 +104,7 @@ public final class ShowcaseAudit {
                 }
             }
             gen.writeEndObject();
+            pending.serialize(target);
         }
     }
 

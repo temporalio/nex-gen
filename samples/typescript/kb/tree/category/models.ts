@@ -36,38 +36,41 @@ export const categoryTransferTypeConverter =
       }
 
       let id: string = undefined as unknown as string;
-      if (raw.id === undefined || raw.id === null) {
+      if (!Object.prototype.hasOwnProperty.call(raw, "id") || raw["id"] === null) {
         violations.push({ path: "id", reason: "required" });
       } else {
-        if (typeof raw.id !== "string") {
+        if (typeof raw["id"] !== "string") {
           violations.push({ path: "id", reason: "expected string" });
         } else {
-          id = raw.id;
+          id = raw["id"];
         }
       }
 
       let name: string = undefined as unknown as string;
-      if (raw.name === undefined || raw.name === null) {
+      if (!Object.prototype.hasOwnProperty.call(raw, "name") || raw["name"] === null) {
         violations.push({ path: "name", reason: "required" });
       } else {
-        if (typeof raw.name !== "string") {
+        if (typeof raw["name"] !== "string") {
           violations.push({ path: "name", reason: "expected string" });
         } else {
-          name = raw.name;
+          name = raw["name"];
         }
       }
 
       let children: Category[] | undefined = undefined as unknown as
         | Category[]
         | undefined;
-      if (raw.children === null) {
+      if (
+        Object.prototype.hasOwnProperty.call(raw, "children") &&
+        raw["children"] === null
+      ) {
         violations.push({ path: "children", reason: "explicit null not allowed" });
-      } else if (raw.children !== undefined) {
-        if (!Array.isArray(raw.children)) {
+      } else if (Object.prototype.hasOwnProperty.call(raw, "children")) {
+        if (!Array.isArray(raw["children"])) {
           violations.push({ path: "children", reason: "expected array" });
         } else {
           children = [];
-          raw.children.forEach((element: unknown, index: number) => {
+          raw["children"].forEach((element: unknown, index: number) => {
             let item: Category = undefined as unknown as Category;
             try {
               item = categoryTransferTypeConverter.fromTransferType(element);
@@ -99,12 +102,15 @@ export const categoryTransferTypeConverter =
 
     public toTransferType(value: Category): unknown {
       const violations: __nexgenDefinitions.Violation[] = [];
-      const out: Record<string, unknown> = {};
-      out.id = value.id;
-      out.name = value.name;
+      const out: Record<string, unknown> = Object.create(null) as Record<
+        string,
+        unknown
+      >;
+      out["id"] = value.id;
+      out["name"] = value.name;
       if (value.children !== undefined) {
         value.children.forEach((element, index) => {});
-        out.children = value.children.map((element, index) =>
+        out["children"] = value.children.map((element, index) =>
           (() => {
             try {
               return categoryTransferTypeConverter.toTransferType(element);
@@ -133,14 +139,17 @@ export const paletteTransferTypeConverter =
       }
 
       let swatches: string[] = undefined as unknown as string[];
-      if (raw.swatches === undefined || raw.swatches === null) {
+      if (
+        !Object.prototype.hasOwnProperty.call(raw, "swatches") ||
+        raw["swatches"] === null
+      ) {
         violations.push({ path: "swatches", reason: "required" });
       } else {
-        if (!Array.isArray(raw.swatches)) {
+        if (!Array.isArray(raw["swatches"])) {
           violations.push({ path: "swatches", reason: "expected array" });
         } else {
           swatches = [];
-          raw.swatches.forEach((element: unknown, index: number) => {
+          raw["swatches"].forEach((element: unknown, index: number) => {
             let item: string = undefined as unknown as string;
             if (typeof element !== "string") {
               violations.push({
@@ -171,8 +180,11 @@ export const paletteTransferTypeConverter =
     }
 
     public toTransferType(value: Palette): unknown {
-      const out: Record<string, unknown> = {};
-      out.swatches = value.swatches;
+      const out: Record<string, unknown> = Object.create(null) as Record<
+        string,
+        unknown
+      >;
+      out["swatches"] = value.swatches;
       return out;
     }
   })();

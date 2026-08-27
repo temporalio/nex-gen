@@ -58,11 +58,23 @@ public final class GetRoomInput {
     public static final class Serializer extends com.fasterxml.jackson.databind.JsonSerializer<GetRoomInput> {
         @Override
         public void serialize(GetRoomInput value, JsonGenerator gen, SerializerProvider serializers) throws IOException {
+            JsonGenerator target = gen;
+            com.fasterxml.jackson.databind.util.TokenBuffer pending = new com.fasterxml.jackson.databind.util.TokenBuffer(gen.getCodec(), false);
+            gen = pending;
+            List<Violation> violations = new ArrayList<>();
+            if (value.roomId == null) {
+                violations.add(new Violation("roomId", "required"));
+            }
+            if (!violations.isEmpty()) {
+                // TODO: Use PayloadValidationException.newPayloadValidationException once it is available in an SDK release.
+                throw ApplicationFailure.newNonRetryableFailure("Payload validation failed", "PayloadValidationError", violations);
+            }
             gen.writeStartObject();
             if (value.roomId != null) {
                 gen.writeStringField("roomId", value.roomId);
             }
             gen.writeEndObject();
+            pending.serialize(target);
         }
     }
 

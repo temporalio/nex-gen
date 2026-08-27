@@ -45,52 +45,58 @@ export const blockTransferTypeConverter =
       }
 
       let blockId: string = undefined as unknown as string;
-      if (raw.blockId === undefined || raw.blockId === null) {
+      if (
+        !Object.prototype.hasOwnProperty.call(raw, "blockId") ||
+        raw["blockId"] === null
+      ) {
         violations.push({ path: "blockId", reason: "required" });
       } else {
-        if (typeof raw.blockId !== "string") {
+        if (typeof raw["blockId"] !== "string") {
           violations.push({ path: "blockId", reason: "expected string" });
         } else {
-          blockId = raw.blockId;
+          blockId = raw["blockId"];
         }
       }
 
       let order: number = undefined as unknown as number;
-      if (raw.order === undefined || raw.order === null) {
+      if (
+        !Object.prototype.hasOwnProperty.call(raw, "order") ||
+        raw["order"] === null
+      ) {
         violations.push({ path: "order", reason: "required" });
       } else {
-        if (typeof raw.order !== "number" || !Number.isSafeInteger(raw.order)) {
+        if (typeof raw["order"] !== "number" || !Number.isSafeInteger(raw["order"])) {
           violations.push({ path: "order", reason: "expected integer" });
         } else {
-          order = raw.order;
-          if (raw.order < 0) {
+          order = raw["order"];
+          if (raw["order"] < 0) {
             violations.push({
               path: "order",
-              reason: `must be >= 0, got ${raw.order}`,
+              reason: `must be >= 0, got ${raw["order"]}`,
             });
           }
         }
       }
 
       let text: string | undefined = undefined as unknown as string | undefined;
-      if (raw.text === null) {
+      if (Object.prototype.hasOwnProperty.call(raw, "text") && raw["text"] === null) {
         violations.push({ path: "text", reason: "explicit null not allowed" });
-      } else if (raw.text !== undefined) {
-        if (typeof raw.text !== "string") {
+      } else if (Object.prototype.hasOwnProperty.call(raw, "text")) {
+        if (typeof raw["text"] !== "string") {
           violations.push({ path: "text", reason: "expected string" });
         } else {
-          text = raw.text;
+          text = raw["text"];
         }
       }
 
       let style: BlockStyle | undefined = undefined as unknown as
         | BlockStyle
         | undefined;
-      if (raw.style === null) {
+      if (Object.prototype.hasOwnProperty.call(raw, "style") && raw["style"] === null) {
         violations.push({ path: "style", reason: "explicit null not allowed" });
-      } else if (raw.style !== undefined) {
+      } else if (Object.prototype.hasOwnProperty.call(raw, "style")) {
         try {
-          style = blockStyleTransferTypeConverter.fromTransferType(raw.style);
+          style = blockStyleTransferTypeConverter.fromTransferType(raw["style"]);
         } catch (error) {
           __nexgenDefinitions.collect(violations, "style", error);
         }
@@ -100,12 +106,12 @@ export const blockTransferTypeConverter =
         | Page
         | null
         | undefined;
-      if (raw.page !== undefined) {
-        if (raw.page === null) {
+      if (Object.prototype.hasOwnProperty.call(raw, "page")) {
+        if (raw["page"] === null) {
           page = null;
         } else {
           try {
-            page = pageTransferTypeConverter.fromTransferType(raw.page);
+            page = pageTransferTypeConverter.fromTransferType(raw["page"]);
           } catch (error) {
             __nexgenDefinitions.collect(violations, "page", error);
           }
@@ -142,8 +148,11 @@ export const blockTransferTypeConverter =
 
     public toTransferType(value: Block): unknown {
       const violations: __nexgenDefinitions.Violation[] = [];
-      const out: Record<string, unknown> = {};
-      out.blockId = value.blockId;
+      const out: Record<string, unknown> = Object.create(null) as Record<
+        string,
+        unknown
+      >;
+      out["blockId"] = value.blockId;
       if (!Number.isSafeInteger(value.order)) {
         violations.push({ path: "order", reason: "exceeds ±(2^53-1) integer cap" });
       } else {
@@ -154,12 +163,12 @@ export const blockTransferTypeConverter =
           });
         }
       }
-      out.order = value.order;
+      out["order"] = value.order;
       if (value.text !== undefined) {
-        out.text = value.text;
+        out["text"] = value.text;
       }
       if (value.style !== undefined) {
-        out.style = (() => {
+        out["style"] = (() => {
           try {
             return blockStyleTransferTypeConverter.toTransferType(value.style);
           } catch (error) {
@@ -169,7 +178,7 @@ export const blockTransferTypeConverter =
         })();
       }
       if (value.page !== undefined) {
-        out.page =
+        out["page"] =
           value.page === null
             ? null
             : (() => {
@@ -199,28 +208,31 @@ export const blockStyleTransferTypeConverter =
       }
 
       let bold: boolean | undefined = undefined as unknown as boolean | undefined;
-      if (raw.bold === null) {
+      if (Object.prototype.hasOwnProperty.call(raw, "bold") && raw["bold"] === null) {
         violations.push({ path: "bold", reason: "explicit null not allowed" });
-      } else if (raw.bold !== undefined) {
-        if (typeof raw.bold !== "boolean") {
+      } else if (Object.prototype.hasOwnProperty.call(raw, "bold")) {
+        if (typeof raw["bold"] !== "boolean") {
           violations.push({ path: "bold", reason: "expected boolean" });
         } else {
-          bold = raw.bold;
+          bold = raw["bold"];
         }
       }
 
       let indent: number | undefined = undefined as unknown as number | undefined;
-      if (raw.indent === null) {
+      if (
+        Object.prototype.hasOwnProperty.call(raw, "indent") &&
+        raw["indent"] === null
+      ) {
         violations.push({ path: "indent", reason: "explicit null not allowed" });
-      } else if (raw.indent !== undefined) {
-        if (typeof raw.indent !== "number" || !Number.isSafeInteger(raw.indent)) {
+      } else if (Object.prototype.hasOwnProperty.call(raw, "indent")) {
+        if (typeof raw["indent"] !== "number" || !Number.isSafeInteger(raw["indent"])) {
           violations.push({ path: "indent", reason: "expected integer" });
         } else {
-          indent = raw.indent;
-          if (raw.indent < 0) {
+          indent = raw["indent"];
+          if (raw["indent"] < 0) {
             violations.push({
               path: "indent",
-              reason: `must be >= 0, got ${raw.indent}`,
+              reason: `must be >= 0, got ${raw["indent"]}`,
             });
           }
         }
@@ -247,9 +259,12 @@ export const blockStyleTransferTypeConverter =
 
     public toTransferType(value: BlockStyle): unknown {
       const violations: __nexgenDefinitions.Violation[] = [];
-      const out: Record<string, unknown> = {};
+      const out: Record<string, unknown> = Object.create(null) as Record<
+        string,
+        unknown
+      >;
       if (value.bold !== undefined) {
-        out.bold = value.bold;
+        out["bold"] = value.bold;
       }
       if (value.indent !== undefined) {
         if (!Number.isSafeInteger(value.indent)) {
@@ -262,7 +277,7 @@ export const blockStyleTransferTypeConverter =
             });
           }
         }
-        out.indent = value.indent;
+        out["indent"] = value.indent;
       }
       if (violations.length) {
         throw __nexgenDefinitions.payloadValidationError(violations);

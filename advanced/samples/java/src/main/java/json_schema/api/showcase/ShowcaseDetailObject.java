@@ -74,8 +74,13 @@ public final class ShowcaseDetailObject implements Showcase.Detail {
     public static final class Serializer extends com.fasterxml.jackson.databind.JsonSerializer<ShowcaseDetailObject> {
         @Override
         public void serialize(ShowcaseDetailObject value, JsonGenerator gen, SerializerProvider serializers) throws IOException {
+            JsonGenerator target = gen;
+            com.fasterxml.jackson.databind.util.TokenBuffer pending = new com.fasterxml.jackson.databind.util.TokenBuffer(gen.getCodec(), false);
+            gen = pending;
             List<Violation> violations = new ArrayList<>();
-            if (value.code != null) {
+            if (value.code == null) {
+                violations.add(new Violation("code", "required"));
+            } else {
                 int length = value.code.codePointCount(0, value.code.length());
                 if (length < 1) {
                     violations.add(new Violation("code", "must have length >= 1, got " + length));
@@ -113,6 +118,7 @@ public final class ShowcaseDetailObject implements Showcase.Detail {
                 }
             }
             gen.writeEndObject();
+            pending.serialize(target);
         }
     }
 

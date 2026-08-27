@@ -127,8 +127,16 @@ public final class TextNote implements Note {
     public static final class Serializer extends com.fasterxml.jackson.databind.JsonSerializer<TextNote> {
         @Override
         public void serialize(TextNote value, JsonGenerator gen, SerializerProvider serializers) throws IOException {
+            JsonGenerator target = gen;
+            com.fasterxml.jackson.databind.util.TokenBuffer pending = new com.fasterxml.jackson.databind.util.TokenBuffer(gen.getCodec(), false);
+            gen = pending;
             List<Violation> violations = new ArrayList<>();
-            if (value.body != null) {
+            if (value.kind == null) {
+                violations.add(new Violation("kind", "required"));
+            }
+            if (value.body == null) {
+                violations.add(new Violation("body", "required"));
+            } else {
                 int length = value.body.codePointCount(0, value.body.length());
                 if (length < 1) {
                     violations.add(new Violation("body", "must have length >= 1, got " + length));
@@ -166,6 +174,7 @@ public final class TextNote implements Note {
                 }
             }
             gen.writeEndObject();
+            pending.serialize(target);
         }
     }
 

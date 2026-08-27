@@ -66,8 +66,13 @@ public final class ShowcaseRowsItem {
     public static final class Serializer extends com.fasterxml.jackson.databind.JsonSerializer<ShowcaseRowsItem> {
         @Override
         public void serialize(ShowcaseRowsItem value, JsonGenerator gen, SerializerProvider serializers) throws IOException {
+            JsonGenerator target = gen;
+            com.fasterxml.jackson.databind.util.TokenBuffer pending = new com.fasterxml.jackson.databind.util.TokenBuffer(gen.getCodec(), false);
+            gen = pending;
             List<Violation> violations = new ArrayList<>();
-            if (value.cell != null) {
+            if (value.cell == null) {
+                violations.add(new Violation("cell", "required"));
+            } else {
                 int length = value.cell.codePointCount(0, value.cell.length());
                 if (length < 1) {
                     violations.add(new Violation("cell", "must have length >= 1, got " + length));
@@ -99,6 +104,7 @@ public final class ShowcaseRowsItem {
                 }
             }
             gen.writeEndObject();
+            pending.serialize(target);
         }
     }
 

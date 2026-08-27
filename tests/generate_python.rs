@@ -2500,6 +2500,34 @@ fn generate_unformatted_python_package(
     output_path
 }
 
+#[test]
+fn python_json_omits_empty_dependent_required_bodies() {
+    let temp_dir = unique_output_path("py-empty-dependent-required");
+    let output_path = generate_unformatted_python_package(
+        &temp_dir,
+        r##"nexusrpc: "1.0.0"
+$schema: https://json-schema.org/draft/2020-12/schema
+$defs:
+  Model:
+    type: object
+    properties:
+      trigger: { type: string }
+    dependentRequired:
+      trigger: []
+"##,
+        false,
+    );
+
+    let models = fs::read_to_string(output_path.join("models.py")).unwrap();
+    assert_eq!(
+        models.matches("if \"trigger\" in raw:").count(),
+        1,
+        "{models}"
+    );
+    assert!(!models.contains("if \"trigger\" in out:"), "{models}");
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
 /// A docstring body that *ends* in a double quote runs straight into the closing
 /// `"""` delimiter. Escaping only the three-quote sequence leaves four consecutive
 /// quotes and the module does not parse at all, so this is asserted by importing

@@ -1245,6 +1245,7 @@ fn java_json_dispatches_a_non_string_discriminant_by_value() {
 /// parent's list, in both directions (`03#8`, P11).
 const JAVA_NESTED_PATH_SCHEMA: &str = r##"$schema: https://json-schema.org/draft/2020-12/schema
 type: object
+required: [address]
 properties:
   address: { $ref: "#/$defs/Addr" }
   addresses:
@@ -1285,6 +1286,12 @@ fn java_json_repaths_nested_violations_on_serialize() {
     let serializer = model.split("class Serializer").nth(1).unwrap();
     let serializer = serializer.split("class Deserializer").next().unwrap();
     for expected in [
+        "if (value.address == null) {",
+        "violations.add(new Violation(\"address\", \"required\"));",
+        "TokenBuffer pending = new com.fasterxml.jackson.databind.util.TokenBuffer(gen.getCodec(), false);",
+        "TokenBuffer nestedBuffer0 = new com.fasterxml.jackson.databind.util.TokenBuffer(gen.getCodec(), false);",
+        "nestedBuffer0.serialize(gen);",
+        "pending.serialize(target);",
         "} catch (ApplicationFailure nested0) {",
         "if (!\"PayloadValidationError\".equals(nested0.getType()) || nested0.getDetails().getSize() == 0) {",
         "List<Violation> nestedViolations0 = (List<Violation>) nested0.getDetails().get(0, List.class);",

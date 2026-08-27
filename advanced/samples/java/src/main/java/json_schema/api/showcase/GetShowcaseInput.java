@@ -58,11 +58,23 @@ public final class GetShowcaseInput {
     public static final class Serializer extends com.fasterxml.jackson.databind.JsonSerializer<GetShowcaseInput> {
         @Override
         public void serialize(GetShowcaseInput value, JsonGenerator gen, SerializerProvider serializers) throws IOException {
+            JsonGenerator target = gen;
+            com.fasterxml.jackson.databind.util.TokenBuffer pending = new com.fasterxml.jackson.databind.util.TokenBuffer(gen.getCodec(), false);
+            gen = pending;
+            List<Violation> violations = new ArrayList<>();
+            if (value.id == null) {
+                violations.add(new Violation("id", "required"));
+            }
+            if (!violations.isEmpty()) {
+                // TODO: Use PayloadValidationException.newPayloadValidationException once it is available in an SDK release.
+                throw ApplicationFailure.newNonRetryableFailure("Payload validation failed", "PayloadValidationError", violations);
+            }
             gen.writeStartObject();
             if (value.id != null) {
                 gen.writeStringField("id", value.id);
             }
             gen.writeEndObject();
+            pending.serialize(target);
         }
     }
 

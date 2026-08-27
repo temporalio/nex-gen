@@ -58,11 +58,23 @@ public final class SendMessageOutput {
     public static final class Serializer extends com.fasterxml.jackson.databind.JsonSerializer<SendMessageOutput> {
         @Override
         public void serialize(SendMessageOutput value, JsonGenerator gen, SerializerProvider serializers) throws IOException {
+            JsonGenerator target = gen;
+            com.fasterxml.jackson.databind.util.TokenBuffer pending = new com.fasterxml.jackson.databind.util.TokenBuffer(gen.getCodec(), false);
+            gen = pending;
+            List<Violation> violations = new ArrayList<>();
+            if (value.messageId == null) {
+                violations.add(new Violation("messageId", "required"));
+            }
+            if (!violations.isEmpty()) {
+                // TODO: Use PayloadValidationException.newPayloadValidationException once it is available in an SDK release.
+                throw ApplicationFailure.newNonRetryableFailure("Payload validation failed", "PayloadValidationError", violations);
+            }
             gen.writeStartObject();
             if (value.messageId != null) {
                 gen.writeStringField("messageId", value.messageId);
             }
             gen.writeEndObject();
+            pending.serialize(target);
         }
     }
 

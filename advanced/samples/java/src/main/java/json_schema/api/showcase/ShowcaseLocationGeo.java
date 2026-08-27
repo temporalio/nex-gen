@@ -74,6 +74,9 @@ public final class ShowcaseLocationGeo {
     public static final class Serializer extends com.fasterxml.jackson.databind.JsonSerializer<ShowcaseLocationGeo> {
         @Override
         public void serialize(ShowcaseLocationGeo value, JsonGenerator gen, SerializerProvider serializers) throws IOException {
+            JsonGenerator target = gen;
+            com.fasterxml.jackson.databind.util.TokenBuffer pending = new com.fasterxml.jackson.databind.util.TokenBuffer(gen.getCodec(), false);
+            gen = pending;
             List<Violation> violations = new ArrayList<>();
             if (value.lat != null) {
                 if (!Double.isFinite(value.lat)) {
@@ -117,6 +120,7 @@ public final class ShowcaseLocationGeo {
                 }
             }
             gen.writeEndObject();
+            pending.serialize(target);
         }
     }
 

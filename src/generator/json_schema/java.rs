@@ -1085,12 +1085,23 @@ fn render_java_array_checks(
     }
     if let Some(matcher) = &constraints.contains {
         let boxed = element_ty.boxed_name();
-        let condition = java_matcher_condition(matcher, "element", element_ty, scope);
-        let guard = java_typed_matcher_guard(matcher, "element", element_ty);
+        let (matcher_value, matcher_ty) =
+            if matches!(element_ty, JavaType::Temporal(_) | JavaType::Bytes(_)) {
+                (
+                    java_unique_key_expr(element_ty, "element", 0),
+                    JavaType::String,
+                )
+            } else {
+                ("element".to_string(), element_ty.clone())
+            };
+        let condition = java_matcher_condition(matcher, &matcher_value, &matcher_ty, scope);
+        let guard = java_typed_matcher_guard(matcher, &matcher_value, &matcher_ty);
         let effective_min = constraints.min_contains.unwrap_or(1);
         output.push_str(&format!("{indent}int matchCount = 0;\n"));
         output.push_str(&format!("{indent}for ({boxed} element : {list}) {{\n"));
-        output.push_str(&format!("{indent}    if ({guard} && ({condition})) {{\n"));
+        output.push_str(&format!(
+            "{indent}    if (element != null && ({guard}) && ({condition})) {{\n"
+        ));
         output.push_str(&format!("{indent}        matchCount++;\n"));
         output.push_str(&format!("{indent}    }}\n"));
         output.push_str(&format!("{indent}}}\n"));
@@ -3057,9 +3068,17 @@ fn java_string_literal(value: &str) -> String {
         match character {
             '"' => output.push_str("\\\""),
             '\\' => output.push_str("\\\\"),
+            '\u{0008}' => output.push_str("\\b"),
             '\n' => output.push_str("\\n"),
             '\r' => output.push_str("\\r"),
             '\t' => output.push_str("\\t"),
+            '\u{000c}' => output.push_str("\\f"),
+            other if other <= '\u{001f}' || ('\u{007f}'..='\u{009f}').contains(&other) => {
+                use std::fmt::Write as _;
+                write!(output, "\\u{:04x}", u32::from(other)).unwrap();
+            }
+            '\u{2028}' => output.push_str("\\u2028"),
+            '\u{2029}' => output.push_str("\\u2029"),
             other => output.push(other),
         }
     }
@@ -3423,6 +3442,12 @@ fn render_equals_hashcode_tostring(
 /// `render_java_serialize_field_check`. A closed value (`const`/`enum`) needs no
 /// serialize check: its value class can only hold a known constant.
 fn field_has_serialize_check(field: &FieldPlan) -> bool {
+    // Java reference types can be constructed with null despite @NullMarked.
+    // A required, non-nullable reference therefore needs an explicit outbound
+    // presence check even when it carries no other schema constraint.
+    if field.required && !field.nullable && !field.is_primitive() {
+        return true;
+    }
     // A union member (on its own, or as a collection's element) is re-checked
     // against the branch it holds, when any branch declares a constraint.
     if let Some(union) = field.union.as_ref().or(field.element_union.as_ref())
@@ -3604,12 +3629,22 @@ fn render_java_serialize_field_check(output: &mut String, field: &FieldPlan, ind
             ));
         }
     }
-    if body.is_empty() {
+    let requires_non_null = field.required && !field.nullable && !field.is_primitive();
+    if body.is_empty() && !requires_non_null {
         return;
     }
     if field.is_primitive() {
         // A stored primitive is always present; a bare block scopes the locals.
         output.push_str(&format!("{indent}{{\n{body}{indent}}}\n"));
+    } else if requires_non_null {
+        output.push_str(&format!(
+            "{indent}if ({accessor} == null) {{\n{indent}    violations.add(new Violation({json}, \"required\"));\n{indent}}}"
+        ));
+        if !body.is_empty() {
+            output.push_str(&format!(" else {{\n{body}{indent}}}\n"));
+        } else {
+            output.push('\n');
+        }
     } else {
         output.push_str(&format!(
             "{indent}if ({accessor} != null) {{\n{body}{indent}}}\n"
@@ -3683,10 +3718,21 @@ fn render_java_serialize_dependent_required(
         return;
     };
     for (trigger, deps) in dependent_required {
-        let trigger_present = java_field_present_expr(fields, trigger, open);
+        if deps.is_empty() {
+            continue;
+        }
+        let trigger_present = if open {
+            format!("wireKeys.contains({})", java_string_literal(trigger))
+        } else {
+            java_field_present_expr(fields, trigger, false)
+        };
         output.push_str(&format!("{indent}if ({trigger_present}) {{\n"));
         for dep in deps {
-            let dep_present = java_field_present_expr(fields, dep, open);
+            let dep_present = if open {
+                format!("wireKeys.contains({})", java_string_literal(dep))
+            } else {
+                java_field_present_expr(fields, dep, false)
+            };
             let reason = format!(
                 "property {} is required when {} is present",
                 quote_for_message(dep),
@@ -3822,6 +3868,13 @@ fn render_object_serializer(
     output.push_str(&format!(
         "        @Override\n        public void serialize({class} value, JsonGenerator gen, SerializerProvider serializers) throws IOException {{\n"
     ));
+    // Buffer the complete object. Nested validating serializers can fail after
+    // they have started writing; buffering keeps the caller's generator
+    // untouched until every sibling has been checked and the aggregate is
+    // known to be empty (P11/P12).
+    output.push_str("            JsonGenerator target = gen;\n");
+    output.push_str("            com.fasterxml.jackson.databind.util.TokenBuffer pending = new com.fasterxml.jackson.databind.util.TokenBuffer(gen.getCodec(), false);\n");
+    output.push_str("            gen = pending;\n");
 
     // A member whose value is itself a validating model reports its failures
     // through its own payload-validation failure; those have to be re-pathed under
@@ -3953,6 +4006,7 @@ fn render_object_serializer(
         render_payload_validation_failure(output, "                ");
         output.push_str("            }\n");
     }
+    output.push_str("            pending.serialize(target);\n");
     output.push_str("        }\n    }\n\n");
 }
 
@@ -4007,9 +4061,13 @@ fn render_capturing_value_write(
             output.push_str(&format!("{indent}gen.writeEndArray();\n"));
         }
         _ => {
+            let buffer = format!("nestedBuffer{depth}");
+            output.push_str(&format!(
+                "{indent}com.fasterxml.jackson.databind.util.TokenBuffer {buffer} = new com.fasterxml.jackson.databind.util.TokenBuffer(gen.getCodec(), false);\n"
+            ));
             output.push_str(&format!("{indent}try {{\n"));
             output.push_str(&format!(
-                "{indent}    serializers.defaultSerializeValue({accessor}, gen);\n"
+                "{indent}    serializers.defaultSerializeValue({accessor}, {buffer});\n{indent}    {buffer}.serialize(gen);\n"
             ));
             output.push_str(&format!(
                 "{indent}}} catch (ApplicationFailure nested{depth}) {{\n"
@@ -4023,10 +4081,11 @@ fn render_capturing_value_write(
             output.push_str(&format!(
                 "{indent}    for (Violation nestedViolation{depth} : nestedViolations{depth}) {{\n{indent}        violations.add(nestedViolation{depth}.withPathPrefix({path_expr}));\n{indent}    }}\n"
             ));
-            // The nested serializer aborted mid-value, so the generator is
-            // expecting one; nothing more can be written. Throw here with the
-            // parent's own violations already merged in (P11).
-            render_payload_validation_failure(output, &format!("{indent}    "));
+            // Keep the buffered parent structurally writable so validation can
+            // continue through every sibling. The parent buffer is discarded
+            // when the final aggregate is thrown, so this placeholder is never
+            // observable on the wire.
+            output.push_str(&format!("{indent}    gen.writeNull();\n"));
             output.push_str(&format!("{indent}}}\n"));
         }
     }

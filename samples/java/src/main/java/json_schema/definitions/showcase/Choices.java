@@ -67,8 +67,10 @@ public final class Choices {
             gen.writeStartObject();
             for (Map.Entry<String, ChoicesValue> entry : value.additionalProperties.entrySet()) {
                 gen.writeFieldName(entry.getKey());
+                com.fasterxml.jackson.databind.util.TokenBuffer nestedBuffer0 = new com.fasterxml.jackson.databind.util.TokenBuffer(gen.getCodec(), false);
                 try {
-                    serializers.defaultSerializeValue(entry.getValue(), gen);
+                    serializers.defaultSerializeValue(entry.getValue(), nestedBuffer0);
+                    nestedBuffer0.serialize(gen);
                 } catch (ApplicationFailure nested0) {
                     if (!"PayloadValidationError".equals(nested0.getType()) || nested0.getDetails().getSize() == 0) {
                         throw nested0;
@@ -80,8 +82,7 @@ public final class Choices {
                     for (Violation nestedViolation0 : nestedViolations0) {
                         violations.add(nestedViolation0.withPathPrefix(entry.getKey()));
                     }
-                    // TODO: Use PayloadValidationException.newPayloadValidationException once it is available in an SDK release.
-                    throw ApplicationFailure.newNonRetryableFailure("Payload validation failed", "PayloadValidationError", violations);
+                    gen.writeNull();
                 }
             }
             gen.writeEndObject();

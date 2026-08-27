@@ -60,11 +60,23 @@ public final class GetPageInput {
     public static final class Serializer extends com.fasterxml.jackson.databind.JsonSerializer<GetPageInput> {
         @Override
         public void serialize(GetPageInput value, JsonGenerator gen, SerializerProvider serializers) throws IOException {
+            JsonGenerator target = gen;
+            com.fasterxml.jackson.databind.util.TokenBuffer pending = new com.fasterxml.jackson.databind.util.TokenBuffer(gen.getCodec(), false);
+            gen = pending;
+            List<Violation> violations = new ArrayList<>();
+            if (value.pageId == null) {
+                violations.add(new Violation("pageId", "required"));
+            }
+            if (!violations.isEmpty()) {
+                // TODO: Use PayloadValidationException.newPayloadValidationException once it is available in an SDK release.
+                throw ApplicationFailure.newNonRetryableFailure("Payload validation failed", "PayloadValidationError", violations);
+            }
             gen.writeStartObject();
             if (value.pageId != null) {
                 gen.writeStringField("pageId", value.pageId);
             }
             gen.writeEndObject();
+            pending.serialize(target);
         }
     }
 

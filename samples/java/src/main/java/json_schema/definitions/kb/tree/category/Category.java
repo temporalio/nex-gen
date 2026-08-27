@@ -84,7 +84,16 @@ public final class Category {
     public static final class Serializer extends com.fasterxml.jackson.databind.JsonSerializer<Category> {
         @Override
         public void serialize(Category value, JsonGenerator gen, SerializerProvider serializers) throws IOException {
+            JsonGenerator target = gen;
+            com.fasterxml.jackson.databind.util.TokenBuffer pending = new com.fasterxml.jackson.databind.util.TokenBuffer(gen.getCodec(), false);
+            gen = pending;
             List<Violation> violations = new ArrayList<>();
+            if (value.id == null) {
+                violations.add(new Violation("id", "required"));
+            }
+            if (value.name == null) {
+                violations.add(new Violation("name", "required"));
+            }
             gen.writeStartObject();
             if (value.id != null) {
                 gen.writeStringField("id", value.id);
@@ -100,8 +109,10 @@ public final class Category {
                     if (nestedElement0 == null) {
                         gen.writeNull();
                     } else {
+                        com.fasterxml.jackson.databind.util.TokenBuffer nestedBuffer1 = new com.fasterxml.jackson.databind.util.TokenBuffer(gen.getCodec(), false);
                         try {
-                            serializers.defaultSerializeValue(nestedElement0, gen);
+                            serializers.defaultSerializeValue(nestedElement0, nestedBuffer1);
+                            nestedBuffer1.serialize(gen);
                         } catch (ApplicationFailure nested1) {
                             if (!"PayloadValidationError".equals(nested1.getType()) || nested1.getDetails().getSize() == 0) {
                                 throw nested1;
@@ -113,8 +124,7 @@ public final class Category {
                             for (Violation nestedViolation1 : nestedViolations1) {
                                 violations.add(nestedViolation1.withPathPrefix("children" + "[" + nestedIndex0 + "]"));
                             }
-                            // TODO: Use PayloadValidationException.newPayloadValidationException once it is available in an SDK release.
-                            throw ApplicationFailure.newNonRetryableFailure("Payload validation failed", "PayloadValidationError", violations);
+                            gen.writeNull();
                         }
                     }
                 }
@@ -125,6 +135,7 @@ public final class Category {
                 // TODO: Use PayloadValidationException.newPayloadValidationException once it is available in an SDK release.
                 throw ApplicationFailure.newNonRetryableFailure("Payload validation failed", "PayloadValidationError", violations);
             }
+            pending.serialize(target);
         }
     }
 
