@@ -66,6 +66,9 @@ public final class ShowcaseLedgerValue {
     public static final class Serializer extends com.fasterxml.jackson.databind.JsonSerializer<ShowcaseLedgerValue> {
         @Override
         public void serialize(ShowcaseLedgerValue value, JsonGenerator gen, SerializerProvider serializers) throws IOException {
+            JsonGenerator target = gen;
+            com.fasterxml.jackson.databind.util.TokenBuffer pending = new com.fasterxml.jackson.databind.util.TokenBuffer(gen.getCodec(), false);
+            gen = pending;
             List<Violation> violations = new ArrayList<>();
             {
                 if (value.amount < -SpecNumbers.INTEGER_CAP || value.amount > SpecNumbers.INTEGER_CAP) {
@@ -98,6 +101,7 @@ public final class ShowcaseLedgerValue {
                 }
             }
             gen.writeEndObject();
+            pending.serialize(target);
         }
     }
 

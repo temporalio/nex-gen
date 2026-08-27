@@ -64,6 +64,9 @@ public final class ShowcaseMetadata {
     public static final class Serializer extends com.fasterxml.jackson.databind.JsonSerializer<ShowcaseMetadata> {
         @Override
         public void serialize(ShowcaseMetadata value, JsonGenerator gen, SerializerProvider serializers) throws IOException {
+            JsonGenerator target = gen;
+            com.fasterxml.jackson.databind.util.TokenBuffer pending = new com.fasterxml.jackson.databind.util.TokenBuffer(gen.getCodec(), false);
+            gen = pending;
             List<Violation> violations = new ArrayList<>();
             java.util.Set<String> wireKeys = new java.util.LinkedHashSet<>();
             if (value.additionalProperties != null) {
@@ -88,6 +91,7 @@ public final class ShowcaseMetadata {
                 }
             }
             gen.writeEndObject();
+            pending.serialize(target);
         }
     }
 

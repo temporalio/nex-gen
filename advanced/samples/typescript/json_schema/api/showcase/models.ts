@@ -766,39 +766,44 @@ export const addressTransferTypeConverter =
       }
 
       let street: string = undefined as unknown as string;
-      if (raw.street === undefined || raw.street === null) {
+      if (
+        !Object.prototype.hasOwnProperty.call(raw, "street") ||
+        raw["street"] === null
+      ) {
         violations.push({ path: "street", reason: "required" });
       } else {
-        if (typeof raw.street !== "string") {
+        if (typeof raw["street"] !== "string") {
           violations.push({ path: "street", reason: "expected string" });
         } else {
-          street = raw.street;
+          street = raw["street"];
         }
       }
 
       let city: string | undefined = undefined as unknown as string | undefined;
-      if (raw.city === null) {
+      if (Object.prototype.hasOwnProperty.call(raw, "city") && raw["city"] === null) {
         violations.push({ path: "city", reason: "explicit null not allowed" });
-      } else if (raw.city !== undefined) {
-        if (typeof raw.city !== "string") {
+      } else if (Object.prototype.hasOwnProperty.call(raw, "city")) {
+        if (typeof raw["city"] !== "string") {
           violations.push({ path: "city", reason: "expected string" });
         } else {
-          city = raw.city;
+          city = raw["city"];
         }
       }
 
       let zip: number | undefined = undefined as unknown as number | undefined;
-      if (raw.zip === null) {
+      if (Object.prototype.hasOwnProperty.call(raw, "zip") && raw["zip"] === null) {
         violations.push({ path: "zip", reason: "explicit null not allowed" });
-      } else if (raw.zip !== undefined) {
-        if (typeof raw.zip !== "number" || !Number.isSafeInteger(raw.zip)) {
+      } else if (Object.prototype.hasOwnProperty.call(raw, "zip")) {
+        if (typeof raw["zip"] !== "number" || !Number.isSafeInteger(raw["zip"])) {
           violations.push({ path: "zip", reason: "expected integer" });
         } else {
-          zip = raw.zip;
+          zip = raw["zip"];
         }
       }
 
-      const additionalProperties: Record<string, unknown> = {};
+      const additionalProperties: Record<string, unknown> = Object.create(
+        null,
+      ) as Record<string, unknown>;
       for (const key of Object.keys(raw)) {
         if (!ADDRESS_DECLARED.has(key)) {
           additionalProperties[key] = raw[key];
@@ -820,16 +825,19 @@ export const addressTransferTypeConverter =
 
     public toTransferType(value: Address): unknown {
       const violations: __nexgenDefinitions.Violation[] = [];
-      const out: Record<string, unknown> = {};
-      out.street = value.street;
+      const out: Record<string, unknown> = Object.create(null) as Record<
+        string,
+        unknown
+      >;
+      out["street"] = value.street;
       if (value.city !== undefined) {
-        out.city = value.city;
+        out["city"] = value.city;
       }
       if (value.zip !== undefined) {
         if (!Number.isSafeInteger(value.zip)) {
           violations.push({ path: "zip", reason: "exceeds ±(2^53-1) integer cap" });
         }
-        out.zip = value.zip;
+        out["zip"] = value.zip;
       }
       for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
         if (ADDRESS_DECLARED.has(key)) {
@@ -859,7 +867,9 @@ export const addressBookTransferTypeConverter =
       }
 
       const keys = Object.keys(raw);
-      const additionalProperties: Record<string, Address> = {};
+      const additionalProperties: Record<string, Address> = Object.create(
+        null,
+      ) as Record<string, Address>;
       for (const key of keys) {
         let entry: Address | undefined = undefined;
         try {
@@ -879,7 +889,10 @@ export const addressBookTransferTypeConverter =
 
     public toTransferType(value: AddressBook): unknown {
       const violations: __nexgenDefinitions.Violation[] = [];
-      const out: Record<string, unknown> = {};
+      const out: Record<string, unknown> = Object.create(null) as Record<
+        string,
+        unknown
+      >;
       for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
         out[key] = (() => {
           try {
@@ -928,7 +941,9 @@ export const attributesTransferTypeConverter =
           });
         }
       }
-      const additionalProperties: Record<string, string> = {};
+      const additionalProperties: Record<string, string> = Object.create(
+        null,
+      ) as Record<string, string>;
       for (const key of keys) {
         let entry: string | undefined = undefined;
         if (typeof raw[key] !== "string") {
@@ -948,7 +963,10 @@ export const attributesTransferTypeConverter =
 
     public toTransferType(value: Attributes): unknown {
       const violations: __nexgenDefinitions.Violation[] = [];
-      const out: Record<string, unknown> = {};
+      const out: Record<string, unknown> = Object.create(null) as Record<
+        string,
+        unknown
+      >;
       for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
         out[key] = entry;
       }
@@ -991,7 +1009,9 @@ export const blobIndexTransferTypeConverter =
       }
 
       const keys = Object.keys(raw);
-      const additionalProperties: Record<string, Uint8Array> = {};
+      const additionalProperties: Record<string, Uint8Array> = Object.create(
+        null,
+      ) as Record<string, Uint8Array>;
       for (const key of keys) {
         let entry: Uint8Array | undefined = undefined;
         if (typeof raw[key] !== "string") {
@@ -1013,7 +1033,10 @@ export const blobIndexTransferTypeConverter =
     }
 
     public toTransferType(value: BlobIndex): unknown {
-      const out: Record<string, unknown> = {};
+      const out: Record<string, unknown> = Object.create(null) as Record<
+        string,
+        unknown
+      >;
       for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
         out[key] = __nexgenDefinitions.bytesToBase64(entry);
       }
@@ -1032,7 +1055,9 @@ export const choicesTransferTypeConverter =
       }
 
       const keys = Object.keys(raw);
-      const additionalProperties: Record<string, ChoicesValue> = {};
+      const additionalProperties: Record<string, ChoicesValue> = Object.create(
+        null,
+      ) as Record<string, ChoicesValue>;
       for (const key of keys) {
         let entry: ChoicesValue | undefined = undefined;
         try {
@@ -1052,7 +1077,10 @@ export const choicesTransferTypeConverter =
 
     public toTransferType(value: Choices): unknown {
       const violations: __nexgenDefinitions.Violation[] = [];
-      const out: Record<string, unknown> = {};
+      const out: Record<string, unknown> = Object.create(null) as Record<
+        string,
+        unknown
+      >;
       for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
         out[key] = (() => {
           try {
@@ -1133,36 +1161,41 @@ export const circleTransferTypeConverter =
       }
 
       let kind: "circle" = undefined as unknown as "circle";
-      if (raw.kind === undefined || raw.kind === null) {
+      if (!Object.prototype.hasOwnProperty.call(raw, "kind") || raw["kind"] === null) {
         violations.push({ path: "kind", reason: "required" });
       } else {
-        if (typeof raw.kind !== "string") {
+        if (typeof raw["kind"] !== "string") {
           violations.push({ path: "kind", reason: "expected string" });
-        } else if (raw.kind !== CIRCLE_KIND_CONST) {
+        } else if (raw["kind"] !== CIRCLE_KIND_CONST) {
           violations.push({ path: "kind", reason: `must equal "circle"` });
         } else {
-          kind = raw.kind as "circle";
+          kind = raw["kind"] as "circle";
         }
       }
 
       let radius: number = undefined as unknown as number;
-      if (raw.radius === undefined || raw.radius === null) {
+      if (
+        !Object.prototype.hasOwnProperty.call(raw, "radius") ||
+        raw["radius"] === null
+      ) {
         violations.push({ path: "radius", reason: "required" });
       } else {
-        if (typeof raw.radius !== "number") {
+        if (typeof raw["radius"] !== "number") {
           violations.push({ path: "radius", reason: "expected number" });
         } else {
-          radius = raw.radius;
-          if (!Number.isFinite(raw.radius)) {
+          radius = raw["radius"];
+          if (!Number.isFinite(raw["radius"])) {
             violations.push({
               path: "radius",
-              reason: `must be a finite number, got ${raw.radius}`,
+              reason: `must be a finite number, got ${raw["radius"]}`,
             });
           }
         }
       }
 
-      const additionalProperties: Record<string, unknown> = {};
+      const additionalProperties: Record<string, unknown> = Object.create(
+        null,
+      ) as Record<string, unknown>;
       for (const key of Object.keys(raw)) {
         if (!CIRCLE_DECLARED.has(key)) {
           additionalProperties[key] = raw[key];
@@ -1178,18 +1211,21 @@ export const circleTransferTypeConverter =
 
     public toTransferType(value: Circle): unknown {
       const violations: __nexgenDefinitions.Violation[] = [];
-      const out: Record<string, unknown> = {};
+      const out: Record<string, unknown> = Object.create(null) as Record<
+        string,
+        unknown
+      >;
       if (value.kind !== "circle") {
         violations.push({ path: "kind", reason: `must equal "circle"` });
       }
-      out.kind = value.kind;
+      out["kind"] = value.kind;
       if (!Number.isFinite(value.radius)) {
         violations.push({
           path: "radius",
           reason: `must be a finite number, got ${value.radius}`,
         });
       }
-      out.radius = value.radius;
+      out["radius"] = value.radius;
       for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
         if (CIRCLE_DECLARED.has(key)) {
           violations.push({
@@ -1220,44 +1256,52 @@ export const contactTsTransferTypeConverter =
       }
 
       let email: string | undefined = undefined as unknown as string | undefined;
-      if (raw.email === null) {
+      if (Object.prototype.hasOwnProperty.call(raw, "email") && raw["email"] === null) {
         violations.push({ path: "email", reason: "explicit null not allowed" });
-      } else if (raw.email !== undefined) {
-        if (typeof raw.email !== "string") {
+      } else if (Object.prototype.hasOwnProperty.call(raw, "email")) {
+        if (typeof raw["email"] !== "string") {
           violations.push({ path: "email", reason: "expected string" });
         } else {
-          email = raw.email;
+          email = raw["email"];
         }
       }
 
       let shippingStreet: string | undefined = undefined as unknown as
         | string
         | undefined;
-      if (raw.shippingStreet === null) {
+      if (
+        Object.prototype.hasOwnProperty.call(raw, "shippingStreet") &&
+        raw["shippingStreet"] === null
+      ) {
         violations.push({
           path: "shippingStreet",
           reason: "explicit null not allowed",
         });
-      } else if (raw.shippingStreet !== undefined) {
-        if (typeof raw.shippingStreet !== "string") {
+      } else if (Object.prototype.hasOwnProperty.call(raw, "shippingStreet")) {
+        if (typeof raw["shippingStreet"] !== "string") {
           violations.push({ path: "shippingStreet", reason: "expected string" });
         } else {
-          shippingStreet = raw.shippingStreet;
+          shippingStreet = raw["shippingStreet"];
         }
       }
 
       let shippingZip: string | undefined = undefined as unknown as string | undefined;
-      if (raw.shippingZip === null) {
+      if (
+        Object.prototype.hasOwnProperty.call(raw, "shippingZip") &&
+        raw["shippingZip"] === null
+      ) {
         violations.push({ path: "shippingZip", reason: "explicit null not allowed" });
-      } else if (raw.shippingZip !== undefined) {
-        if (typeof raw.shippingZip !== "string") {
+      } else if (Object.prototype.hasOwnProperty.call(raw, "shippingZip")) {
+        if (typeof raw["shippingZip"] !== "string") {
           violations.push({ path: "shippingZip", reason: "expected string" });
         } else {
-          shippingZip = raw.shippingZip;
+          shippingZip = raw["shippingZip"];
         }
       }
 
-      const additionalProperties: Record<string, unknown> = {};
+      const additionalProperties: Record<string, unknown> = Object.create(
+        null,
+      ) as Record<string, unknown>;
       for (const key of Object.keys(raw)) {
         if (!CONTACT_TS_DECLARED.has(key)) {
           additionalProperties[key] = raw[key];
@@ -1276,8 +1320,8 @@ export const contactTsTransferTypeConverter =
           reason: `must have at most 3 properties, got ${Object.keys(raw).length}`,
         });
       }
-      if (raw["shippingStreet"] !== undefined) {
-        if (raw["shippingZip"] === undefined) {
+      if (Object.prototype.hasOwnProperty.call(raw, "shippingStreet")) {
+        if (!Object.prototype.hasOwnProperty.call(raw, "shippingZip")) {
           violations.push({
             path: "shippingZip",
             reason: `property "shippingZip" is required when "shippingStreet" is present`,
@@ -1302,15 +1346,18 @@ export const contactTsTransferTypeConverter =
 
     public toTransferType(value: ContactTs): unknown {
       const violations: __nexgenDefinitions.Violation[] = [];
-      const out: Record<string, unknown> = {};
+      const out: Record<string, unknown> = Object.create(null) as Record<
+        string,
+        unknown
+      >;
       if (value.email !== undefined) {
-        out.email = value.email;
+        out["email"] = value.email;
       }
       if (value.shippingStreet !== undefined) {
-        out.shippingStreet = value.shippingStreet;
+        out["shippingStreet"] = value.shippingStreet;
       }
       if (value.shippingZip !== undefined) {
-        out.shippingZip = value.shippingZip;
+        out["shippingZip"] = value.shippingZip;
       }
       for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
         if (CONTACT_TS_DECLARED.has(key)) {
@@ -1334,8 +1381,8 @@ export const contactTsTransferTypeConverter =
           reason: `must have at most 3 properties, got ${Object.keys(out).length}`,
         });
       }
-      if (out["shippingStreet"] !== undefined) {
-        if (out["shippingZip"] === undefined) {
+      if (Object.prototype.hasOwnProperty.call(out, "shippingStreet")) {
+        if (!Object.prototype.hasOwnProperty.call(out, "shippingZip")) {
           violations.push({
             path: "shippingZip",
             reason: `property "shippingZip" is required when "shippingStreet" is present`,
@@ -1360,7 +1407,9 @@ export const dateIndexTransferTypeConverter =
       }
 
       const keys = Object.keys(raw);
-      const additionalProperties: Record<string, string> = {};
+      const additionalProperties: Record<string, string> = Object.create(
+        null,
+      ) as Record<string, string>;
       for (const key of keys) {
         let entry: string | undefined = undefined;
         if (typeof raw[key] !== "string") {
@@ -1387,7 +1436,10 @@ export const dateIndexTransferTypeConverter =
 
     public toTransferType(value: DateIndex): unknown {
       const violations: __nexgenDefinitions.Violation[] = [];
-      const out: Record<string, unknown> = {};
+      const out: Record<string, unknown> = Object.create(null) as Record<
+        string,
+        unknown
+      >;
       for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
         __nexgenDefinitions.validateTemporalDate(entry, key, violations);
         out[key] = entry;
@@ -1416,7 +1468,9 @@ export const extrasTransferTypeConverter =
           reason: `must have at most 4 properties, got ${keys.length}`,
         });
       }
-      const additionalProperties: Record<string, unknown> = {};
+      const additionalProperties: Record<string, unknown> = Object.create(
+        null,
+      ) as Record<string, unknown>;
       for (const key of keys) {
         additionalProperties[key] = raw[key];
       }
@@ -1428,7 +1482,10 @@ export const extrasTransferTypeConverter =
 
     public toTransferType(value: Extras): unknown {
       const violations: __nexgenDefinitions.Violation[] = [];
-      const out: Record<string, unknown> = {};
+      const out: Record<string, unknown> = Object.create(null) as Record<
+        string,
+        unknown
+      >;
       for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
         out[key] = entry;
       }
@@ -1463,7 +1520,9 @@ export const labelsTransferTypeConverter =
           reason: `must have at most 50 properties, got ${keys.length}`,
         });
       }
-      const additionalProperties: Record<string, string> = {};
+      const additionalProperties: Record<string, string> = Object.create(
+        null,
+      ) as Record<string, string>;
       for (const key of keys) {
         let entry: string | undefined = undefined;
         if (typeof raw[key] !== "string") {
@@ -1483,7 +1542,10 @@ export const labelsTransferTypeConverter =
 
     public toTransferType(value: Labels): unknown {
       const violations: __nexgenDefinitions.Violation[] = [];
-      const out: Record<string, unknown> = {};
+      const out: Record<string, unknown> = Object.create(null) as Record<
+        string,
+        unknown
+      >;
       for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
         out[key] = entry;
       }
@@ -1514,28 +1576,28 @@ export const linkNoteTransferTypeConverter =
       }
 
       let kind: "link" = undefined as unknown as "link";
-      if (raw.kind === undefined || raw.kind === null) {
+      if (!Object.prototype.hasOwnProperty.call(raw, "kind") || raw["kind"] === null) {
         violations.push({ path: "kind", reason: "required" });
       } else {
-        if (typeof raw.kind !== "string") {
+        if (typeof raw["kind"] !== "string") {
           violations.push({ path: "kind", reason: "expected string" });
-        } else if (raw.kind !== LINK_NOTE_KIND_CONST) {
+        } else if (raw["kind"] !== LINK_NOTE_KIND_CONST) {
           violations.push({ path: "kind", reason: `must equal "link"` });
         } else {
-          kind = raw.kind as "link";
+          kind = raw["kind"] as "link";
         }
       }
 
       let href: string = undefined as unknown as string;
-      if (raw.href === undefined || raw.href === null) {
+      if (!Object.prototype.hasOwnProperty.call(raw, "href") || raw["href"] === null) {
         violations.push({ path: "href", reason: "required" });
       } else {
-        if (typeof raw.href !== "string") {
+        if (typeof raw["href"] !== "string") {
           violations.push({ path: "href", reason: "expected string" });
         } else {
-          href = raw.href;
+          href = raw["href"];
           {
-            const codePoints = __nexgenDefinitions.codePointLength(raw.href, 1);
+            const codePoints = __nexgenDefinitions.codePointLength(raw["href"], 1);
             if (codePoints < 1) {
               violations.push({
                 path: "href",
@@ -1546,7 +1608,9 @@ export const linkNoteTransferTypeConverter =
         }
       }
 
-      const additionalProperties: Record<string, unknown> = {};
+      const additionalProperties: Record<string, unknown> = Object.create(
+        null,
+      ) as Record<string, unknown>;
       for (const key of Object.keys(raw)) {
         if (!LINK_NOTE_DECLARED.has(key)) {
           additionalProperties[key] = raw[key];
@@ -1562,11 +1626,14 @@ export const linkNoteTransferTypeConverter =
 
     public toTransferType(value: LinkNote): unknown {
       const violations: __nexgenDefinitions.Violation[] = [];
-      const out: Record<string, unknown> = {};
+      const out: Record<string, unknown> = Object.create(null) as Record<
+        string,
+        unknown
+      >;
       if (value.kind !== "link") {
         violations.push({ path: "kind", reason: `must equal "link"` });
       }
-      out.kind = value.kind;
+      out["kind"] = value.kind;
       {
         const codePoints = __nexgenDefinitions.codePointLength(value.href, 1);
         if (codePoints < 1) {
@@ -1576,7 +1643,7 @@ export const linkNoteTransferTypeConverter =
           });
         }
       }
-      out.href = value.href;
+      out["href"] = value.href;
       for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
         if (LINK_NOTE_DECLARED.has(key)) {
           violations.push({
@@ -1605,7 +1672,9 @@ export const metricsTransferTypeConverter =
       }
 
       const keys = Object.keys(raw);
-      const additionalProperties: Record<string, number> = {};
+      const additionalProperties: Record<string, number> = Object.create(
+        null,
+      ) as Record<string, number>;
       for (const key of keys) {
         let entry: number | undefined = undefined;
         if (typeof raw[key] !== "number") {
@@ -1631,7 +1700,10 @@ export const metricsTransferTypeConverter =
 
     public toTransferType(value: Metrics): unknown {
       const violations: __nexgenDefinitions.Violation[] = [];
-      const out: Record<string, unknown> = {};
+      const out: Record<string, unknown> = Object.create(null) as Record<
+        string,
+        unknown
+      >;
       for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
         if (!Number.isFinite(entry)) {
           violations.push({
@@ -1659,7 +1731,9 @@ export const nicknamesTransferTypeConverter =
       }
 
       const keys = Object.keys(raw);
-      const additionalProperties: Record<string, string | null> = {};
+      const additionalProperties: Record<string, string | null> = Object.create(
+        null,
+      ) as Record<string, string | null>;
       for (const key of keys) {
         let entry: string | null | undefined = undefined;
         if (raw[key] === null) {
@@ -1692,7 +1766,10 @@ export const nicknamesTransferTypeConverter =
 
     public toTransferType(value: Nicknames): unknown {
       const violations: __nexgenDefinitions.Violation[] = [];
-      const out: Record<string, unknown> = {};
+      const out: Record<string, unknown> = Object.create(null) as Record<
+        string,
+        unknown
+      >;
       for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
         if (entry !== null) {
           {
@@ -1775,7 +1852,9 @@ export const quotasTransferTypeConverter =
       }
 
       const keys = Object.keys(raw);
-      const additionalProperties: Record<string, number> = {};
+      const additionalProperties: Record<string, number> = Object.create(
+        null,
+      ) as Record<string, number>;
       for (const key of keys) {
         let entry: number | undefined = undefined;
         if (typeof raw[key] !== "number" || !Number.isSafeInteger(raw[key])) {
@@ -1807,7 +1886,10 @@ export const quotasTransferTypeConverter =
 
     public toTransferType(value: Quotas): unknown {
       const violations: __nexgenDefinitions.Violation[] = [];
-      const out: Record<string, unknown> = {};
+      const out: Record<string, unknown> = Object.create(null) as Record<
+        string,
+        unknown
+      >;
       for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
         if (!Number.isSafeInteger(entry)) {
           violations.push({ path: key, reason: "exceeds ±(2^53-1) integer cap" });
@@ -1845,24 +1927,30 @@ export const settingsTransferTypeConverter =
       }
 
       let theme: string | undefined = undefined as unknown as string | undefined;
-      if (raw.theme === null) {
+      if (Object.prototype.hasOwnProperty.call(raw, "theme") && raw["theme"] === null) {
         violations.push({ path: "theme", reason: "explicit null not allowed" });
-      } else if (raw.theme !== undefined) {
-        if (typeof raw.theme !== "string") {
+      } else if (Object.prototype.hasOwnProperty.call(raw, "theme")) {
+        if (typeof raw["theme"] !== "string") {
           violations.push({ path: "theme", reason: "expected string" });
         } else {
-          theme = raw.theme;
+          theme = raw["theme"];
         }
       }
 
       let fontSize: number | undefined = undefined as unknown as number | undefined;
-      if (raw.fontSize === null) {
+      if (
+        Object.prototype.hasOwnProperty.call(raw, "fontSize") &&
+        raw["fontSize"] === null
+      ) {
         violations.push({ path: "fontSize", reason: "explicit null not allowed" });
-      } else if (raw.fontSize !== undefined) {
-        if (typeof raw.fontSize !== "number" || !Number.isSafeInteger(raw.fontSize)) {
+      } else if (Object.prototype.hasOwnProperty.call(raw, "fontSize")) {
+        if (
+          typeof raw["fontSize"] !== "number" ||
+          !Number.isSafeInteger(raw["fontSize"])
+        ) {
           violations.push({ path: "fontSize", reason: "expected integer" });
         } else {
-          fontSize = raw.fontSize;
+          fontSize = raw["fontSize"];
         }
       }
 
@@ -1887,9 +1975,12 @@ export const settingsTransferTypeConverter =
 
     public toTransferType(value: Settings): unknown {
       const violations: __nexgenDefinitions.Violation[] = [];
-      const out: Record<string, unknown> = {};
+      const out: Record<string, unknown> = Object.create(null) as Record<
+        string,
+        unknown
+      >;
       if (value.theme !== undefined) {
-        out.theme = value.theme;
+        out["theme"] = value.theme;
       }
       if (value.fontSize !== undefined) {
         if (!Number.isSafeInteger(value.fontSize)) {
@@ -1898,7 +1989,7 @@ export const settingsTransferTypeConverter =
             reason: "exceeds ±(2^53-1) integer cap",
           });
         }
-        out.fontSize = value.fontSize;
+        out["fontSize"] = value.fontSize;
       }
       if (violations.length) {
         throw __nexgenDefinitions.payloadValidationError(violations);
@@ -1968,41 +2059,47 @@ export const showcaseTransferTypeConverter =
       }
 
       let kind: "showcase" = undefined as unknown as "showcase";
-      if (raw.kind === undefined || raw.kind === null) {
+      if (!Object.prototype.hasOwnProperty.call(raw, "kind") || raw["kind"] === null) {
         violations.push({ path: "kind", reason: "required" });
       } else {
-        if (typeof raw.kind !== "string") {
+        if (typeof raw["kind"] !== "string") {
           violations.push({ path: "kind", reason: "expected string" });
-        } else if (raw.kind !== SHOWCASE_KIND_CONST) {
+        } else if (raw["kind"] !== SHOWCASE_KIND_CONST) {
           violations.push({ path: "kind", reason: `must equal "showcase"` });
         } else {
-          kind = raw.kind as "showcase";
+          kind = raw["kind"] as "showcase";
         }
       }
 
       let revision: 1 = undefined as unknown as 1;
-      if (raw.revision === undefined || raw.revision === null) {
+      if (
+        !Object.prototype.hasOwnProperty.call(raw, "revision") ||
+        raw["revision"] === null
+      ) {
         violations.push({ path: "revision", reason: "required" });
       } else {
-        if (typeof raw.revision !== "number") {
+        if (typeof raw["revision"] !== "number") {
           violations.push({ path: "revision", reason: "expected number" });
-        } else if (raw.revision !== REVISION_CONST) {
+        } else if (raw["revision"] !== REVISION_CONST) {
           violations.push({ path: "revision", reason: `must equal 1` });
         } else {
-          revision = raw.revision as 1;
+          revision = raw["revision"] as 1;
         }
       }
 
       let enabled: true = undefined as unknown as true;
-      if (raw.enabled === undefined || raw.enabled === null) {
+      if (
+        !Object.prototype.hasOwnProperty.call(raw, "enabled") ||
+        raw["enabled"] === null
+      ) {
         violations.push({ path: "enabled", reason: "required" });
       } else {
-        if (typeof raw.enabled !== "boolean") {
+        if (typeof raw["enabled"] !== "boolean") {
           violations.push({ path: "enabled", reason: "expected boolean" });
-        } else if (raw.enabled !== ENABLED_CONST) {
+        } else if (raw["enabled"] !== ENABLED_CONST) {
           violations.push({ path: "enabled", reason: `must equal true` });
         } else {
-          enabled = raw.enabled as true;
+          enabled = raw["enabled"] as true;
         }
       }
 
@@ -2010,67 +2107,73 @@ export const showcaseTransferTypeConverter =
         | "active"
         | "inactive"
         | "pending";
-      if (raw.status === undefined || raw.status === null) {
+      if (
+        !Object.prototype.hasOwnProperty.call(raw, "status") ||
+        raw["status"] === null
+      ) {
         violations.push({ path: "status", reason: "required" });
       } else {
-        if (typeof raw.status !== "string") {
+        if (typeof raw["status"] !== "string") {
           violations.push({ path: "status", reason: "expected string" });
         } else if (
-          raw.status !== "active" &&
-          raw.status !== "inactive" &&
-          raw.status !== "pending"
+          raw["status"] !== "active" &&
+          raw["status"] !== "inactive" &&
+          raw["status"] !== "pending"
         ) {
           violations.push({
             path: "status",
-            reason: `must be one of ["active", "inactive", "pending"], got ${JSON.stringify(raw.status)}`,
+            reason: `must be one of ["active", "inactive", "pending"], got ${JSON.stringify(raw["status"])}`,
           });
         } else {
-          status = raw.status as "active" | "inactive" | "pending";
+          status = raw["status"] as "active" | "inactive" | "pending";
         }
       }
 
       let tier: 1 | 2 | 3 = undefined as unknown as 1 | 2 | 3;
-      if (raw.tier === undefined || raw.tier === null) {
+      if (!Object.prototype.hasOwnProperty.call(raw, "tier") || raw["tier"] === null) {
         violations.push({ path: "tier", reason: "required" });
       } else {
-        if (typeof raw.tier !== "number") {
+        if (typeof raw["tier"] !== "number") {
           violations.push({ path: "tier", reason: "expected number" });
-        } else if (raw.tier !== 1 && raw.tier !== 2 && raw.tier !== 3) {
+        } else if (raw["tier"] !== 1 && raw["tier"] !== 2 && raw["tier"] !== 3) {
           violations.push({
             path: "tier",
-            reason: `must be one of [1, 2, 3], got ${JSON.stringify(raw.tier)}`,
+            reason: `must be one of [1, 2, 3], got ${JSON.stringify(raw["tier"])}`,
           });
         } else {
-          tier = raw.tier as 1 | 2 | 3;
+          tier = raw["tier"] as 1 | 2 | 3;
         }
       }
 
       let scale: 1.5 | 2.5 = undefined as unknown as 1.5 | 2.5;
-      if (raw.scale === undefined || raw.scale === null) {
+      if (
+        !Object.prototype.hasOwnProperty.call(raw, "scale") ||
+        raw["scale"] === null
+      ) {
         violations.push({ path: "scale", reason: "required" });
       } else {
-        if (typeof raw.scale !== "number") {
+        if (typeof raw["scale"] !== "number") {
           violations.push({ path: "scale", reason: "expected number" });
-        } else if (raw.scale !== 1.5 && raw.scale !== 2.5) {
+        } else if (raw["scale"] !== 1.5 && raw["scale"] !== 2.5) {
           violations.push({
             path: "scale",
-            reason: `must be one of [1.5, 2.5], got ${JSON.stringify(raw.scale)}`,
+            reason: `must be one of [1.5, 2.5], got ${JSON.stringify(raw["scale"])}`,
           });
         } else {
-          scale = raw.scale as 1.5 | 2.5;
+          scale = raw["scale"] as 1.5 | 2.5;
         }
       }
 
       let name: string = undefined as unknown as string;
-      if (raw.name === undefined || raw.name === null) {
+      if (!Object.prototype.hasOwnProperty.call(raw, "name") || raw["name"] === null) {
         violations.push({ path: "name", reason: "required" });
       } else {
-        if (typeof raw.name !== "string") {
+        if (typeof raw["name"] !== "string") {
           violations.push({ path: "name", reason: "expected string" });
         } else {
-          name = raw.name;
+          name = raw["name"];
           {
-            const codePoints = __nexgenDefinitions.codePointLength(raw.name, 1);
+            const codePoints = __nexgenDefinitions.codePointLength(raw["name"], 1);
             if (codePoints < 1) {
               violations.push({
                 path: "name",
@@ -2078,64 +2181,73 @@ export const showcaseTransferTypeConverter =
               });
             }
           }
-          if (__nexgenDefinitions.codePointLength(raw.name, 64) > 64) {
+          if (__nexgenDefinitions.codePointLength(raw["name"], 64) > 64) {
             violations.push({
               path: "name",
-              reason: `must have length <= 64, got ${__nexgenDefinitions.codePointLength(raw.name)}`,
+              reason: `must have length <= 64, got ${__nexgenDefinitions.codePointLength(raw["name"])}`,
             });
           }
         }
       }
 
       let count: number = undefined as unknown as number;
-      if (raw.count === undefined || raw.count === null) {
+      if (
+        !Object.prototype.hasOwnProperty.call(raw, "count") ||
+        raw["count"] === null
+      ) {
         violations.push({ path: "count", reason: "required" });
       } else {
-        if (typeof raw.count !== "number" || !Number.isSafeInteger(raw.count)) {
+        if (typeof raw["count"] !== "number" || !Number.isSafeInteger(raw["count"])) {
           violations.push({ path: "count", reason: "expected integer" });
         } else {
-          count = raw.count;
+          count = raw["count"];
         }
       }
 
       let active: boolean = undefined as unknown as boolean;
-      if (raw.active === undefined || raw.active === null) {
+      if (
+        !Object.prototype.hasOwnProperty.call(raw, "active") ||
+        raw["active"] === null
+      ) {
         violations.push({ path: "active", reason: "required" });
       } else {
-        if (typeof raw.active !== "boolean") {
+        if (typeof raw["active"] !== "boolean") {
           violations.push({ path: "active", reason: "expected boolean" });
         } else {
-          active = raw.active;
+          active = raw["active"];
         }
       }
 
       let nickname: string | undefined = undefined as unknown as string | undefined;
-      if (raw.nickname === null) {
+      if (
+        Object.prototype.hasOwnProperty.call(raw, "nickname") &&
+        raw["nickname"] === null
+      ) {
         violations.push({ path: "nickname", reason: "explicit null not allowed" });
-      } else if (raw.nickname !== undefined) {
-        if (typeof raw.nickname !== "string") {
+      } else if (Object.prototype.hasOwnProperty.call(raw, "nickname")) {
+        if (typeof raw["nickname"] !== "string") {
           violations.push({ path: "nickname", reason: "expected string" });
         } else {
-          nickname = raw.nickname;
-          if (__nexgenDefinitions.codePointLength(raw.nickname, 12) > 12) {
+          nickname = raw["nickname"];
+          if (__nexgenDefinitions.codePointLength(raw["nickname"], 12) > 12) {
             violations.push({
               path: "nickname",
-              reason: `must have length <= 12, got ${__nexgenDefinitions.codePointLength(raw.nickname)}`,
+              reason: `must have length <= 12, got ${__nexgenDefinitions.codePointLength(raw["nickname"])}`,
             });
           }
         }
       }
 
       let code: string | undefined = undefined as unknown as string | undefined;
-      if (raw.code === null) {
+      if (Object.prototype.hasOwnProperty.call(raw, "code") && raw["code"] === null) {
         violations.push({ path: "code", reason: "explicit null not allowed" });
-      } else if (raw.code !== undefined) {
-        if (typeof raw.code !== "string") {
+      } else if (Object.prototype.hasOwnProperty.call(raw, "code")) {
+        if (typeof raw["code"] !== "string") {
           violations.push({ path: "code", reason: "expected string" });
         } else {
-          code = raw.code;
+          code = raw["code"];
           {
-            const codePoints = __nexgenDefinitions.codePointLength(raw.code, 2);
+            const codePoints = __nexgenDefinitions.codePointLength(raw["code"], 2);
             if (codePoints < 2) {
               violations.push({
                 path: "code",
@@ -2143,149 +2255,164 @@ export const showcaseTransferTypeConverter =
               });
             }
           }
-          if (__nexgenDefinitions.codePointLength(raw.code, 5) > 5) {
+          if (__nexgenDefinitions.codePointLength(raw["code"], 5) > 5) {
             violations.push({
               path: "code",
-              reason: `must have length <= 5, got ${__nexgenDefinitions.codePointLength(raw.code)}`,
+              reason: `must have length <= 5, got ${__nexgenDefinitions.codePointLength(raw["code"])}`,
             });
           }
         }
       }
 
       let sku: string | undefined = undefined as unknown as string | undefined;
-      if (raw.sku === null) {
+      if (Object.prototype.hasOwnProperty.call(raw, "sku") && raw["sku"] === null) {
         violations.push({ path: "sku", reason: "explicit null not allowed" });
-      } else if (raw.sku !== undefined) {
-        if (typeof raw.sku !== "string") {
+      } else if (Object.prototype.hasOwnProperty.call(raw, "sku")) {
+        if (typeof raw["sku"] !== "string") {
           violations.push({ path: "sku", reason: "expected string" });
         } else {
-          sku = raw.sku;
-          if (!PATTERN_821EF753B4B37A85.test(raw.sku)) {
+          sku = raw["sku"];
+          if (!PATTERN_821EF753B4B37A85.test(raw["sku"])) {
             violations.push({
               path: "sku",
-              reason: `must match pattern ^[A-Z]{2,4}\$, got ${JSON.stringify(raw.sku)}`,
+              reason: `must match pattern ^[A-Z]{2,4}\$, got ${JSON.stringify(raw["sku"])}`,
             });
           }
         }
       }
 
       let phrase: string | undefined = undefined as unknown as string | undefined;
-      if (raw.phrase === null) {
+      if (
+        Object.prototype.hasOwnProperty.call(raw, "phrase") &&
+        raw["phrase"] === null
+      ) {
         violations.push({ path: "phrase", reason: "explicit null not allowed" });
-      } else if (raw.phrase !== undefined) {
-        if (typeof raw.phrase !== "string") {
+      } else if (Object.prototype.hasOwnProperty.call(raw, "phrase")) {
+        if (typeof raw["phrase"] !== "string") {
           violations.push({ path: "phrase", reason: "expected string" });
         } else {
-          phrase = raw.phrase;
-          if (!PATTERN_AF8AB992526D6283.test(raw.phrase)) {
+          phrase = raw["phrase"];
+          if (!PATTERN_AF8AB992526D6283.test(raw["phrase"])) {
             violations.push({
               path: "phrase",
-              reason: `must match pattern ^[^\\t\\n\\x0B\\f\\r ]+[\\t\\n\\x0B\\f\\r ][^\\t\\n\\x0B\\f\\r ]+\$, got ${JSON.stringify(raw.phrase)}`,
+              reason: `must match pattern ^[^\\t\\n\\x0B\\f\\r ]+[\\t\\n\\x0B\\f\\r ][^\\t\\n\\x0B\\f\\r ]+\$, got ${JSON.stringify(raw["phrase"])}`,
             });
           }
         }
       }
 
       let requestId: string | undefined = undefined as unknown as string | undefined;
-      if (raw.requestId === null) {
+      if (
+        Object.prototype.hasOwnProperty.call(raw, "requestId") &&
+        raw["requestId"] === null
+      ) {
         violations.push({ path: "requestId", reason: "explicit null not allowed" });
-      } else if (raw.requestId !== undefined) {
-        if (typeof raw.requestId !== "string") {
+      } else if (Object.prototype.hasOwnProperty.call(raw, "requestId")) {
+        if (typeof raw["requestId"] !== "string") {
           violations.push({ path: "requestId", reason: "expected string" });
         } else {
-          requestId = raw.requestId;
-          if (!PATTERN_52CD3CCF2038430A.test(raw.requestId)) {
+          requestId = raw["requestId"];
+          if (!PATTERN_52CD3CCF2038430A.test(raw["requestId"])) {
             violations.push({
               path: "requestId",
-              reason: `must be a valid uuid, got ${JSON.stringify(raw.requestId)}`,
+              reason: `must be a valid uuid, got ${JSON.stringify(raw["requestId"])}`,
             });
           }
         }
       }
 
       let contactEmail: string | undefined = undefined as unknown as string | undefined;
-      if (raw.contactEmail === null) {
+      if (
+        Object.prototype.hasOwnProperty.call(raw, "contactEmail") &&
+        raw["contactEmail"] === null
+      ) {
         violations.push({ path: "contactEmail", reason: "explicit null not allowed" });
-      } else if (raw.contactEmail !== undefined) {
-        if (typeof raw.contactEmail !== "string") {
+      } else if (Object.prototype.hasOwnProperty.call(raw, "contactEmail")) {
+        if (typeof raw["contactEmail"] !== "string") {
           violations.push({ path: "contactEmail", reason: "expected string" });
         } else {
-          contactEmail = raw.contactEmail;
+          contactEmail = raw["contactEmail"];
           if (
-            __nexgenDefinitions.codePointLength(raw.contactEmail, 254) > 254 ||
-            !PATTERN_E7C805FB9E8E4DC4.test(raw.contactEmail)
+            __nexgenDefinitions.codePointLength(raw["contactEmail"], 254) > 254 ||
+            !PATTERN_E7C805FB9E8E4DC4.test(raw["contactEmail"])
           ) {
             violations.push({
               path: "contactEmail",
-              reason: `must be a valid email, got ${JSON.stringify(raw.contactEmail)}`,
+              reason: `must be a valid email, got ${JSON.stringify(raw["contactEmail"])}`,
             });
           }
         }
       }
 
       let host: string | undefined = undefined as unknown as string | undefined;
-      if (raw.host === null) {
+      if (Object.prototype.hasOwnProperty.call(raw, "host") && raw["host"] === null) {
         violations.push({ path: "host", reason: "explicit null not allowed" });
-      } else if (raw.host !== undefined) {
-        if (typeof raw.host !== "string") {
+      } else if (Object.prototype.hasOwnProperty.call(raw, "host")) {
+        if (typeof raw["host"] !== "string") {
           violations.push({ path: "host", reason: "expected string" });
         } else {
-          host = raw.host;
+          host = raw["host"];
           if (
-            __nexgenDefinitions.codePointLength(raw.host, 253) > 253 ||
-            !PATTERN_BB674DB499542D4F.test(raw.host)
+            __nexgenDefinitions.codePointLength(raw["host"], 253) > 253 ||
+            !PATTERN_BB674DB499542D4F.test(raw["host"])
           ) {
             violations.push({
               path: "host",
-              reason: `must be a valid hostname, got ${JSON.stringify(raw.host)}`,
+              reason: `must be a valid hostname, got ${JSON.stringify(raw["host"])}`,
             });
           }
         }
       }
 
       let homepage: string | undefined = undefined as unknown as string | undefined;
-      if (raw.homepage === null) {
+      if (
+        Object.prototype.hasOwnProperty.call(raw, "homepage") &&
+        raw["homepage"] === null
+      ) {
         violations.push({ path: "homepage", reason: "explicit null not allowed" });
-      } else if (raw.homepage !== undefined) {
-        if (typeof raw.homepage !== "string") {
+      } else if (Object.prototype.hasOwnProperty.call(raw, "homepage")) {
+        if (typeof raw["homepage"] !== "string") {
           violations.push({ path: "homepage", reason: "expected string" });
         } else {
-          homepage = raw.homepage;
-          if (!PATTERN_2F0C822905CC055D.test(raw.homepage)) {
+          homepage = raw["homepage"];
+          if (!PATTERN_2F0C822905CC055D.test(raw["homepage"])) {
             violations.push({
               path: "homepage",
-              reason: `must be a valid uri, got ${JSON.stringify(raw.homepage)}`,
+              reason: `must be a valid uri, got ${JSON.stringify(raw["homepage"])}`,
             });
           }
         }
       }
 
       let gateway: string | undefined = undefined as unknown as string | undefined;
-      if (raw.gateway === null) {
+      if (
+        Object.prototype.hasOwnProperty.call(raw, "gateway") &&
+        raw["gateway"] === null
+      ) {
         violations.push({ path: "gateway", reason: "explicit null not allowed" });
-      } else if (raw.gateway !== undefined) {
-        if (typeof raw.gateway !== "string") {
+      } else if (Object.prototype.hasOwnProperty.call(raw, "gateway")) {
+        if (typeof raw["gateway"] !== "string") {
           violations.push({ path: "gateway", reason: "expected string" });
         } else {
-          gateway = raw.gateway;
-          if (!PATTERN_F5FB862A44510B9D.test(raw.gateway)) {
+          gateway = raw["gateway"];
+          if (!PATTERN_F5FB862A44510B9D.test(raw["gateway"])) {
             violations.push({
               path: "gateway",
-              reason: `must be a valid ipv4, got ${JSON.stringify(raw.gateway)}`,
+              reason: `must be a valid ipv4, got ${JSON.stringify(raw["gateway"])}`,
             });
           }
         }
       }
 
       let blob: Uint8Array | undefined = undefined as unknown as Uint8Array | undefined;
-      if (raw.blob === null) {
+      if (Object.prototype.hasOwnProperty.call(raw, "blob") && raw["blob"] === null) {
         violations.push({ path: "blob", reason: "explicit null not allowed" });
-      } else if (raw.blob !== undefined) {
-        if (typeof raw.blob !== "string") {
+      } else if (Object.prototype.hasOwnProperty.call(raw, "blob")) {
+        if (typeof raw["blob"] !== "string") {
           violations.push({ path: "blob", reason: "expected string" });
         } else {
           const parsed = __nexgenDefinitions.base64ToBytes(
-            raw.blob,
+            raw["blob"],
             "blob",
             violations,
           );
@@ -2298,14 +2425,17 @@ export const showcaseTransferTypeConverter =
       let urlBlob: Uint8Array | undefined = undefined as unknown as
         | Uint8Array
         | undefined;
-      if (raw.urlBlob === null) {
+      if (
+        Object.prototype.hasOwnProperty.call(raw, "urlBlob") &&
+        raw["urlBlob"] === null
+      ) {
         violations.push({ path: "urlBlob", reason: "explicit null not allowed" });
-      } else if (raw.urlBlob !== undefined) {
-        if (typeof raw.urlBlob !== "string") {
+      } else if (Object.prototype.hasOwnProperty.call(raw, "urlBlob")) {
+        if (typeof raw["urlBlob"] !== "string") {
           violations.push({ path: "urlBlob", reason: "expected string" });
         } else {
           const parsed = __nexgenDefinitions.base64UrlToBytes(
-            raw.urlBlob,
+            raw["urlBlob"],
             "urlBlob",
             violations,
           );
@@ -2316,57 +2446,72 @@ export const showcaseTransferTypeConverter =
       }
 
       let retries: number | undefined = undefined as unknown as number | undefined;
-      if (raw.retries === null) {
+      if (
+        Object.prototype.hasOwnProperty.call(raw, "retries") &&
+        raw["retries"] === null
+      ) {
         violations.push({ path: "retries", reason: "explicit null not allowed" });
-      } else if (raw.retries !== undefined) {
-        if (typeof raw.retries !== "number" || !Number.isSafeInteger(raw.retries)) {
+      } else if (Object.prototype.hasOwnProperty.call(raw, "retries")) {
+        if (
+          typeof raw["retries"] !== "number" ||
+          !Number.isSafeInteger(raw["retries"])
+        ) {
           violations.push({ path: "retries", reason: "expected integer" });
         } else {
-          retries = raw.retries;
+          retries = raw["retries"];
         }
       }
 
       let verbose: boolean | undefined = undefined as unknown as boolean | undefined;
-      if (raw.verbose === null) {
+      if (
+        Object.prototype.hasOwnProperty.call(raw, "verbose") &&
+        raw["verbose"] === null
+      ) {
         violations.push({ path: "verbose", reason: "explicit null not allowed" });
-      } else if (raw.verbose !== undefined) {
-        if (typeof raw.verbose !== "boolean") {
+      } else if (Object.prototype.hasOwnProperty.call(raw, "verbose")) {
+        if (typeof raw["verbose"] !== "boolean") {
           violations.push({ path: "verbose", reason: "expected boolean" });
         } else {
-          verbose = raw.verbose;
+          verbose = raw["verbose"];
         }
       }
 
       let greeting: string | undefined = undefined as unknown as string | undefined;
-      if (raw.greeting === null) {
+      if (
+        Object.prototype.hasOwnProperty.call(raw, "greeting") &&
+        raw["greeting"] === null
+      ) {
         violations.push({ path: "greeting", reason: "explicit null not allowed" });
-      } else if (raw.greeting !== undefined) {
-        if (typeof raw.greeting !== "string") {
+      } else if (Object.prototype.hasOwnProperty.call(raw, "greeting")) {
+        if (typeof raw["greeting"] !== "string") {
           violations.push({ path: "greeting", reason: "expected string" });
         } else {
-          greeting = raw.greeting;
+          greeting = raw["greeting"];
         }
       }
 
       let debug: boolean | undefined = undefined as unknown as boolean | undefined;
-      if (raw.debug === null) {
+      if (Object.prototype.hasOwnProperty.call(raw, "debug") && raw["debug"] === null) {
         violations.push({ path: "debug", reason: "explicit null not allowed" });
-      } else if (raw.debug !== undefined) {
-        if (typeof raw.debug !== "boolean") {
+      } else if (Object.prototype.hasOwnProperty.call(raw, "debug")) {
+        if (typeof raw["debug"] !== "boolean") {
           violations.push({ path: "debug", reason: "expected boolean" });
         } else {
-          debug = raw.debug;
+          debug = raw["debug"];
         }
       }
 
       let legacyIdTs: string | undefined = undefined as unknown as string | undefined;
-      if (raw.legacyId === null) {
+      if (
+        Object.prototype.hasOwnProperty.call(raw, "legacyId") &&
+        raw["legacyId"] === null
+      ) {
         violations.push({ path: "legacyId", reason: "explicit null not allowed" });
-      } else if (raw.legacyId !== undefined) {
-        if (typeof raw.legacyId !== "string") {
+      } else if (Object.prototype.hasOwnProperty.call(raw, "legacyId")) {
+        if (typeof raw["legacyId"] !== "string") {
           violations.push({ path: "legacyId", reason: "expected string" });
         } else {
-          legacyIdTs = raw.legacyId;
+          legacyIdTs = raw["legacyId"];
         }
       }
 
@@ -2374,94 +2519,103 @@ export const showcaseTransferTypeConverter =
         | string
         | null
         | undefined;
-      if (raw.middleName !== undefined) {
-        if (raw.middleName === null) {
+      if (Object.prototype.hasOwnProperty.call(raw, "middleName")) {
+        if (raw["middleName"] === null) {
           middleName = null;
         } else {
-          if (typeof raw.middleName !== "string") {
+          if (typeof raw["middleName"] !== "string") {
             violations.push({ path: "middleName", reason: "expected string" });
           } else {
-            middleName = raw.middleName;
+            middleName = raw["middleName"];
           }
         }
       }
 
       let category: string | null = undefined as unknown as string | null;
-      if (raw.category === undefined) {
+      if (!Object.prototype.hasOwnProperty.call(raw, "category")) {
         violations.push({ path: "category", reason: "required" });
       } else {
-        if (raw.category === null) {
+        if (raw["category"] === null) {
           category = null;
         } else {
-          if (typeof raw.category !== "string") {
+          if (typeof raw["category"] !== "string") {
             violations.push({ path: "category", reason: "expected string" });
           } else {
-            category = raw.category;
+            category = raw["category"];
           }
         }
       }
 
       let priority: number | undefined = undefined as unknown as number | undefined;
-      if (raw.priority === null) {
+      if (
+        Object.prototype.hasOwnProperty.call(raw, "priority") &&
+        raw["priority"] === null
+      ) {
         violations.push({ path: "priority", reason: "explicit null not allowed" });
-      } else if (raw.priority !== undefined) {
-        if (typeof raw.priority !== "number" || !Number.isSafeInteger(raw.priority)) {
+      } else if (Object.prototype.hasOwnProperty.call(raw, "priority")) {
+        if (
+          typeof raw["priority"] !== "number" ||
+          !Number.isSafeInteger(raw["priority"])
+        ) {
           violations.push({ path: "priority", reason: "expected integer" });
         } else {
-          priority = raw.priority;
-          if (raw.priority < 1) {
+          priority = raw["priority"];
+          if (raw["priority"] < 1) {
             violations.push({
               path: "priority",
-              reason: `must be >= 1, got ${raw.priority}`,
+              reason: `must be >= 1, got ${raw["priority"]}`,
             });
           }
-          if (raw.priority > 10) {
+          if (raw["priority"] > 10) {
             violations.push({
               path: "priority",
-              reason: `must be <= 10, got ${raw.priority}`,
+              reason: `must be <= 10, got ${raw["priority"]}`,
             });
           }
         }
       }
 
       let level: number | undefined = undefined as unknown as number | undefined;
-      if (raw.level === null) {
+      if (Object.prototype.hasOwnProperty.call(raw, "level") && raw["level"] === null) {
         violations.push({ path: "level", reason: "explicit null not allowed" });
-      } else if (raw.level !== undefined) {
-        if (typeof raw.level !== "number" || !Number.isSafeInteger(raw.level)) {
+      } else if (Object.prototype.hasOwnProperty.call(raw, "level")) {
+        if (typeof raw["level"] !== "number" || !Number.isSafeInteger(raw["level"])) {
           violations.push({ path: "level", reason: "expected integer" });
         } else {
-          level = raw.level;
-          if (raw.level <= 0) {
-            violations.push({ path: "level", reason: `must be > 0, got ${raw.level}` });
+          level = raw["level"];
+          if (raw["level"] <= 0) {
+            violations.push({
+              path: "level",
+              reason: `must be > 0, got ${raw["level"]}`,
+            });
           }
         }
       }
 
       let ratio: number | undefined = undefined as unknown as number | undefined;
-      if (raw.ratio === null) {
+      if (Object.prototype.hasOwnProperty.call(raw, "ratio") && raw["ratio"] === null) {
         violations.push({ path: "ratio", reason: "explicit null not allowed" });
-      } else if (raw.ratio !== undefined) {
-        if (typeof raw.ratio !== "number") {
+      } else if (Object.prototype.hasOwnProperty.call(raw, "ratio")) {
+        if (typeof raw["ratio"] !== "number") {
           violations.push({ path: "ratio", reason: "expected number" });
         } else {
-          ratio = raw.ratio;
-          if (!Number.isFinite(raw.ratio)) {
+          ratio = raw["ratio"];
+          if (!Number.isFinite(raw["ratio"])) {
             violations.push({
               path: "ratio",
-              reason: `must be a finite number, got ${raw.ratio}`,
+              reason: `must be a finite number, got ${raw["ratio"]}`,
             });
           } else {
-            if (raw.ratio < 5) {
+            if (raw["ratio"] < 5) {
               violations.push({
                 path: "ratio",
-                reason: `must be >= 5, got ${raw.ratio}`,
+                reason: `must be >= 5, got ${raw["ratio"]}`,
               });
             }
-            if (raw.ratio % 5 !== 0) {
+            if (raw["ratio"] % 5 !== 0) {
               violations.push({
                 path: "ratio",
-                reason: `must be a multiple of 5, got ${raw.ratio}`,
+                reason: `must be a multiple of 5, got ${raw["ratio"]}`,
               });
             }
           }
@@ -2469,48 +2623,48 @@ export const showcaseTransferTypeConverter =
       }
 
       let score: number | undefined = undefined as unknown as number | undefined;
-      if (raw.score === null) {
+      if (Object.prototype.hasOwnProperty.call(raw, "score") && raw["score"] === null) {
         violations.push({ path: "score", reason: "explicit null not allowed" });
-      } else if (raw.score !== undefined) {
-        if (typeof raw.score !== "number") {
+      } else if (Object.prototype.hasOwnProperty.call(raw, "score")) {
+        if (typeof raw["score"] !== "number") {
           violations.push({ path: "score", reason: "expected number" });
         } else {
-          score = raw.score;
-          if (!Number.isFinite(raw.score)) {
+          score = raw["score"];
+          if (!Number.isFinite(raw["score"])) {
             violations.push({
               path: "score",
-              reason: `must be a finite number, got ${raw.score}`,
+              reason: `must be a finite number, got ${raw["score"]}`,
             });
           }
         }
       }
 
       let step: number | undefined = undefined as unknown as number | undefined;
-      if (raw.step === null) {
+      if (Object.prototype.hasOwnProperty.call(raw, "step") && raw["step"] === null) {
         violations.push({ path: "step", reason: "explicit null not allowed" });
-      } else if (raw.step !== undefined) {
-        if (typeof raw.step !== "number" || !Number.isSafeInteger(raw.step)) {
+      } else if (Object.prototype.hasOwnProperty.call(raw, "step")) {
+        if (typeof raw["step"] !== "number" || !Number.isSafeInteger(raw["step"])) {
           violations.push({ path: "step", reason: "expected integer" });
         } else {
-          step = raw.step;
-          if (raw.step % 3 !== 0) {
+          step = raw["step"];
+          if (raw["step"] % 3 !== 0) {
             violations.push({
               path: "step",
-              reason: `must be a multiple of 3, got ${raw.step}`,
+              reason: `must be a multiple of 3, got ${raw["step"]}`,
             });
           }
         }
       }
 
       let tags: string[] | undefined = undefined as unknown as string[] | undefined;
-      if (raw.tags === null) {
+      if (Object.prototype.hasOwnProperty.call(raw, "tags") && raw["tags"] === null) {
         violations.push({ path: "tags", reason: "explicit null not allowed" });
-      } else if (raw.tags !== undefined) {
-        if (!Array.isArray(raw.tags)) {
+      } else if (Object.prototype.hasOwnProperty.call(raw, "tags")) {
+        if (!Array.isArray(raw["tags"])) {
           violations.push({ path: "tags", reason: "expected array" });
         } else {
           tags = [];
-          raw.tags.forEach((element: unknown, index: number) => {
+          raw["tags"].forEach((element: unknown, index: number) => {
             let item: string = undefined as unknown as string;
             if (typeof element !== "string") {
               violations.push({ path: `tags[${index}]`, reason: "expected string" });
@@ -2521,30 +2675,33 @@ export const showcaseTransferTypeConverter =
               tags!.push(item);
             }
           });
-          if (raw.tags.length < 1) {
+          if (raw["tags"].length < 1) {
             violations.push({
               path: "tags",
-              reason: `must have at least 1 items, got ${raw.tags.length}`,
+              reason: `must have at least 1 items, got ${raw["tags"].length}`,
             });
           }
-          if (raw.tags.length > 5) {
+          if (raw["tags"].length > 5) {
             violations.push({
               path: "tags",
-              reason: `must have at most 5 items, got ${raw.tags.length}`,
+              reason: `must have at most 5 items, got ${raw["tags"].length}`,
             });
           }
         }
       }
 
       let aliases: string[] | undefined = undefined as unknown as string[] | undefined;
-      if (raw.aliases === null) {
+      if (
+        Object.prototype.hasOwnProperty.call(raw, "aliases") &&
+        raw["aliases"] === null
+      ) {
         violations.push({ path: "aliases", reason: "explicit null not allowed" });
-      } else if (raw.aliases !== undefined) {
-        if (!Array.isArray(raw.aliases)) {
+      } else if (Object.prototype.hasOwnProperty.call(raw, "aliases")) {
+        if (!Array.isArray(raw["aliases"])) {
           violations.push({ path: "aliases", reason: "expected array" });
         } else {
           aliases = [];
-          raw.aliases.forEach((element: unknown, index: number) => {
+          raw["aliases"].forEach((element: unknown, index: number) => {
             let item: string = undefined as unknown as string;
             if (typeof element !== "string") {
               violations.push({ path: `aliases[${index}]`, reason: "expected string" });
@@ -2557,7 +2714,7 @@ export const showcaseTransferTypeConverter =
           });
           {
             const seen = new Map<unknown, number>();
-            raw.aliases.forEach((element, index) => {
+            raw["aliases"].forEach((element, index) => {
               if (seen.has(element)) {
                 violations.push({
                   path: "aliases",
@@ -2572,14 +2729,14 @@ export const showcaseTransferTypeConverter =
       }
 
       let roles: string[] | undefined = undefined as unknown as string[] | undefined;
-      if (raw.roles === null) {
+      if (Object.prototype.hasOwnProperty.call(raw, "roles") && raw["roles"] === null) {
         violations.push({ path: "roles", reason: "explicit null not allowed" });
-      } else if (raw.roles !== undefined) {
-        if (!Array.isArray(raw.roles)) {
+      } else if (Object.prototype.hasOwnProperty.call(raw, "roles")) {
+        if (!Array.isArray(raw["roles"])) {
           violations.push({ path: "roles", reason: "expected array" });
         } else {
           roles = [];
-          raw.roles.forEach((element: unknown, index: number) => {
+          raw["roles"].forEach((element: unknown, index: number) => {
             let item: string = undefined as unknown as string;
             if (typeof element !== "string") {
               violations.push({ path: `roles[${index}]`, reason: "expected string" });
@@ -2591,7 +2748,7 @@ export const showcaseTransferTypeConverter =
             }
           });
           {
-            const matchCount = raw.roles.filter(
+            const matchCount = raw["roles"].filter(
               (element) => typeof element === "string" && element === "admin",
             ).length;
             if (matchCount < 1) {
@@ -2614,11 +2771,14 @@ export const showcaseTransferTypeConverter =
         | string
         | number
         | undefined;
-      if (raw.idOrName === null) {
+      if (
+        Object.prototype.hasOwnProperty.call(raw, "idOrName") &&
+        raw["idOrName"] === null
+      ) {
         violations.push({ path: "idOrName", reason: "explicit null not allowed" });
-      } else if (raw.idOrName !== undefined) {
-        if (typeof raw.idOrName === "string") {
-          idOrName = raw.idOrName as string;
+      } else if (Object.prototype.hasOwnProperty.call(raw, "idOrName")) {
+        if (typeof raw["idOrName"] === "string") {
+          idOrName = raw["idOrName"] as string;
           {
             const codePoints = __nexgenDefinitions.codePointLength(
               idOrName as string,
@@ -2632,10 +2792,10 @@ export const showcaseTransferTypeConverter =
             }
           }
         } else if (
-          typeof raw.idOrName === "number" &&
-          Number.isSafeInteger(raw.idOrName)
+          typeof raw["idOrName"] === "number" &&
+          Number.isSafeInteger(raw["idOrName"])
         ) {
-          idOrName = raw.idOrName as number;
+          idOrName = raw["idOrName"] as number;
           if (!Number.isSafeInteger(idOrName as number)) {
             violations.push({
               path: "idOrName",
@@ -2662,11 +2822,11 @@ export const showcaseTransferTypeConverter =
         | "manual"
         | number
         | undefined;
-      if (raw.mode === null) {
+      if (Object.prototype.hasOwnProperty.call(raw, "mode") && raw["mode"] === null) {
         violations.push({ path: "mode", reason: "explicit null not allowed" });
-      } else if (raw.mode !== undefined) {
-        if (typeof raw.mode === "string") {
-          mode = raw.mode as "auto" | "manual";
+      } else if (Object.prototype.hasOwnProperty.call(raw, "mode")) {
+        if (typeof raw["mode"] === "string") {
+          mode = raw["mode"] as "auto" | "manual";
           if (
             (mode as "auto" | "manual") !== "auto" &&
             (mode as "auto" | "manual") !== "manual"
@@ -2676,8 +2836,11 @@ export const showcaseTransferTypeConverter =
               reason: `must be one of ["auto", "manual"], got ${JSON.stringify(mode as "auto" | "manual")}`,
             });
           }
-        } else if (typeof raw.mode === "number" && Number.isSafeInteger(raw.mode)) {
-          mode = raw.mode as number;
+        } else if (
+          typeof raw["mode"] === "number" &&
+          Number.isSafeInteger(raw["mode"])
+        ) {
+          mode = raw["mode"] as number;
           if (!Number.isSafeInteger(mode as number)) {
             violations.push({ path: "mode", reason: "exceeds ±(2^53-1) integer cap" });
           } else {
@@ -2695,13 +2858,16 @@ export const showcaseTransferTypeConverter =
 
       let payload: Record<string, unknown> | string | undefined =
         undefined as unknown as Record<string, unknown> | string | undefined;
-      if (raw.payload === null) {
+      if (
+        Object.prototype.hasOwnProperty.call(raw, "payload") &&
+        raw["payload"] === null
+      ) {
         violations.push({ path: "payload", reason: "explicit null not allowed" });
-      } else if (raw.payload !== undefined) {
-        if (__nexgenDefinitions.isPlainObject(raw.payload)) {
-          payload = raw.payload as Record<string, unknown>;
-        } else if (typeof raw.payload === "string") {
-          payload = raw.payload as string;
+      } else if (Object.prototype.hasOwnProperty.call(raw, "payload")) {
+        if (__nexgenDefinitions.isPlainObject(raw["payload"])) {
+          payload = raw["payload"] as Record<string, unknown>;
+        } else if (typeof raw["payload"] === "string") {
+          payload = raw["payload"] as string;
         } else {
           violations.push({
             path: "payload",
@@ -2714,19 +2880,22 @@ export const showcaseTransferTypeConverter =
         | ShowcaseDetailObject
         | string
         | undefined;
-      if (raw.detail === null) {
+      if (
+        Object.prototype.hasOwnProperty.call(raw, "detail") &&
+        raw["detail"] === null
+      ) {
         violations.push({ path: "detail", reason: "explicit null not allowed" });
-      } else if (raw.detail !== undefined) {
-        if (__nexgenDefinitions.isPlainObject(raw.detail)) {
+      } else if (Object.prototype.hasOwnProperty.call(raw, "detail")) {
+        if (__nexgenDefinitions.isPlainObject(raw["detail"])) {
           try {
             detail = showcaseDetailObjectTransferTypeConverter.fromTransferType(
-              raw.detail,
+              raw["detail"],
             );
           } catch (error) {
             __nexgenDefinitions.collect(violations, "detail", error);
           }
-        } else if (typeof raw.detail === "string") {
-          detail = raw.detail as string;
+        } else if (typeof raw["detail"] === "string") {
+          detail = raw["detail"] as string;
         } else {
           violations.push({
             path: "detail",
@@ -2740,15 +2909,18 @@ export const showcaseTransferTypeConverter =
         | Square
         | string
         | undefined;
-      if (raw.shapeOrName === null) {
+      if (
+        Object.prototype.hasOwnProperty.call(raw, "shapeOrName") &&
+        raw["shapeOrName"] === null
+      ) {
         violations.push({ path: "shapeOrName", reason: "explicit null not allowed" });
-      } else if (raw.shapeOrName !== undefined) {
-        if (__nexgenDefinitions.isPlainObject(raw.shapeOrName)) {
-          switch ((raw.shapeOrName as Record<string, unknown>)["kind"]) {
+      } else if (Object.prototype.hasOwnProperty.call(raw, "shapeOrName")) {
+        if (__nexgenDefinitions.isPlainObject(raw["shapeOrName"])) {
+          switch ((raw["shapeOrName"] as Record<string, unknown>)["kind"]) {
             case "circle":
               try {
                 shapeOrName = circleTransferTypeConverter.fromTransferType(
-                  raw.shapeOrName,
+                  raw["shapeOrName"],
                 );
               } catch (error) {
                 __nexgenDefinitions.collect(violations, "shapeOrName", error);
@@ -2757,7 +2929,7 @@ export const showcaseTransferTypeConverter =
             case "square":
               try {
                 shapeOrName = squareTransferTypeConverter.fromTransferType(
-                  raw.shapeOrName,
+                  raw["shapeOrName"],
                 );
               } catch (error) {
                 __nexgenDefinitions.collect(violations, "shapeOrName", error);
@@ -2766,11 +2938,11 @@ export const showcaseTransferTypeConverter =
             default:
               violations.push({
                 path: "shapeOrName",
-                reason: `unknown discriminator kind ${String((raw.shapeOrName as Record<string, unknown>)["kind"])}: expected one of ["circle", "square"]`,
+                reason: `unknown discriminator kind ${String((raw["shapeOrName"] as Record<string, unknown>)["kind"])}: expected one of ["circle", "square"]`,
               });
           }
-        } else if (typeof raw.shapeOrName === "string") {
-          shapeOrName = raw.shapeOrName as string;
+        } else if (typeof raw["shapeOrName"] === "string") {
+          shapeOrName = raw["shapeOrName"] as string;
           if (__nexgenDefinitions.codePointLength(shapeOrName as string, 32) > 32) {
             violations.push({
               path: "shapeOrName",
@@ -2789,16 +2961,19 @@ export const showcaseTransferTypeConverter =
         | number[]
         | string
         | undefined;
-      if (raw.measurements === null) {
+      if (
+        Object.prototype.hasOwnProperty.call(raw, "measurements") &&
+        raw["measurements"] === null
+      ) {
         violations.push({ path: "measurements", reason: "explicit null not allowed" });
-      } else if (raw.measurements !== undefined) {
-        if (Array.isArray(raw.measurements)) {
+      } else if (Object.prototype.hasOwnProperty.call(raw, "measurements")) {
+        if (Array.isArray(raw["measurements"])) {
           let measurementsArrayBranch: number[] = undefined as unknown as number[];
-          if (!Array.isArray(raw.measurements)) {
+          if (!Array.isArray(raw["measurements"])) {
             violations.push({ path: "measurements", reason: "expected array" });
           } else {
             measurementsArrayBranch = [];
-            raw.measurements.forEach((element: unknown, index: number) => {
+            raw["measurements"].forEach((element: unknown, index: number) => {
               let item: number = undefined as unknown as number;
               if (typeof element !== "number") {
                 violations.push({
@@ -2818,15 +2993,15 @@ export const showcaseTransferTypeConverter =
                 measurementsArrayBranch!.push(item);
               }
             });
-            if (raw.measurements.length < 1) {
+            if (raw["measurements"].length < 1) {
               violations.push({
                 path: "measurements",
-                reason: `must have at least 1 items, got ${raw.measurements.length}`,
+                reason: `must have at least 1 items, got ${raw["measurements"].length}`,
               });
             }
             {
               const seen = new Map<unknown, number>();
-              raw.measurements.forEach((element, index) => {
+              raw["measurements"].forEach((element, index) => {
                 if (seen.has(element)) {
                   violations.push({
                     path: "measurements",
@@ -2841,8 +3016,8 @@ export const showcaseTransferTypeConverter =
           if (measurementsArrayBranch !== undefined) {
             measurements = measurementsArrayBranch;
           }
-        } else if (typeof raw.measurements === "string") {
-          measurements = raw.measurements as string;
+        } else if (typeof raw["measurements"] === "string") {
+          measurements = raw["measurements"] as string;
           if (!PATTERN_C182F89FDB221836.test(measurements as string)) {
             violations.push({
               path: "measurements",
@@ -2858,14 +3033,17 @@ export const showcaseTransferTypeConverter =
       }
 
       let shapes: Shape[] | undefined = undefined as unknown as Shape[] | undefined;
-      if (raw.shapes === null) {
+      if (
+        Object.prototype.hasOwnProperty.call(raw, "shapes") &&
+        raw["shapes"] === null
+      ) {
         violations.push({ path: "shapes", reason: "explicit null not allowed" });
-      } else if (raw.shapes !== undefined) {
-        if (!Array.isArray(raw.shapes)) {
+      } else if (Object.prototype.hasOwnProperty.call(raw, "shapes")) {
+        if (!Array.isArray(raw["shapes"])) {
           violations.push({ path: "shapes", reason: "expected array" });
         } else {
           shapes = [];
-          raw.shapes.forEach((element: unknown, index: number) => {
+          raw["shapes"].forEach((element: unknown, index: number) => {
             let item: Shape = undefined as unknown as Shape;
             try {
               item = shapeTransferTypeConverter.fromTransferType(element);
@@ -2882,14 +3060,17 @@ export const showcaseTransferTypeConverter =
       let segments: ShowcaseSegmentsItem[] | undefined = undefined as unknown as
         | ShowcaseSegmentsItem[]
         | undefined;
-      if (raw.segments === null) {
+      if (
+        Object.prototype.hasOwnProperty.call(raw, "segments") &&
+        raw["segments"] === null
+      ) {
         violations.push({ path: "segments", reason: "explicit null not allowed" });
-      } else if (raw.segments !== undefined) {
-        if (!Array.isArray(raw.segments)) {
+      } else if (Object.prototype.hasOwnProperty.call(raw, "segments")) {
+        if (!Array.isArray(raw["segments"])) {
           violations.push({ path: "segments", reason: "expected array" });
         } else {
           segments = [];
-          raw.segments.forEach((element: unknown, index: number) => {
+          raw["segments"].forEach((element: unknown, index: number) => {
             let item: ShowcaseSegmentsItem =
               undefined as unknown as ShowcaseSegmentsItem;
             try {
@@ -2908,14 +3089,14 @@ export const showcaseTransferTypeConverter =
       let slots: (string | null)[] | undefined = undefined as unknown as
         | (string | null)[]
         | undefined;
-      if (raw.slots === null) {
+      if (Object.prototype.hasOwnProperty.call(raw, "slots") && raw["slots"] === null) {
         violations.push({ path: "slots", reason: "explicit null not allowed" });
-      } else if (raw.slots !== undefined) {
-        if (!Array.isArray(raw.slots)) {
+      } else if (Object.prototype.hasOwnProperty.call(raw, "slots")) {
+        if (!Array.isArray(raw["slots"])) {
           violations.push({ path: "slots", reason: "expected array" });
         } else {
           slots = [];
-          raw.slots.forEach((element: unknown, index: number) => {
+          raw["slots"].forEach((element: unknown, index: number) => {
             let item: string | null = undefined as unknown as string | null;
             if (element === null) {
               item = null;
@@ -2943,14 +3124,14 @@ export const showcaseTransferTypeConverter =
       }
 
       let grid: number[][] | undefined = undefined as unknown as number[][] | undefined;
-      if (raw.grid === null) {
+      if (Object.prototype.hasOwnProperty.call(raw, "grid") && raw["grid"] === null) {
         violations.push({ path: "grid", reason: "explicit null not allowed" });
-      } else if (raw.grid !== undefined) {
-        if (!Array.isArray(raw.grid)) {
+      } else if (Object.prototype.hasOwnProperty.call(raw, "grid")) {
+        if (!Array.isArray(raw["grid"])) {
           violations.push({ path: "grid", reason: "expected array" });
         } else {
           grid = [];
-          raw.grid.forEach((element: unknown, index: number) => {
+          raw["grid"].forEach((element: unknown, index: number) => {
             let item: number[] = undefined as unknown as number[];
             if (!Array.isArray(element)) {
               violations.push({ path: `grid[${index}]`, reason: "expected array" });
@@ -2981,14 +3162,17 @@ export const showcaseTransferTypeConverter =
       let numberGrid: number[][] | undefined = undefined as unknown as
         | number[][]
         | undefined;
-      if (raw.numberGrid === null) {
+      if (
+        Object.prototype.hasOwnProperty.call(raw, "numberGrid") &&
+        raw["numberGrid"] === null
+      ) {
         violations.push({ path: "numberGrid", reason: "explicit null not allowed" });
-      } else if (raw.numberGrid !== undefined) {
-        if (!Array.isArray(raw.numberGrid)) {
+      } else if (Object.prototype.hasOwnProperty.call(raw, "numberGrid")) {
+        if (!Array.isArray(raw["numberGrid"])) {
           violations.push({ path: "numberGrid", reason: "expected array" });
         } else {
           numberGrid = [];
-          raw.numberGrid.forEach((element: unknown, index: number) => {
+          raw["numberGrid"].forEach((element: unknown, index: number) => {
             let item: number[] = undefined as unknown as number[];
             if (!Array.isArray(element)) {
               violations.push({
@@ -3026,14 +3210,14 @@ export const showcaseTransferTypeConverter =
       }
 
       let links: string[] | undefined = undefined as unknown as string[] | undefined;
-      if (raw.links === null) {
+      if (Object.prototype.hasOwnProperty.call(raw, "links") && raw["links"] === null) {
         violations.push({ path: "links", reason: "explicit null not allowed" });
-      } else if (raw.links !== undefined) {
-        if (!Array.isArray(raw.links)) {
+      } else if (Object.prototype.hasOwnProperty.call(raw, "links")) {
+        if (!Array.isArray(raw["links"])) {
           violations.push({ path: "links", reason: "expected array" });
         } else {
           links = [];
-          raw.links.forEach((element: unknown, index: number) => {
+          raw["links"].forEach((element: unknown, index: number) => {
             let item: string = undefined as unknown as string;
             if (typeof element !== "string") {
               violations.push({ path: `links[${index}]`, reason: "expected string" });
@@ -3056,14 +3240,17 @@ export const showcaseTransferTypeConverter =
       let addresses: Address[] | undefined = undefined as unknown as
         | Address[]
         | undefined;
-      if (raw.addresses === null) {
+      if (
+        Object.prototype.hasOwnProperty.call(raw, "addresses") &&
+        raw["addresses"] === null
+      ) {
         violations.push({ path: "addresses", reason: "explicit null not allowed" });
-      } else if (raw.addresses !== undefined) {
-        if (!Array.isArray(raw.addresses)) {
+      } else if (Object.prototype.hasOwnProperty.call(raw, "addresses")) {
+        if (!Array.isArray(raw["addresses"])) {
           violations.push({ path: "addresses", reason: "expected array" });
         } else {
           addresses = [];
-          raw.addresses.forEach((element: unknown, index: number) => {
+          raw["addresses"].forEach((element: unknown, index: number) => {
             let item: Address = undefined as unknown as Address;
             try {
               item = addressTransferTypeConverter.fromTransferType(element);
@@ -3080,12 +3267,15 @@ export const showcaseTransferTypeConverter =
       let addressBook: AddressBook | undefined = undefined as unknown as
         | AddressBook
         | undefined;
-      if (raw.addressBook === null) {
+      if (
+        Object.prototype.hasOwnProperty.call(raw, "addressBook") &&
+        raw["addressBook"] === null
+      ) {
         violations.push({ path: "addressBook", reason: "explicit null not allowed" });
-      } else if (raw.addressBook !== undefined) {
+      } else if (Object.prototype.hasOwnProperty.call(raw, "addressBook")) {
         try {
           addressBook = addressBookTransferTypeConverter.fromTransferType(
-            raw.addressBook,
+            raw["addressBook"],
           );
         } catch (error) {
           __nexgenDefinitions.collect(violations, "addressBook", error);
@@ -3093,14 +3283,14 @@ export const showcaseTransferTypeConverter =
       }
 
       let dates: string[] | undefined = undefined as unknown as string[] | undefined;
-      if (raw.dates === null) {
+      if (Object.prototype.hasOwnProperty.call(raw, "dates") && raw["dates"] === null) {
         violations.push({ path: "dates", reason: "explicit null not allowed" });
-      } else if (raw.dates !== undefined) {
-        if (!Array.isArray(raw.dates)) {
+      } else if (Object.prototype.hasOwnProperty.call(raw, "dates")) {
+        if (!Array.isArray(raw["dates"])) {
           violations.push({ path: "dates", reason: "expected array" });
         } else {
           dates = [];
-          raw.dates.forEach((element: unknown, index: number) => {
+          raw["dates"].forEach((element: unknown, index: number) => {
             let item: string = undefined as unknown as string;
             if (typeof element !== "string") {
               violations.push({ path: `dates[${index}]`, reason: "expected string" });
@@ -3124,11 +3314,14 @@ export const showcaseTransferTypeConverter =
       let dateIndex: DateIndex | undefined = undefined as unknown as
         | DateIndex
         | undefined;
-      if (raw.dateIndex === null) {
+      if (
+        Object.prototype.hasOwnProperty.call(raw, "dateIndex") &&
+        raw["dateIndex"] === null
+      ) {
         violations.push({ path: "dateIndex", reason: "explicit null not allowed" });
-      } else if (raw.dateIndex !== undefined) {
+      } else if (Object.prototype.hasOwnProperty.call(raw, "dateIndex")) {
         try {
-          dateIndex = dateIndexTransferTypeConverter.fromTransferType(raw.dateIndex);
+          dateIndex = dateIndexTransferTypeConverter.fromTransferType(raw["dateIndex"]);
         } catch (error) {
           __nexgenDefinitions.collect(violations, "dateIndex", error);
         }
@@ -3137,14 +3330,14 @@ export const showcaseTransferTypeConverter =
       let blobs: Uint8Array[] | undefined = undefined as unknown as
         | Uint8Array[]
         | undefined;
-      if (raw.blobs === null) {
+      if (Object.prototype.hasOwnProperty.call(raw, "blobs") && raw["blobs"] === null) {
         violations.push({ path: "blobs", reason: "explicit null not allowed" });
-      } else if (raw.blobs !== undefined) {
-        if (!Array.isArray(raw.blobs)) {
+      } else if (Object.prototype.hasOwnProperty.call(raw, "blobs")) {
+        if (!Array.isArray(raw["blobs"])) {
           violations.push({ path: "blobs", reason: "expected array" });
         } else {
           blobs = [];
-          raw.blobs.forEach((element: unknown, index: number) => {
+          raw["blobs"].forEach((element: unknown, index: number) => {
             let item: Uint8Array = undefined as unknown as Uint8Array;
             if (typeof element !== "string") {
               violations.push({ path: `blobs[${index}]`, reason: "expected string" });
@@ -3168,22 +3361,28 @@ export const showcaseTransferTypeConverter =
       let blobIndex: BlobIndex | undefined = undefined as unknown as
         | BlobIndex
         | undefined;
-      if (raw.blobIndex === null) {
+      if (
+        Object.prototype.hasOwnProperty.call(raw, "blobIndex") &&
+        raw["blobIndex"] === null
+      ) {
         violations.push({ path: "blobIndex", reason: "explicit null not allowed" });
-      } else if (raw.blobIndex !== undefined) {
+      } else if (Object.prototype.hasOwnProperty.call(raw, "blobIndex")) {
         try {
-          blobIndex = blobIndexTransferTypeConverter.fromTransferType(raw.blobIndex);
+          blobIndex = blobIndexTransferTypeConverter.fromTransferType(raw["blobIndex"]);
         } catch (error) {
           __nexgenDefinitions.collect(violations, "blobIndex", error);
         }
       }
 
       let metrics: Metrics | undefined = undefined as unknown as Metrics | undefined;
-      if (raw.metrics === null) {
+      if (
+        Object.prototype.hasOwnProperty.call(raw, "metrics") &&
+        raw["metrics"] === null
+      ) {
         violations.push({ path: "metrics", reason: "explicit null not allowed" });
-      } else if (raw.metrics !== undefined) {
+      } else if (Object.prototype.hasOwnProperty.call(raw, "metrics")) {
         try {
-          metrics = metricsTransferTypeConverter.fromTransferType(raw.metrics);
+          metrics = metricsTransferTypeConverter.fromTransferType(raw["metrics"]);
         } catch (error) {
           __nexgenDefinitions.collect(violations, "metrics", error);
         }
@@ -3193,19 +3392,22 @@ export const showcaseTransferTypeConverter =
         | number
         | string
         | undefined;
-      if (raw.metricOrLabel === null) {
+      if (
+        Object.prototype.hasOwnProperty.call(raw, "metricOrLabel") &&
+        raw["metricOrLabel"] === null
+      ) {
         violations.push({ path: "metricOrLabel", reason: "explicit null not allowed" });
-      } else if (raw.metricOrLabel !== undefined) {
-        if (typeof raw.metricOrLabel === "number") {
-          metricOrLabel = raw.metricOrLabel as number;
+      } else if (Object.prototype.hasOwnProperty.call(raw, "metricOrLabel")) {
+        if (typeof raw["metricOrLabel"] === "number") {
+          metricOrLabel = raw["metricOrLabel"] as number;
           if (!Number.isFinite(metricOrLabel as number)) {
             violations.push({
               path: "metricOrLabel",
               reason: `must be a finite number, got ${metricOrLabel as number}`,
             });
           }
-        } else if (typeof raw.metricOrLabel === "string") {
-          metricOrLabel = raw.metricOrLabel as string;
+        } else if (typeof raw["metricOrLabel"] === "string") {
+          metricOrLabel = raw["metricOrLabel"] as string;
           {
             const codePoints = __nexgenDefinitions.codePointLength(
               metricOrLabel as string,
@@ -3230,20 +3432,23 @@ export const showcaseTransferTypeConverter =
         | Address[]
         | string
         | undefined;
-      if (raw.addressListOrLabel === null) {
+      if (
+        Object.prototype.hasOwnProperty.call(raw, "addressListOrLabel") &&
+        raw["addressListOrLabel"] === null
+      ) {
         violations.push({
           path: "addressListOrLabel",
           reason: "explicit null not allowed",
         });
-      } else if (raw.addressListOrLabel !== undefined) {
-        if (Array.isArray(raw.addressListOrLabel)) {
+      } else if (Object.prototype.hasOwnProperty.call(raw, "addressListOrLabel")) {
+        if (Array.isArray(raw["addressListOrLabel"])) {
           let addressListOrLabelArrayBranch: Address[] =
             undefined as unknown as Address[];
-          if (!Array.isArray(raw.addressListOrLabel)) {
+          if (!Array.isArray(raw["addressListOrLabel"])) {
             violations.push({ path: "addressListOrLabel", reason: "expected array" });
           } else {
             addressListOrLabelArrayBranch = [];
-            raw.addressListOrLabel.forEach((element: unknown, index: number) => {
+            raw["addressListOrLabel"].forEach((element: unknown, index: number) => {
               let item: Address = undefined as unknown as Address;
               try {
                 item = addressTransferTypeConverter.fromTransferType(element);
@@ -3258,18 +3463,18 @@ export const showcaseTransferTypeConverter =
                 addressListOrLabelArrayBranch!.push(item);
               }
             });
-            if (raw.addressListOrLabel.length < 1) {
+            if (raw["addressListOrLabel"].length < 1) {
               violations.push({
                 path: "addressListOrLabel",
-                reason: `must have at least 1 items, got ${raw.addressListOrLabel.length}`,
+                reason: `must have at least 1 items, got ${raw["addressListOrLabel"].length}`,
               });
             }
           }
           if (addressListOrLabelArrayBranch !== undefined) {
             addressListOrLabel = addressListOrLabelArrayBranch;
           }
-        } else if (typeof raw.addressListOrLabel === "string") {
-          addressListOrLabel = raw.addressListOrLabel as string;
+        } else if (typeof raw["addressListOrLabel"] === "string") {
+          addressListOrLabel = raw["addressListOrLabel"] as string;
           {
             const codePoints = __nexgenDefinitions.codePointLength(
               addressListOrLabel as string,
@@ -3293,12 +3498,15 @@ export const showcaseTransferTypeConverter =
       let location: ShowcaseLocation | undefined = undefined as unknown as
         | ShowcaseLocation
         | undefined;
-      if (raw.location === null) {
+      if (
+        Object.prototype.hasOwnProperty.call(raw, "location") &&
+        raw["location"] === null
+      ) {
         violations.push({ path: "location", reason: "explicit null not allowed" });
-      } else if (raw.location !== undefined) {
+      } else if (Object.prototype.hasOwnProperty.call(raw, "location")) {
         try {
           location = showcaseLocationTransferTypeConverter.fromTransferType(
-            raw.location,
+            raw["location"],
           );
         } catch (error) {
           __nexgenDefinitions.collect(violations, "location", error);
@@ -3309,12 +3517,12 @@ export const showcaseTransferTypeConverter =
         | ShowcaseAudit
         | null
         | undefined;
-      if (raw.audit !== undefined) {
-        if (raw.audit === null) {
+      if (Object.prototype.hasOwnProperty.call(raw, "audit")) {
+        if (raw["audit"] === null) {
           audit = null;
         } else {
           try {
-            audit = showcaseAuditTransferTypeConverter.fromTransferType(raw.audit);
+            audit = showcaseAuditTransferTypeConverter.fromTransferType(raw["audit"]);
           } catch (error) {
             __nexgenDefinitions.collect(violations, "audit", error);
           }
@@ -3324,14 +3532,14 @@ export const showcaseTransferTypeConverter =
       let rows: ShowcaseRowsItem[] | undefined = undefined as unknown as
         | ShowcaseRowsItem[]
         | undefined;
-      if (raw.rows === null) {
+      if (Object.prototype.hasOwnProperty.call(raw, "rows") && raw["rows"] === null) {
         violations.push({ path: "rows", reason: "explicit null not allowed" });
-      } else if (raw.rows !== undefined) {
-        if (!Array.isArray(raw.rows)) {
+      } else if (Object.prototype.hasOwnProperty.call(raw, "rows")) {
+        if (!Array.isArray(raw["rows"])) {
           violations.push({ path: "rows", reason: "expected array" });
         } else {
           rows = [];
-          raw.rows.forEach((element: unknown, index: number) => {
+          raw["rows"].forEach((element: unknown, index: number) => {
             let item: ShowcaseRowsItem = undefined as unknown as ShowcaseRowsItem;
             try {
               item = showcaseRowsItemTransferTypeConverter.fromTransferType(element);
@@ -3348,11 +3556,16 @@ export const showcaseTransferTypeConverter =
       let ledgerTs: ShowcaseLedger | undefined = undefined as unknown as
         | ShowcaseLedger
         | undefined;
-      if (raw.ledger === null) {
+      if (
+        Object.prototype.hasOwnProperty.call(raw, "ledger") &&
+        raw["ledger"] === null
+      ) {
         violations.push({ path: "ledger", reason: "explicit null not allowed" });
-      } else if (raw.ledger !== undefined) {
+      } else if (Object.prototype.hasOwnProperty.call(raw, "ledger")) {
         try {
-          ledgerTs = showcaseLedgerTransferTypeConverter.fromTransferType(raw.ledger);
+          ledgerTs = showcaseLedgerTransferTypeConverter.fromTransferType(
+            raw["ledger"],
+          );
         } catch (error) {
           __nexgenDefinitions.collect(violations, "ledger", error);
         }
@@ -3361,12 +3574,15 @@ export const showcaseTransferTypeConverter =
       let metadata: ShowcaseMetadata | undefined = undefined as unknown as
         | ShowcaseMetadata
         | undefined;
-      if (raw.metadata === null) {
+      if (
+        Object.prototype.hasOwnProperty.call(raw, "metadata") &&
+        raw["metadata"] === null
+      ) {
         violations.push({ path: "metadata", reason: "explicit null not allowed" });
-      } else if (raw.metadata !== undefined) {
+      } else if (Object.prototype.hasOwnProperty.call(raw, "metadata")) {
         try {
           metadata = showcaseMetadataTransferTypeConverter.fromTransferType(
-            raw.metadata,
+            raw["metadata"],
           );
         } catch (error) {
           __nexgenDefinitions.collect(violations, "metadata", error);
@@ -3374,22 +3590,28 @@ export const showcaseTransferTypeConverter =
       }
 
       let quotas: Quotas | undefined = undefined as unknown as Quotas | undefined;
-      if (raw.quotas === null) {
+      if (
+        Object.prototype.hasOwnProperty.call(raw, "quotas") &&
+        raw["quotas"] === null
+      ) {
         violations.push({ path: "quotas", reason: "explicit null not allowed" });
-      } else if (raw.quotas !== undefined) {
+      } else if (Object.prototype.hasOwnProperty.call(raw, "quotas")) {
         try {
-          quotas = quotasTransferTypeConverter.fromTransferType(raw.quotas);
+          quotas = quotasTransferTypeConverter.fromTransferType(raw["quotas"]);
         } catch (error) {
           __nexgenDefinitions.collect(violations, "quotas", error);
         }
       }
 
       let tokens: Tokens | undefined = undefined as unknown as Tokens | undefined;
-      if (raw.tokens === null) {
+      if (
+        Object.prototype.hasOwnProperty.call(raw, "tokens") &&
+        raw["tokens"] === null
+      ) {
         violations.push({ path: "tokens", reason: "explicit null not allowed" });
-      } else if (raw.tokens !== undefined) {
+      } else if (Object.prototype.hasOwnProperty.call(raw, "tokens")) {
         try {
-          tokens = tokensTransferTypeConverter.fromTransferType(raw.tokens);
+          tokens = tokensTransferTypeConverter.fromTransferType(raw["tokens"]);
         } catch (error) {
           __nexgenDefinitions.collect(violations, "tokens", error);
         }
@@ -3398,88 +3620,106 @@ export const showcaseTransferTypeConverter =
       let nicknames: Nicknames | undefined = undefined as unknown as
         | Nicknames
         | undefined;
-      if (raw.nicknames === null) {
+      if (
+        Object.prototype.hasOwnProperty.call(raw, "nicknames") &&
+        raw["nicknames"] === null
+      ) {
         violations.push({ path: "nicknames", reason: "explicit null not allowed" });
-      } else if (raw.nicknames !== undefined) {
+      } else if (Object.prototype.hasOwnProperty.call(raw, "nicknames")) {
         try {
-          nicknames = nicknamesTransferTypeConverter.fromTransferType(raw.nicknames);
+          nicknames = nicknamesTransferTypeConverter.fromTransferType(raw["nicknames"]);
         } catch (error) {
           __nexgenDefinitions.collect(violations, "nicknames", error);
         }
       }
 
       let choices: Choices | undefined = undefined as unknown as Choices | undefined;
-      if (raw.choices === null) {
+      if (
+        Object.prototype.hasOwnProperty.call(raw, "choices") &&
+        raw["choices"] === null
+      ) {
         violations.push({ path: "choices", reason: "explicit null not allowed" });
-      } else if (raw.choices !== undefined) {
+      } else if (Object.prototype.hasOwnProperty.call(raw, "choices")) {
         try {
-          choices = choicesTransferTypeConverter.fromTransferType(raw.choices);
+          choices = choicesTransferTypeConverter.fromTransferType(raw["choices"]);
         } catch (error) {
           __nexgenDefinitions.collect(violations, "choices", error);
         }
       }
 
       let extras: Extras | undefined = undefined as unknown as Extras | undefined;
-      if (raw.extras === null) {
+      if (
+        Object.prototype.hasOwnProperty.call(raw, "extras") &&
+        raw["extras"] === null
+      ) {
         violations.push({ path: "extras", reason: "explicit null not allowed" });
-      } else if (raw.extras !== undefined) {
+      } else if (Object.prototype.hasOwnProperty.call(raw, "extras")) {
         try {
-          extras = extrasTransferTypeConverter.fromTransferType(raw.extras);
+          extras = extrasTransferTypeConverter.fromTransferType(raw["extras"]);
         } catch (error) {
           __nexgenDefinitions.collect(violations, "extras", error);
         }
       }
 
       let shape: Shape | undefined = undefined as unknown as Shape | undefined;
-      if (raw.shape === null) {
+      if (Object.prototype.hasOwnProperty.call(raw, "shape") && raw["shape"] === null) {
         violations.push({ path: "shape", reason: "explicit null not allowed" });
-      } else if (raw.shape !== undefined) {
+      } else if (Object.prototype.hasOwnProperty.call(raw, "shape")) {
         try {
-          shape = shapeTransferTypeConverter.fromTransferType(raw.shape);
+          shape = shapeTransferTypeConverter.fromTransferType(raw["shape"]);
         } catch (error) {
           __nexgenDefinitions.collect(violations, "shape", error);
         }
       }
 
       let note: Note | undefined = undefined as unknown as Note | undefined;
-      if (raw.note === null) {
+      if (Object.prototype.hasOwnProperty.call(raw, "note") && raw["note"] === null) {
         violations.push({ path: "note", reason: "explicit null not allowed" });
-      } else if (raw.note !== undefined) {
+      } else if (Object.prototype.hasOwnProperty.call(raw, "note")) {
         try {
-          note = noteTransferTypeConverter.fromTransferType(raw.note);
+          note = noteTransferTypeConverter.fromTransferType(raw["note"]);
         } catch (error) {
           __nexgenDefinitions.collect(violations, "note", error);
         }
       }
 
       let address: Address | undefined = undefined as unknown as Address | undefined;
-      if (raw.address === null) {
+      if (
+        Object.prototype.hasOwnProperty.call(raw, "address") &&
+        raw["address"] === null
+      ) {
         violations.push({ path: "address", reason: "explicit null not allowed" });
-      } else if (raw.address !== undefined) {
+      } else if (Object.prototype.hasOwnProperty.call(raw, "address")) {
         try {
-          address = addressTransferTypeConverter.fromTransferType(raw.address);
+          address = addressTransferTypeConverter.fromTransferType(raw["address"]);
         } catch (error) {
           __nexgenDefinitions.collect(violations, "address", error);
         }
       }
 
       let labels: Labels | undefined = undefined as unknown as Labels | undefined;
-      if (raw.labels === null) {
+      if (
+        Object.prototype.hasOwnProperty.call(raw, "labels") &&
+        raw["labels"] === null
+      ) {
         violations.push({ path: "labels", reason: "explicit null not allowed" });
-      } else if (raw.labels !== undefined) {
+      } else if (Object.prototype.hasOwnProperty.call(raw, "labels")) {
         try {
-          labels = labelsTransferTypeConverter.fromTransferType(raw.labels);
+          labels = labelsTransferTypeConverter.fromTransferType(raw["labels"]);
         } catch (error) {
           __nexgenDefinitions.collect(violations, "labels", error);
         }
       }
 
       let settings: Settings | undefined = undefined as unknown as Settings | undefined;
-      if (raw.settings === null) {
+      if (
+        Object.prototype.hasOwnProperty.call(raw, "settings") &&
+        raw["settings"] === null
+      ) {
         violations.push({ path: "settings", reason: "explicit null not allowed" });
-      } else if (raw.settings !== undefined) {
+      } else if (Object.prototype.hasOwnProperty.call(raw, "settings")) {
         try {
-          settings = settingsTransferTypeConverter.fromTransferType(raw.settings);
+          settings = settingsTransferTypeConverter.fromTransferType(raw["settings"]);
         } catch (error) {
           __nexgenDefinitions.collect(violations, "settings", error);
         }
@@ -3488,11 +3728,16 @@ export const showcaseTransferTypeConverter =
       let attributes: Attributes | undefined = undefined as unknown as
         | Attributes
         | undefined;
-      if (raw.attributes === null) {
+      if (
+        Object.prototype.hasOwnProperty.call(raw, "attributes") &&
+        raw["attributes"] === null
+      ) {
         violations.push({ path: "attributes", reason: "explicit null not allowed" });
-      } else if (raw.attributes !== undefined) {
+      } else if (Object.prototype.hasOwnProperty.call(raw, "attributes")) {
         try {
-          attributes = attributesTransferTypeConverter.fromTransferType(raw.attributes);
+          attributes = attributesTransferTypeConverter.fromTransferType(
+            raw["attributes"],
+          );
         } catch (error) {
           __nexgenDefinitions.collect(violations, "attributes", error);
         }
@@ -3501,11 +3746,14 @@ export const showcaseTransferTypeConverter =
       let contact: ContactTs | undefined = undefined as unknown as
         | ContactTs
         | undefined;
-      if (raw.contact === null) {
+      if (
+        Object.prototype.hasOwnProperty.call(raw, "contact") &&
+        raw["contact"] === null
+      ) {
         violations.push({ path: "contact", reason: "explicit null not allowed" });
-      } else if (raw.contact !== undefined) {
+      } else if (Object.prototype.hasOwnProperty.call(raw, "contact")) {
         try {
-          contact = contactTsTransferTypeConverter.fromTransferType(raw.contact);
+          contact = contactTsTransferTypeConverter.fromTransferType(raw["contact"]);
         } catch (error) {
           __nexgenDefinitions.collect(violations, "contact", error);
         }
@@ -3515,27 +3763,27 @@ export const showcaseTransferTypeConverter =
         | number
         | null
         | undefined;
-      if (raw.nullableCount !== undefined) {
-        if (raw.nullableCount === null) {
+      if (Object.prototype.hasOwnProperty.call(raw, "nullableCount")) {
+        if (raw["nullableCount"] === null) {
           nullableCount = null;
         } else {
           if (
-            typeof raw.nullableCount !== "number" ||
-            !Number.isSafeInteger(raw.nullableCount)
+            typeof raw["nullableCount"] !== "number" ||
+            !Number.isSafeInteger(raw["nullableCount"])
           ) {
             violations.push({ path: "nullableCount", reason: "expected integer" });
           } else {
-            nullableCount = raw.nullableCount;
-            if (raw.nullableCount < 1) {
+            nullableCount = raw["nullableCount"];
+            if (raw["nullableCount"] < 1) {
               violations.push({
                 path: "nullableCount",
-                reason: `must be >= 1, got ${raw.nullableCount}`,
+                reason: `must be >= 1, got ${raw["nullableCount"]}`,
               });
             }
-            if (raw.nullableCount > 10) {
+            if (raw["nullableCount"] > 10) {
               violations.push({
                 path: "nullableCount",
-                reason: `must be <= 10, got ${raw.nullableCount}`,
+                reason: `must be <= 10, got ${raw["nullableCount"]}`,
               });
             }
           }
@@ -3546,24 +3794,24 @@ export const showcaseTransferTypeConverter =
         | number
         | null
         | undefined;
-      if (raw.nullableRatio !== undefined) {
-        if (raw.nullableRatio === null) {
+      if (Object.prototype.hasOwnProperty.call(raw, "nullableRatio")) {
+        if (raw["nullableRatio"] === null) {
           nullableRatio = null;
         } else {
-          if (typeof raw.nullableRatio !== "number") {
+          if (typeof raw["nullableRatio"] !== "number") {
             violations.push({ path: "nullableRatio", reason: "expected number" });
           } else {
-            nullableRatio = raw.nullableRatio;
-            if (!Number.isFinite(raw.nullableRatio)) {
+            nullableRatio = raw["nullableRatio"];
+            if (!Number.isFinite(raw["nullableRatio"])) {
               violations.push({
                 path: "nullableRatio",
-                reason: `must be a finite number, got ${raw.nullableRatio}`,
+                reason: `must be a finite number, got ${raw["nullableRatio"]}`,
               });
             } else {
-              if (raw.nullableRatio % 2 !== 0) {
+              if (raw["nullableRatio"] % 2 !== 0) {
                 violations.push({
                   path: "nullableRatio",
-                  reason: `must be a multiple of 2, got ${raw.nullableRatio}`,
+                  reason: `must be a multiple of 2, got ${raw["nullableRatio"]}`,
                 });
               }
             }
@@ -3575,14 +3823,14 @@ export const showcaseTransferTypeConverter =
         | boolean
         | null
         | undefined;
-      if (raw.nullableFlag !== undefined) {
-        if (raw.nullableFlag === null) {
+      if (Object.prototype.hasOwnProperty.call(raw, "nullableFlag")) {
+        if (raw["nullableFlag"] === null) {
           nullableFlag = null;
         } else {
-          if (typeof raw.nullableFlag !== "boolean") {
+          if (typeof raw["nullableFlag"] !== "boolean") {
             violations.push({ path: "nullableFlag", reason: "expected boolean" });
           } else {
-            nullableFlag = raw.nullableFlag;
+            nullableFlag = raw["nullableFlag"];
           }
         }
       }
@@ -3591,15 +3839,15 @@ export const showcaseTransferTypeConverter =
         | string[]
         | null
         | undefined;
-      if (raw.nullableTags !== undefined) {
-        if (raw.nullableTags === null) {
+      if (Object.prototype.hasOwnProperty.call(raw, "nullableTags")) {
+        if (raw["nullableTags"] === null) {
           nullableTags = null;
         } else {
-          if (!Array.isArray(raw.nullableTags)) {
+          if (!Array.isArray(raw["nullableTags"])) {
             violations.push({ path: "nullableTags", reason: "expected array" });
           } else {
             nullableTags = [];
-            raw.nullableTags.forEach((element: unknown, index: number) => {
+            raw["nullableTags"].forEach((element: unknown, index: number) => {
               let item: string = undefined as unknown as string;
               if (typeof element !== "string") {
                 violations.push({
@@ -3613,15 +3861,15 @@ export const showcaseTransferTypeConverter =
                 nullableTags!.push(item);
               }
             });
-            if (raw.nullableTags.length < 1) {
+            if (raw["nullableTags"].length < 1) {
               violations.push({
                 path: "nullableTags",
-                reason: `must have at least 1 items, got ${raw.nullableTags.length}`,
+                reason: `must have at least 1 items, got ${raw["nullableTags"].length}`,
               });
             }
             {
               const seen = new Map<unknown, number>();
-              raw.nullableTags.forEach((element, index) => {
+              raw["nullableTags"].forEach((element, index) => {
                 if (seen.has(element)) {
                   violations.push({
                     path: "nullableTags",
@@ -3641,19 +3889,22 @@ export const showcaseTransferTypeConverter =
         | "manual"
         | null
         | undefined;
-      if (raw.nullableMode !== undefined) {
-        if (raw.nullableMode === null) {
+      if (Object.prototype.hasOwnProperty.call(raw, "nullableMode")) {
+        if (raw["nullableMode"] === null) {
           nullableMode = null;
         } else {
-          if (typeof raw.nullableMode !== "string") {
+          if (typeof raw["nullableMode"] !== "string") {
             violations.push({ path: "nullableMode", reason: "expected string" });
-          } else if (raw.nullableMode !== "auto" && raw.nullableMode !== "manual") {
+          } else if (
+            raw["nullableMode"] !== "auto" &&
+            raw["nullableMode"] !== "manual"
+          ) {
             violations.push({
               path: "nullableMode",
-              reason: `must be one of ["auto", "manual"], got ${JSON.stringify(raw.nullableMode)}`,
+              reason: `must be one of ["auto", "manual"], got ${JSON.stringify(raw["nullableMode"])}`,
             });
           } else {
-            nullableMode = raw.nullableMode as "auto" | "manual";
+            nullableMode = raw["nullableMode"] as "auto" | "manual";
           }
         }
       }
@@ -3661,17 +3912,20 @@ export const showcaseTransferTypeConverter =
       let integralMeasurements: number[] | undefined = undefined as unknown as
         | number[]
         | undefined;
-      if (raw.integralMeasurements === null) {
+      if (
+        Object.prototype.hasOwnProperty.call(raw, "integralMeasurements") &&
+        raw["integralMeasurements"] === null
+      ) {
         violations.push({
           path: "integralMeasurements",
           reason: "explicit null not allowed",
         });
-      } else if (raw.integralMeasurements !== undefined) {
-        if (!Array.isArray(raw.integralMeasurements)) {
+      } else if (Object.prototype.hasOwnProperty.call(raw, "integralMeasurements")) {
+        if (!Array.isArray(raw["integralMeasurements"])) {
           violations.push({ path: "integralMeasurements", reason: "expected array" });
         } else {
           integralMeasurements = [];
-          raw.integralMeasurements.forEach((element: unknown, index: number) => {
+          raw["integralMeasurements"].forEach((element: unknown, index: number) => {
             let item: number = undefined as unknown as number;
             if (typeof element !== "number") {
               violations.push({
@@ -3692,7 +3946,7 @@ export const showcaseTransferTypeConverter =
             }
           });
           {
-            const matchCount = raw.integralMeasurements.filter(
+            const matchCount = raw["integralMeasurements"].filter(
               (element) => typeof element === "number" && Number.isSafeInteger(element),
             ).length;
             if (matchCount < 1) {
@@ -3706,23 +3960,26 @@ export const showcaseTransferTypeConverter =
       }
 
       let byFive: number | undefined = undefined as unknown as number | undefined;
-      if (raw.byFive === null) {
+      if (
+        Object.prototype.hasOwnProperty.call(raw, "byFive") &&
+        raw["byFive"] === null
+      ) {
         violations.push({ path: "byFive", reason: "explicit null not allowed" });
-      } else if (raw.byFive !== undefined) {
-        if (typeof raw.byFive !== "number") {
+      } else if (Object.prototype.hasOwnProperty.call(raw, "byFive")) {
+        if (typeof raw["byFive"] !== "number") {
           violations.push({ path: "byFive", reason: "expected number" });
         } else {
-          byFive = raw.byFive;
-          if (!Number.isFinite(raw.byFive)) {
+          byFive = raw["byFive"];
+          if (!Number.isFinite(raw["byFive"])) {
             violations.push({
               path: "byFive",
-              reason: `must be a finite number, got ${raw.byFive}`,
+              reason: `must be a finite number, got ${raw["byFive"]}`,
             });
           } else {
-            if (raw.byFive % 5 !== 0) {
+            if (raw["byFive"] % 5 !== 0) {
               violations.push({
                 path: "byFive",
-                reason: `must be a multiple of 5, got ${raw.byFive}`,
+                reason: `must be a multiple of 5, got ${raw["byFive"]}`,
               });
             }
           }
@@ -3730,30 +3987,36 @@ export const showcaseTransferTypeConverter =
       }
 
       let wildcard: string | undefined = undefined as unknown as string | undefined;
-      if (raw.wildcard === null) {
+      if (
+        Object.prototype.hasOwnProperty.call(raw, "wildcard") &&
+        raw["wildcard"] === null
+      ) {
         violations.push({ path: "wildcard", reason: "explicit null not allowed" });
-      } else if (raw.wildcard !== undefined) {
-        if (typeof raw.wildcard !== "string") {
+      } else if (Object.prototype.hasOwnProperty.call(raw, "wildcard")) {
+        if (typeof raw["wildcard"] !== "string") {
           violations.push({ path: "wildcard", reason: "expected string" });
         } else {
-          wildcard = raw.wildcard;
-          if (!PATTERN_F7DE686CF7F23810.test(raw.wildcard)) {
+          wildcard = raw["wildcard"];
+          if (!PATTERN_F7DE686CF7F23810.test(raw["wildcard"])) {
             violations.push({
               path: "wildcard",
-              reason: `must match pattern a[^\\n]b, got ${JSON.stringify(raw.wildcard)}`,
+              reason: `must match pattern a[^\\n]b, got ${JSON.stringify(raw["wildcard"])}`,
             });
           }
         }
       }
 
       let quoted: string | undefined = undefined as unknown as string | undefined;
-      if (raw.quoted === null) {
+      if (
+        Object.prototype.hasOwnProperty.call(raw, "quoted") &&
+        raw["quoted"] === null
+      ) {
         violations.push({ path: "quoted", reason: "explicit null not allowed" });
-      } else if (raw.quoted !== undefined) {
-        if (typeof raw.quoted !== "string") {
+      } else if (Object.prototype.hasOwnProperty.call(raw, "quoted")) {
+        if (typeof raw["quoted"] !== "string") {
           violations.push({ path: "quoted", reason: "expected string" });
         } else {
-          quoted = raw.quoted;
+          quoted = raw["quoted"];
         }
       }
 
@@ -4082,19 +4345,22 @@ export const showcaseTransferTypeConverter =
 
     public toTransferType(value: Showcase): unknown {
       const violations: __nexgenDefinitions.Violation[] = [];
-      const out: Record<string, unknown> = {};
+      const out: Record<string, unknown> = Object.create(null) as Record<
+        string,
+        unknown
+      >;
       if (value.kind !== "showcase") {
         violations.push({ path: "kind", reason: `must equal "showcase"` });
       }
-      out.kind = value.kind;
+      out["kind"] = value.kind;
       if (value.revision !== 1) {
         violations.push({ path: "revision", reason: `must equal 1` });
       }
-      out.revision = value.revision;
+      out["revision"] = value.revision;
       if (value.enabled !== true) {
         violations.push({ path: "enabled", reason: `must equal true` });
       }
-      out.enabled = value.enabled;
+      out["enabled"] = value.enabled;
       if (
         value.status !== "active" &&
         value.status !== "inactive" &&
@@ -4105,21 +4371,21 @@ export const showcaseTransferTypeConverter =
           reason: `must be one of ["active", "inactive", "pending"], got ${JSON.stringify(value.status)}`,
         });
       }
-      out.status = value.status;
+      out["status"] = value.status;
       if (value.tier !== 1 && value.tier !== 2 && value.tier !== 3) {
         violations.push({
           path: "tier",
           reason: `must be one of [1, 2, 3], got ${JSON.stringify(value.tier)}`,
         });
       }
-      out.tier = value.tier;
+      out["tier"] = value.tier;
       if (value.scale !== 1.5 && value.scale !== 2.5) {
         violations.push({
           path: "scale",
           reason: `must be one of [1.5, 2.5], got ${JSON.stringify(value.scale)}`,
         });
       }
-      out.scale = value.scale;
+      out["scale"] = value.scale;
       {
         const codePoints = __nexgenDefinitions.codePointLength(value.name, 1);
         if (codePoints < 1) {
@@ -4135,12 +4401,12 @@ export const showcaseTransferTypeConverter =
           reason: `must have length <= 64, got ${__nexgenDefinitions.codePointLength(value.name)}`,
         });
       }
-      out.name = value.name;
+      out["name"] = value.name;
       if (!Number.isSafeInteger(value.count)) {
         violations.push({ path: "count", reason: "exceeds ±(2^53-1) integer cap" });
       }
-      out.count = value.count;
-      out.active = value.active;
+      out["count"] = value.count;
+      out["active"] = value.active;
       if (value.nickname !== undefined) {
         if (__nexgenDefinitions.codePointLength(value.nickname, 12) > 12) {
           violations.push({
@@ -4148,7 +4414,7 @@ export const showcaseTransferTypeConverter =
             reason: `must have length <= 12, got ${__nexgenDefinitions.codePointLength(value.nickname)}`,
           });
         }
-        out.nickname = value.nickname;
+        out["nickname"] = value.nickname;
       }
       if (value.code !== undefined) {
         {
@@ -4166,7 +4432,7 @@ export const showcaseTransferTypeConverter =
             reason: `must have length <= 5, got ${__nexgenDefinitions.codePointLength(value.code)}`,
           });
         }
-        out.code = value.code;
+        out["code"] = value.code;
       }
       if (value.sku !== undefined) {
         if (!PATTERN_821EF753B4B37A85.test(value.sku)) {
@@ -4175,7 +4441,7 @@ export const showcaseTransferTypeConverter =
             reason: `must match pattern ^[A-Z]{2,4}\$, got ${JSON.stringify(value.sku)}`,
           });
         }
-        out.sku = value.sku;
+        out["sku"] = value.sku;
       }
       if (value.phrase !== undefined) {
         if (!PATTERN_AF8AB992526D6283.test(value.phrase)) {
@@ -4184,7 +4450,7 @@ export const showcaseTransferTypeConverter =
             reason: `must match pattern ^[^\\t\\n\\x0B\\f\\r ]+[\\t\\n\\x0B\\f\\r ][^\\t\\n\\x0B\\f\\r ]+\$, got ${JSON.stringify(value.phrase)}`,
           });
         }
-        out.phrase = value.phrase;
+        out["phrase"] = value.phrase;
       }
       if (value.requestId !== undefined) {
         if (!PATTERN_52CD3CCF2038430A.test(value.requestId)) {
@@ -4193,7 +4459,7 @@ export const showcaseTransferTypeConverter =
             reason: `must be a valid uuid, got ${JSON.stringify(value.requestId)}`,
           });
         }
-        out.requestId = value.requestId;
+        out["requestId"] = value.requestId;
       }
       if (value.contactEmail !== undefined) {
         if (
@@ -4205,7 +4471,7 @@ export const showcaseTransferTypeConverter =
             reason: `must be a valid email, got ${JSON.stringify(value.contactEmail)}`,
           });
         }
-        out.contactEmail = value.contactEmail;
+        out["contactEmail"] = value.contactEmail;
       }
       if (value.host !== undefined) {
         if (
@@ -4217,7 +4483,7 @@ export const showcaseTransferTypeConverter =
             reason: `must be a valid hostname, got ${JSON.stringify(value.host)}`,
           });
         }
-        out.host = value.host;
+        out["host"] = value.host;
       }
       if (value.homepage !== undefined) {
         if (!PATTERN_2F0C822905CC055D.test(value.homepage)) {
@@ -4226,7 +4492,7 @@ export const showcaseTransferTypeConverter =
             reason: `must be a valid uri, got ${JSON.stringify(value.homepage)}`,
           });
         }
-        out.homepage = value.homepage;
+        out["homepage"] = value.homepage;
       }
       if (value.gateway !== undefined) {
         if (!PATTERN_F5FB862A44510B9D.test(value.gateway)) {
@@ -4235,36 +4501,36 @@ export const showcaseTransferTypeConverter =
             reason: `must be a valid ipv4, got ${JSON.stringify(value.gateway)}`,
           });
         }
-        out.gateway = value.gateway;
+        out["gateway"] = value.gateway;
       }
       if (value.blob !== undefined) {
-        out.blob = __nexgenDefinitions.bytesToBase64(value.blob);
+        out["blob"] = __nexgenDefinitions.bytesToBase64(value.blob);
       }
       if (value.urlBlob !== undefined) {
-        out.urlBlob = __nexgenDefinitions.bytesToBase64Url(value.urlBlob);
+        out["urlBlob"] = __nexgenDefinitions.bytesToBase64Url(value.urlBlob);
       }
       if (value.retries !== undefined) {
         if (!Number.isSafeInteger(value.retries)) {
           violations.push({ path: "retries", reason: "exceeds ±(2^53-1) integer cap" });
         }
-        out.retries = value.retries;
+        out["retries"] = value.retries;
       }
       if (value.verbose !== undefined) {
-        out.verbose = value.verbose;
+        out["verbose"] = value.verbose;
       }
       if (value.greeting !== undefined) {
-        out.greeting = value.greeting;
+        out["greeting"] = value.greeting;
       }
       if (value.debug !== undefined) {
-        out.debug = value.debug;
+        out["debug"] = value.debug;
       }
       if (value.legacyIdTs !== undefined) {
-        out.legacyId = value.legacyIdTs;
+        out["legacyId"] = value.legacyIdTs;
       }
       if (value.middleName !== undefined) {
-        out.middleName = value.middleName;
+        out["middleName"] = value.middleName;
       }
-      out.category = value.category;
+      out["category"] = value.category;
       if (value.priority !== undefined) {
         if (!Number.isSafeInteger(value.priority)) {
           violations.push({
@@ -4285,7 +4551,7 @@ export const showcaseTransferTypeConverter =
             });
           }
         }
-        out.priority = value.priority;
+        out["priority"] = value.priority;
       }
       if (value.level !== undefined) {
         if (!Number.isSafeInteger(value.level)) {
@@ -4298,7 +4564,7 @@ export const showcaseTransferTypeConverter =
             });
           }
         }
-        out.level = value.level;
+        out["level"] = value.level;
       }
       if (value.ratio !== undefined) {
         if (!Number.isFinite(value.ratio)) {
@@ -4320,7 +4586,7 @@ export const showcaseTransferTypeConverter =
             });
           }
         }
-        out.ratio = value.ratio;
+        out["ratio"] = value.ratio;
       }
       if (value.score !== undefined) {
         if (!Number.isFinite(value.score)) {
@@ -4329,7 +4595,7 @@ export const showcaseTransferTypeConverter =
             reason: `must be a finite number, got ${value.score}`,
           });
         }
-        out.score = value.score;
+        out["score"] = value.score;
       }
       if (value.step !== undefined) {
         if (!Number.isSafeInteger(value.step)) {
@@ -4342,7 +4608,7 @@ export const showcaseTransferTypeConverter =
             });
           }
         }
-        out.step = value.step;
+        out["step"] = value.step;
       }
       if (value.tags !== undefined) {
         if (value.tags.length < 1) {
@@ -4357,7 +4623,7 @@ export const showcaseTransferTypeConverter =
             reason: `must have at most 5 items, got ${value.tags.length}`,
           });
         }
-        out.tags = value.tags;
+        out["tags"] = value.tags;
       }
       if (value.aliases !== undefined) {
         {
@@ -4373,7 +4639,7 @@ export const showcaseTransferTypeConverter =
             }
           });
         }
-        out.aliases = value.aliases;
+        out["aliases"] = value.aliases;
       }
       if (value.roles !== undefined) {
         {
@@ -4393,7 +4659,7 @@ export const showcaseTransferTypeConverter =
             });
           }
         }
-        out.roles = value.roles;
+        out["roles"] = value.roles;
       }
       if (value.idOrName !== undefined) {
         if (typeof value.idOrName === "string") {
@@ -4428,7 +4694,7 @@ export const showcaseTransferTypeConverter =
             }
           }
         }
-        out.idOrName = value.idOrName;
+        out["idOrName"] = value.idOrName;
       }
       if (value.mode !== undefined) {
         if (typeof value.mode === "string") {
@@ -4454,13 +4720,13 @@ export const showcaseTransferTypeConverter =
             }
           }
         }
-        out.mode = value.mode;
+        out["mode"] = value.mode;
       }
       if (value.payload !== undefined) {
-        out.payload = value.payload;
+        out["payload"] = value.payload;
       }
       if (value.detail !== undefined) {
-        out.detail = (() => {
+        out["detail"] = (() => {
           try {
             return serializeShowcaseDetail(value.detail);
           } catch (error) {
@@ -4480,7 +4746,7 @@ export const showcaseTransferTypeConverter =
             });
           }
         }
-        out.shapeOrName = (() => {
+        out["shapeOrName"] = (() => {
           try {
             return serializeShowcaseShapeOrName(value.shapeOrName);
           } catch (error) {
@@ -4527,11 +4793,11 @@ export const showcaseTransferTypeConverter =
             });
           }
         }
-        out.measurements = value.measurements;
+        out["measurements"] = value.measurements;
       }
       if (value.shapes !== undefined) {
         value.shapes.forEach((element, index) => {});
-        out.shapes = value.shapes.map((element, index) =>
+        out["shapes"] = value.shapes.map((element, index) =>
           (() => {
             try {
               return shapeTransferTypeConverter.toTransferType(element);
@@ -4544,7 +4810,7 @@ export const showcaseTransferTypeConverter =
       }
       if (value.segments !== undefined) {
         value.segments.forEach((element, index) => {});
-        out.segments = value.segments.map((element, index) =>
+        out["segments"] = value.segments.map((element, index) =>
           (() => {
             try {
               return showcaseSegmentsItemTransferTypeConverter.toTransferType(element);
@@ -4569,7 +4835,7 @@ export const showcaseTransferTypeConverter =
             }
           }
         });
-        out.slots = value.slots;
+        out["slots"] = value.slots;
       }
       if (value.grid !== undefined) {
         value.grid.forEach((element, index) => {
@@ -4582,7 +4848,7 @@ export const showcaseTransferTypeConverter =
             }
           });
         });
-        out.grid = value.grid;
+        out["grid"] = value.grid;
       }
       if (value.numberGrid !== undefined) {
         value.numberGrid.forEach((element, index) => {
@@ -4595,7 +4861,7 @@ export const showcaseTransferTypeConverter =
             }
           });
         });
-        out.numberGrid = value.numberGrid;
+        out["numberGrid"] = value.numberGrid;
       }
       if (value.links !== undefined) {
         value.links.forEach((element, index) => {
@@ -4606,11 +4872,11 @@ export const showcaseTransferTypeConverter =
             });
           }
         });
-        out.links = value.links;
+        out["links"] = value.links;
       }
       if (value.addresses !== undefined) {
         value.addresses.forEach((element, index) => {});
-        out.addresses = value.addresses.map((element, index) =>
+        out["addresses"] = value.addresses.map((element, index) =>
           (() => {
             try {
               return addressTransferTypeConverter.toTransferType(element);
@@ -4622,7 +4888,7 @@ export const showcaseTransferTypeConverter =
         );
       }
       if (value.addressBook !== undefined) {
-        out.addressBook = (() => {
+        out["addressBook"] = (() => {
           try {
             return addressBookTransferTypeConverter.toTransferType(value.addressBook);
           } catch (error) {
@@ -4639,10 +4905,10 @@ export const showcaseTransferTypeConverter =
             violations,
           );
         });
-        out.dates = value.dates;
+        out["dates"] = value.dates;
       }
       if (value.dateIndex !== undefined) {
-        out.dateIndex = (() => {
+        out["dateIndex"] = (() => {
           try {
             return dateIndexTransferTypeConverter.toTransferType(value.dateIndex);
           } catch (error) {
@@ -4652,12 +4918,12 @@ export const showcaseTransferTypeConverter =
         })();
       }
       if (value.blobs !== undefined) {
-        out.blobs = value.blobs.map((element, index) =>
+        out["blobs"] = value.blobs.map((element, index) =>
           __nexgenDefinitions.bytesToBase64(element),
         );
       }
       if (value.blobIndex !== undefined) {
-        out.blobIndex = (() => {
+        out["blobIndex"] = (() => {
           try {
             return blobIndexTransferTypeConverter.toTransferType(value.blobIndex);
           } catch (error) {
@@ -4667,7 +4933,7 @@ export const showcaseTransferTypeConverter =
         })();
       }
       if (value.metrics !== undefined) {
-        out.metrics = (() => {
+        out["metrics"] = (() => {
           try {
             return metricsTransferTypeConverter.toTransferType(value.metrics);
           } catch (error) {
@@ -4699,7 +4965,7 @@ export const showcaseTransferTypeConverter =
             }
           }
         }
-        out.metricOrLabel = value.metricOrLabel;
+        out["metricOrLabel"] = value.metricOrLabel;
       }
       if (value.addressListOrLabel !== undefined) {
         if (Array.isArray(value.addressListOrLabel)) {
@@ -4725,7 +4991,7 @@ export const showcaseTransferTypeConverter =
             }
           }
         }
-        out.addressListOrLabel = (() => {
+        out["addressListOrLabel"] = (() => {
           try {
             return serializeShowcaseAddressListOrLabel(value.addressListOrLabel);
           } catch (error) {
@@ -4735,7 +5001,7 @@ export const showcaseTransferTypeConverter =
         })();
       }
       if (value.location !== undefined) {
-        out.location = (() => {
+        out["location"] = (() => {
           try {
             return showcaseLocationTransferTypeConverter.toTransferType(value.location);
           } catch (error) {
@@ -4745,7 +5011,7 @@ export const showcaseTransferTypeConverter =
         })();
       }
       if (value.audit !== undefined) {
-        out.audit =
+        out["audit"] =
           value.audit === null
             ? null
             : (() => {
@@ -4759,7 +5025,7 @@ export const showcaseTransferTypeConverter =
       }
       if (value.rows !== undefined) {
         value.rows.forEach((element, index) => {});
-        out.rows = value.rows.map((element, index) =>
+        out["rows"] = value.rows.map((element, index) =>
           (() => {
             try {
               return showcaseRowsItemTransferTypeConverter.toTransferType(element);
@@ -4771,7 +5037,7 @@ export const showcaseTransferTypeConverter =
         );
       }
       if (value.ledgerTs !== undefined) {
-        out.ledger = (() => {
+        out["ledger"] = (() => {
           try {
             return showcaseLedgerTransferTypeConverter.toTransferType(value.ledgerTs);
           } catch (error) {
@@ -4781,7 +5047,7 @@ export const showcaseTransferTypeConverter =
         })();
       }
       if (value.metadata !== undefined) {
-        out.metadata = (() => {
+        out["metadata"] = (() => {
           try {
             return showcaseMetadataTransferTypeConverter.toTransferType(value.metadata);
           } catch (error) {
@@ -4791,7 +5057,7 @@ export const showcaseTransferTypeConverter =
         })();
       }
       if (value.quotas !== undefined) {
-        out.quotas = (() => {
+        out["quotas"] = (() => {
           try {
             return quotasTransferTypeConverter.toTransferType(value.quotas);
           } catch (error) {
@@ -4801,7 +5067,7 @@ export const showcaseTransferTypeConverter =
         })();
       }
       if (value.tokens !== undefined) {
-        out.tokens = (() => {
+        out["tokens"] = (() => {
           try {
             return tokensTransferTypeConverter.toTransferType(value.tokens);
           } catch (error) {
@@ -4811,7 +5077,7 @@ export const showcaseTransferTypeConverter =
         })();
       }
       if (value.nicknames !== undefined) {
-        out.nicknames = (() => {
+        out["nicknames"] = (() => {
           try {
             return nicknamesTransferTypeConverter.toTransferType(value.nicknames);
           } catch (error) {
@@ -4821,7 +5087,7 @@ export const showcaseTransferTypeConverter =
         })();
       }
       if (value.choices !== undefined) {
-        out.choices = (() => {
+        out["choices"] = (() => {
           try {
             return choicesTransferTypeConverter.toTransferType(value.choices);
           } catch (error) {
@@ -4831,7 +5097,7 @@ export const showcaseTransferTypeConverter =
         })();
       }
       if (value.extras !== undefined) {
-        out.extras = (() => {
+        out["extras"] = (() => {
           try {
             return extrasTransferTypeConverter.toTransferType(value.extras);
           } catch (error) {
@@ -4841,7 +5107,7 @@ export const showcaseTransferTypeConverter =
         })();
       }
       if (value.shape !== undefined) {
-        out.shape = (() => {
+        out["shape"] = (() => {
           try {
             return shapeTransferTypeConverter.toTransferType(value.shape);
           } catch (error) {
@@ -4851,7 +5117,7 @@ export const showcaseTransferTypeConverter =
         })();
       }
       if (value.note !== undefined) {
-        out.note = (() => {
+        out["note"] = (() => {
           try {
             return noteTransferTypeConverter.toTransferType(value.note);
           } catch (error) {
@@ -4861,7 +5127,7 @@ export const showcaseTransferTypeConverter =
         })();
       }
       if (value.address !== undefined) {
-        out.address = (() => {
+        out["address"] = (() => {
           try {
             return addressTransferTypeConverter.toTransferType(value.address);
           } catch (error) {
@@ -4871,7 +5137,7 @@ export const showcaseTransferTypeConverter =
         })();
       }
       if (value.labels !== undefined) {
-        out.labels = (() => {
+        out["labels"] = (() => {
           try {
             return labelsTransferTypeConverter.toTransferType(value.labels);
           } catch (error) {
@@ -4881,7 +5147,7 @@ export const showcaseTransferTypeConverter =
         })();
       }
       if (value.settings !== undefined) {
-        out.settings = (() => {
+        out["settings"] = (() => {
           try {
             return settingsTransferTypeConverter.toTransferType(value.settings);
           } catch (error) {
@@ -4891,7 +5157,7 @@ export const showcaseTransferTypeConverter =
         })();
       }
       if (value.attributes !== undefined) {
-        out.attributes = (() => {
+        out["attributes"] = (() => {
           try {
             return attributesTransferTypeConverter.toTransferType(value.attributes);
           } catch (error) {
@@ -4901,7 +5167,7 @@ export const showcaseTransferTypeConverter =
         })();
       }
       if (value.contact !== undefined) {
-        out.contact = (() => {
+        out["contact"] = (() => {
           try {
             return contactTsTransferTypeConverter.toTransferType(value.contact);
           } catch (error) {
@@ -4932,7 +5198,7 @@ export const showcaseTransferTypeConverter =
             }
           }
         }
-        out.nullableCount = value.nullableCount;
+        out["nullableCount"] = value.nullableCount;
       }
       if (value.nullableRatio !== undefined) {
         if (value.nullableRatio !== null) {
@@ -4950,10 +5216,10 @@ export const showcaseTransferTypeConverter =
             }
           }
         }
-        out.nullableRatio = value.nullableRatio;
+        out["nullableRatio"] = value.nullableRatio;
       }
       if (value.nullableFlag !== undefined) {
-        out.nullableFlag = value.nullableFlag;
+        out["nullableFlag"] = value.nullableFlag;
       }
       if (value.nullableTags !== undefined) {
         if (value.nullableTags !== null) {
@@ -4977,7 +5243,7 @@ export const showcaseTransferTypeConverter =
             });
           }
         }
-        out.nullableTags = value.nullableTags;
+        out["nullableTags"] = value.nullableTags;
       }
       if (value.nullableMode !== undefined) {
         if (value.nullableMode !== null) {
@@ -4988,7 +5254,7 @@ export const showcaseTransferTypeConverter =
             });
           }
         }
-        out.nullableMode = value.nullableMode;
+        out["nullableMode"] = value.nullableMode;
       }
       if (value.integralMeasurements !== undefined) {
         {
@@ -5010,7 +5276,7 @@ export const showcaseTransferTypeConverter =
             });
           }
         });
-        out.integralMeasurements = value.integralMeasurements;
+        out["integralMeasurements"] = value.integralMeasurements;
       }
       if (value.byFive !== undefined) {
         if (!Number.isFinite(value.byFive)) {
@@ -5026,7 +5292,7 @@ export const showcaseTransferTypeConverter =
             });
           }
         }
-        out.byFive = value.byFive;
+        out["byFive"] = value.byFive;
       }
       if (value.wildcard !== undefined) {
         if (!PATTERN_F7DE686CF7F23810.test(value.wildcard)) {
@@ -5035,10 +5301,10 @@ export const showcaseTransferTypeConverter =
             reason: `must match pattern a[^\\n]b, got ${JSON.stringify(value.wildcard)}`,
           });
         }
-        out.wildcard = value.wildcard;
+        out["wildcard"] = value.wildcard;
       }
       if (value.quoted !== undefined) {
-        out.quoted = value.quoted;
+        out["quoted"] = value.quoted;
       }
       if (violations.length) {
         throw __nexgenDefinitions.payloadValidationError(violations);
@@ -5060,15 +5326,15 @@ export const showcaseAuditTransferTypeConverter =
       }
 
       let by: string = undefined as unknown as string;
-      if (raw.by === undefined || raw.by === null) {
+      if (!Object.prototype.hasOwnProperty.call(raw, "by") || raw["by"] === null) {
         violations.push({ path: "by", reason: "required" });
       } else {
-        if (typeof raw.by !== "string") {
+        if (typeof raw["by"] !== "string") {
           violations.push({ path: "by", reason: "expected string" });
         } else {
-          by = raw.by;
+          by = raw["by"];
           {
-            const codePoints = __nexgenDefinitions.codePointLength(raw.by, 1);
+            const codePoints = __nexgenDefinitions.codePointLength(raw["by"], 1);
             if (codePoints < 1) {
               violations.push({
                 path: "by",
@@ -5079,7 +5345,9 @@ export const showcaseAuditTransferTypeConverter =
         }
       }
 
-      const additionalProperties: Record<string, unknown> = {};
+      const additionalProperties: Record<string, unknown> = Object.create(
+        null,
+      ) as Record<string, unknown>;
       for (const key of Object.keys(raw)) {
         if (!SHOWCASE_AUDIT_DECLARED.has(key)) {
           additionalProperties[key] = raw[key];
@@ -5095,7 +5363,10 @@ export const showcaseAuditTransferTypeConverter =
 
     public toTransferType(value: ShowcaseAudit): unknown {
       const violations: __nexgenDefinitions.Violation[] = [];
-      const out: Record<string, unknown> = {};
+      const out: Record<string, unknown> = Object.create(null) as Record<
+        string,
+        unknown
+      >;
       {
         const codePoints = __nexgenDefinitions.codePointLength(value.by, 1);
         if (codePoints < 1) {
@@ -5105,7 +5376,7 @@ export const showcaseAuditTransferTypeConverter =
           });
         }
       }
-      out.by = value.by;
+      out["by"] = value.by;
       for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
         if (SHOWCASE_AUDIT_DECLARED.has(key)) {
           violations.push({
@@ -5136,15 +5407,15 @@ export const showcaseDetailObjectTransferTypeConverter =
       }
 
       let code: string = undefined as unknown as string;
-      if (raw.code === undefined || raw.code === null) {
+      if (!Object.prototype.hasOwnProperty.call(raw, "code") || raw["code"] === null) {
         violations.push({ path: "code", reason: "required" });
       } else {
-        if (typeof raw.code !== "string") {
+        if (typeof raw["code"] !== "string") {
           violations.push({ path: "code", reason: "expected string" });
         } else {
-          code = raw.code;
+          code = raw["code"];
           {
-            const codePoints = __nexgenDefinitions.codePointLength(raw.code, 1);
+            const codePoints = __nexgenDefinitions.codePointLength(raw["code"], 1);
             if (codePoints < 1) {
               violations.push({
                 path: "code",
@@ -5156,17 +5427,19 @@ export const showcaseDetailObjectTransferTypeConverter =
       }
 
       let hint: string | undefined = undefined as unknown as string | undefined;
-      if (raw.hint === null) {
+      if (Object.prototype.hasOwnProperty.call(raw, "hint") && raw["hint"] === null) {
         violations.push({ path: "hint", reason: "explicit null not allowed" });
-      } else if (raw.hint !== undefined) {
-        if (typeof raw.hint !== "string") {
+      } else if (Object.prototype.hasOwnProperty.call(raw, "hint")) {
+        if (typeof raw["hint"] !== "string") {
           violations.push({ path: "hint", reason: "expected string" });
         } else {
-          hint = raw.hint;
+          hint = raw["hint"];
         }
       }
 
-      const additionalProperties: Record<string, unknown> = {};
+      const additionalProperties: Record<string, unknown> = Object.create(
+        null,
+      ) as Record<string, unknown>;
       for (const key of Object.keys(raw)) {
         if (!SHOWCASE_DETAIL_OBJECT_DECLARED.has(key)) {
           additionalProperties[key] = raw[key];
@@ -5185,7 +5458,10 @@ export const showcaseDetailObjectTransferTypeConverter =
 
     public toTransferType(value: ShowcaseDetailObject): unknown {
       const violations: __nexgenDefinitions.Violation[] = [];
-      const out: Record<string, unknown> = {};
+      const out: Record<string, unknown> = Object.create(null) as Record<
+        string,
+        unknown
+      >;
       {
         const codePoints = __nexgenDefinitions.codePointLength(value.code, 1);
         if (codePoints < 1) {
@@ -5195,9 +5471,9 @@ export const showcaseDetailObjectTransferTypeConverter =
           });
         }
       }
-      out.code = value.code;
+      out["code"] = value.code;
       if (value.hint !== undefined) {
-        out.hint = value.hint;
+        out["hint"] = value.hint;
       }
       for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
         if (SHOWCASE_DETAIL_OBJECT_DECLARED.has(key)) {
@@ -5227,7 +5503,9 @@ export const showcaseLedgerTransferTypeConverter =
       }
 
       const keys = Object.keys(raw);
-      const additionalProperties: Record<string, ShowcaseLedgerValue> = {};
+      const additionalProperties: Record<string, ShowcaseLedgerValue> = Object.create(
+        null,
+      ) as Record<string, ShowcaseLedgerValue>;
       for (const key of keys) {
         let entry: ShowcaseLedgerValue | undefined = undefined;
         try {
@@ -5247,7 +5525,10 @@ export const showcaseLedgerTransferTypeConverter =
 
     public toTransferType(value: ShowcaseLedger): unknown {
       const violations: __nexgenDefinitions.Violation[] = [];
-      const out: Record<string, unknown> = {};
+      const out: Record<string, unknown> = Object.create(null) as Record<
+        string,
+        unknown
+      >;
       for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
         out[key] = (() => {
           try {
@@ -5278,23 +5559,28 @@ export const showcaseLedgerValueTransferTypeConverter =
       }
 
       let amount: number = undefined as unknown as number;
-      if (raw.amount === undefined || raw.amount === null) {
+      if (
+        !Object.prototype.hasOwnProperty.call(raw, "amount") ||
+        raw["amount"] === null
+      ) {
         violations.push({ path: "amount", reason: "required" });
       } else {
-        if (typeof raw.amount !== "number" || !Number.isSafeInteger(raw.amount)) {
+        if (typeof raw["amount"] !== "number" || !Number.isSafeInteger(raw["amount"])) {
           violations.push({ path: "amount", reason: "expected integer" });
         } else {
-          amount = raw.amount;
-          if (raw.amount < 0) {
+          amount = raw["amount"];
+          if (raw["amount"] < 0) {
             violations.push({
               path: "amount",
-              reason: `must be >= 0, got ${raw.amount}`,
+              reason: `must be >= 0, got ${raw["amount"]}`,
             });
           }
         }
       }
 
-      const additionalProperties: Record<string, unknown> = {};
+      const additionalProperties: Record<string, unknown> = Object.create(
+        null,
+      ) as Record<string, unknown>;
       for (const key of Object.keys(raw)) {
         if (!SHOWCASE_LEDGER_VALUE_DECLARED.has(key)) {
           additionalProperties[key] = raw[key];
@@ -5310,7 +5596,10 @@ export const showcaseLedgerValueTransferTypeConverter =
 
     public toTransferType(value: ShowcaseLedgerValue): unknown {
       const violations: __nexgenDefinitions.Violation[] = [];
-      const out: Record<string, unknown> = {};
+      const out: Record<string, unknown> = Object.create(null) as Record<
+        string,
+        unknown
+      >;
       if (!Number.isSafeInteger(value.amount)) {
         violations.push({ path: "amount", reason: "exceeds ±(2^53-1) integer cap" });
       } else {
@@ -5321,7 +5610,7 @@ export const showcaseLedgerValueTransferTypeConverter =
           });
         }
       }
-      out.amount = value.amount;
+      out["amount"] = value.amount;
       for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
         if (SHOWCASE_LEDGER_VALUE_DECLARED.has(key)) {
           violations.push({
@@ -5352,15 +5641,15 @@ export const showcaseLocationTransferTypeConverter =
       }
 
       let city: string = undefined as unknown as string;
-      if (raw.city === undefined || raw.city === null) {
+      if (!Object.prototype.hasOwnProperty.call(raw, "city") || raw["city"] === null) {
         violations.push({ path: "city", reason: "required" });
       } else {
-        if (typeof raw.city !== "string") {
+        if (typeof raw["city"] !== "string") {
           violations.push({ path: "city", reason: "expected string" });
         } else {
-          city = raw.city;
+          city = raw["city"];
           {
-            const codePoints = __nexgenDefinitions.codePointLength(raw.city, 1);
+            const codePoints = __nexgenDefinitions.codePointLength(raw["city"], 1);
             if (codePoints < 1) {
               violations.push({
                 path: "city",
@@ -5374,17 +5663,19 @@ export const showcaseLocationTransferTypeConverter =
       let geo: ShowcaseLocationGeo | undefined = undefined as unknown as
         | ShowcaseLocationGeo
         | undefined;
-      if (raw.geo === null) {
+      if (Object.prototype.hasOwnProperty.call(raw, "geo") && raw["geo"] === null) {
         violations.push({ path: "geo", reason: "explicit null not allowed" });
-      } else if (raw.geo !== undefined) {
+      } else if (Object.prototype.hasOwnProperty.call(raw, "geo")) {
         try {
-          geo = showcaseLocationGeoTransferTypeConverter.fromTransferType(raw.geo);
+          geo = showcaseLocationGeoTransferTypeConverter.fromTransferType(raw["geo"]);
         } catch (error) {
           __nexgenDefinitions.collect(violations, "geo", error);
         }
       }
 
-      const additionalProperties: Record<string, unknown> = {};
+      const additionalProperties: Record<string, unknown> = Object.create(
+        null,
+      ) as Record<string, unknown>;
       for (const key of Object.keys(raw)) {
         if (!SHOWCASE_LOCATION_DECLARED.has(key)) {
           additionalProperties[key] = raw[key];
@@ -5403,7 +5694,10 @@ export const showcaseLocationTransferTypeConverter =
 
     public toTransferType(value: ShowcaseLocation): unknown {
       const violations: __nexgenDefinitions.Violation[] = [];
-      const out: Record<string, unknown> = {};
+      const out: Record<string, unknown> = Object.create(null) as Record<
+        string,
+        unknown
+      >;
       {
         const codePoints = __nexgenDefinitions.codePointLength(value.city, 1);
         if (codePoints < 1) {
@@ -5413,9 +5707,9 @@ export const showcaseLocationTransferTypeConverter =
           });
         }
       }
-      out.city = value.city;
+      out["city"] = value.city;
       if (value.geo !== undefined) {
-        out.geo = (() => {
+        out["geo"] = (() => {
           try {
             return showcaseLocationGeoTransferTypeConverter.toTransferType(value.geo);
           } catch (error) {
@@ -5454,40 +5748,42 @@ export const showcaseLocationGeoTransferTypeConverter =
       }
 
       let lat: number | undefined = undefined as unknown as number | undefined;
-      if (raw.lat === null) {
+      if (Object.prototype.hasOwnProperty.call(raw, "lat") && raw["lat"] === null) {
         violations.push({ path: "lat", reason: "explicit null not allowed" });
-      } else if (raw.lat !== undefined) {
-        if (typeof raw.lat !== "number") {
+      } else if (Object.prototype.hasOwnProperty.call(raw, "lat")) {
+        if (typeof raw["lat"] !== "number") {
           violations.push({ path: "lat", reason: "expected number" });
         } else {
-          lat = raw.lat;
-          if (!Number.isFinite(raw.lat)) {
+          lat = raw["lat"];
+          if (!Number.isFinite(raw["lat"])) {
             violations.push({
               path: "lat",
-              reason: `must be a finite number, got ${raw.lat}`,
+              reason: `must be a finite number, got ${raw["lat"]}`,
             });
           }
         }
       }
 
       let lon: number | undefined = undefined as unknown as number | undefined;
-      if (raw.lon === null) {
+      if (Object.prototype.hasOwnProperty.call(raw, "lon") && raw["lon"] === null) {
         violations.push({ path: "lon", reason: "explicit null not allowed" });
-      } else if (raw.lon !== undefined) {
-        if (typeof raw.lon !== "number") {
+      } else if (Object.prototype.hasOwnProperty.call(raw, "lon")) {
+        if (typeof raw["lon"] !== "number") {
           violations.push({ path: "lon", reason: "expected number" });
         } else {
-          lon = raw.lon;
-          if (!Number.isFinite(raw.lon)) {
+          lon = raw["lon"];
+          if (!Number.isFinite(raw["lon"])) {
             violations.push({
               path: "lon",
-              reason: `must be a finite number, got ${raw.lon}`,
+              reason: `must be a finite number, got ${raw["lon"]}`,
             });
           }
         }
       }
 
-      const additionalProperties: Record<string, unknown> = {};
+      const additionalProperties: Record<string, unknown> = Object.create(
+        null,
+      ) as Record<string, unknown>;
       for (const key of Object.keys(raw)) {
         if (!SHOWCASE_LOCATION_GEO_DECLARED.has(key)) {
           additionalProperties[key] = raw[key];
@@ -5509,7 +5805,10 @@ export const showcaseLocationGeoTransferTypeConverter =
 
     public toTransferType(value: ShowcaseLocationGeo): unknown {
       const violations: __nexgenDefinitions.Violation[] = [];
-      const out: Record<string, unknown> = {};
+      const out: Record<string, unknown> = Object.create(null) as Record<
+        string,
+        unknown
+      >;
       if (value.lat !== undefined) {
         if (!Number.isFinite(value.lat)) {
           violations.push({
@@ -5517,7 +5816,7 @@ export const showcaseLocationGeoTransferTypeConverter =
             reason: `must be a finite number, got ${value.lat}`,
           });
         }
-        out.lat = value.lat;
+        out["lat"] = value.lat;
       }
       if (value.lon !== undefined) {
         if (!Number.isFinite(value.lon)) {
@@ -5526,7 +5825,7 @@ export const showcaseLocationGeoTransferTypeConverter =
             reason: `must be a finite number, got ${value.lon}`,
           });
         }
-        out.lon = value.lon;
+        out["lon"] = value.lon;
       }
       for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
         if (SHOWCASE_LOCATION_GEO_DECLARED.has(key)) {
@@ -5562,7 +5861,9 @@ export const showcaseMetadataTransferTypeConverter =
           reason: `must have at most 3 properties, got ${keys.length}`,
         });
       }
-      const additionalProperties: Record<string, unknown> = {};
+      const additionalProperties: Record<string, unknown> = Object.create(
+        null,
+      ) as Record<string, unknown>;
       for (const key of keys) {
         additionalProperties[key] = raw[key];
       }
@@ -5574,7 +5875,10 @@ export const showcaseMetadataTransferTypeConverter =
 
     public toTransferType(value: ShowcaseMetadata): unknown {
       const violations: __nexgenDefinitions.Violation[] = [];
-      const out: Record<string, unknown> = {};
+      const out: Record<string, unknown> = Object.create(null) as Record<
+        string,
+        unknown
+      >;
       for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
         out[key] = entry;
       }
@@ -5605,15 +5909,15 @@ export const showcaseRowsItemTransferTypeConverter =
       }
 
       let cell: string = undefined as unknown as string;
-      if (raw.cell === undefined || raw.cell === null) {
+      if (!Object.prototype.hasOwnProperty.call(raw, "cell") || raw["cell"] === null) {
         violations.push({ path: "cell", reason: "required" });
       } else {
-        if (typeof raw.cell !== "string") {
+        if (typeof raw["cell"] !== "string") {
           violations.push({ path: "cell", reason: "expected string" });
         } else {
-          cell = raw.cell;
+          cell = raw["cell"];
           {
-            const codePoints = __nexgenDefinitions.codePointLength(raw.cell, 1);
+            const codePoints = __nexgenDefinitions.codePointLength(raw["cell"], 1);
             if (codePoints < 1) {
               violations.push({
                 path: "cell",
@@ -5624,7 +5928,9 @@ export const showcaseRowsItemTransferTypeConverter =
         }
       }
 
-      const additionalProperties: Record<string, unknown> = {};
+      const additionalProperties: Record<string, unknown> = Object.create(
+        null,
+      ) as Record<string, unknown>;
       for (const key of Object.keys(raw)) {
         if (!SHOWCASE_ROWS_ITEM_DECLARED.has(key)) {
           additionalProperties[key] = raw[key];
@@ -5640,7 +5946,10 @@ export const showcaseRowsItemTransferTypeConverter =
 
     public toTransferType(value: ShowcaseRowsItem): unknown {
       const violations: __nexgenDefinitions.Violation[] = [];
-      const out: Record<string, unknown> = {};
+      const out: Record<string, unknown> = Object.create(null) as Record<
+        string,
+        unknown
+      >;
       {
         const codePoints = __nexgenDefinitions.codePointLength(value.cell, 1);
         if (codePoints < 1) {
@@ -5650,7 +5959,7 @@ export const showcaseRowsItemTransferTypeConverter =
           });
         }
       }
-      out.cell = value.cell;
+      out["cell"] = value.cell;
       for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
         if (SHOWCASE_ROWS_ITEM_DECLARED.has(key)) {
           violations.push({
@@ -5753,13 +6062,13 @@ export const getShowcaseInputTransferTypeConverter =
       }
 
       let id: string = undefined as unknown as string;
-      if (raw.id === undefined || raw.id === null) {
+      if (!Object.prototype.hasOwnProperty.call(raw, "id") || raw["id"] === null) {
         violations.push({ path: "id", reason: "required" });
       } else {
-        if (typeof raw.id !== "string") {
+        if (typeof raw["id"] !== "string") {
           violations.push({ path: "id", reason: "expected string" });
         } else {
-          id = raw.id;
+          id = raw["id"];
         }
       }
 
@@ -5777,8 +6086,11 @@ export const getShowcaseInputTransferTypeConverter =
     }
 
     public toTransferType(value: GetShowcaseInput): unknown {
-      const out: Record<string, unknown> = {};
-      out.id = value.id;
+      const out: Record<string, unknown> = Object.create(null) as Record<
+        string,
+        unknown
+      >;
+      out["id"] = value.id;
       return out;
     }
   })();
@@ -5796,36 +6108,38 @@ export const squareTransferTypeConverter =
       }
 
       let kind: "square" = undefined as unknown as "square";
-      if (raw.kind === undefined || raw.kind === null) {
+      if (!Object.prototype.hasOwnProperty.call(raw, "kind") || raw["kind"] === null) {
         violations.push({ path: "kind", reason: "required" });
       } else {
-        if (typeof raw.kind !== "string") {
+        if (typeof raw["kind"] !== "string") {
           violations.push({ path: "kind", reason: "expected string" });
-        } else if (raw.kind !== SQUARE_KIND_CONST) {
+        } else if (raw["kind"] !== SQUARE_KIND_CONST) {
           violations.push({ path: "kind", reason: `must equal "square"` });
         } else {
-          kind = raw.kind as "square";
+          kind = raw["kind"] as "square";
         }
       }
 
       let side: number = undefined as unknown as number;
-      if (raw.side === undefined || raw.side === null) {
+      if (!Object.prototype.hasOwnProperty.call(raw, "side") || raw["side"] === null) {
         violations.push({ path: "side", reason: "required" });
       } else {
-        if (typeof raw.side !== "number") {
+        if (typeof raw["side"] !== "number") {
           violations.push({ path: "side", reason: "expected number" });
         } else {
-          side = raw.side;
-          if (!Number.isFinite(raw.side)) {
+          side = raw["side"];
+          if (!Number.isFinite(raw["side"])) {
             violations.push({
               path: "side",
-              reason: `must be a finite number, got ${raw.side}`,
+              reason: `must be a finite number, got ${raw["side"]}`,
             });
           }
         }
       }
 
-      const additionalProperties: Record<string, unknown> = {};
+      const additionalProperties: Record<string, unknown> = Object.create(
+        null,
+      ) as Record<string, unknown>;
       for (const key of Object.keys(raw)) {
         if (!SQUARE_DECLARED.has(key)) {
           additionalProperties[key] = raw[key];
@@ -5841,18 +6155,21 @@ export const squareTransferTypeConverter =
 
     public toTransferType(value: Square): unknown {
       const violations: __nexgenDefinitions.Violation[] = [];
-      const out: Record<string, unknown> = {};
+      const out: Record<string, unknown> = Object.create(null) as Record<
+        string,
+        unknown
+      >;
       if (value.kind !== "square") {
         violations.push({ path: "kind", reason: `must equal "square"` });
       }
-      out.kind = value.kind;
+      out["kind"] = value.kind;
       if (!Number.isFinite(value.side)) {
         violations.push({
           path: "side",
           reason: `must be a finite number, got ${value.side}`,
         });
       }
-      out.side = value.side;
+      out["side"] = value.side;
       for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
         if (SQUARE_DECLARED.has(key)) {
           violations.push({
@@ -5883,28 +6200,28 @@ export const textNoteTransferTypeConverter =
       }
 
       let kind: "text" = undefined as unknown as "text";
-      if (raw.kind === undefined || raw.kind === null) {
+      if (!Object.prototype.hasOwnProperty.call(raw, "kind") || raw["kind"] === null) {
         violations.push({ path: "kind", reason: "required" });
       } else {
-        if (typeof raw.kind !== "string") {
+        if (typeof raw["kind"] !== "string") {
           violations.push({ path: "kind", reason: "expected string" });
-        } else if (raw.kind !== TEXT_NOTE_KIND_CONST) {
+        } else if (raw["kind"] !== TEXT_NOTE_KIND_CONST) {
           violations.push({ path: "kind", reason: `must equal "text"` });
         } else {
-          kind = raw.kind as "text";
+          kind = raw["kind"] as "text";
         }
       }
 
       let body: string = undefined as unknown as string;
-      if (raw.body === undefined || raw.body === null) {
+      if (!Object.prototype.hasOwnProperty.call(raw, "body") || raw["body"] === null) {
         violations.push({ path: "body", reason: "required" });
       } else {
-        if (typeof raw.body !== "string") {
+        if (typeof raw["body"] !== "string") {
           violations.push({ path: "body", reason: "expected string" });
         } else {
-          body = raw.body;
+          body = raw["body"];
           {
-            const codePoints = __nexgenDefinitions.codePointLength(raw.body, 1);
+            const codePoints = __nexgenDefinitions.codePointLength(raw["body"], 1);
             if (codePoints < 1) {
               violations.push({
                 path: "body",
@@ -5915,7 +6232,9 @@ export const textNoteTransferTypeConverter =
         }
       }
 
-      const additionalProperties: Record<string, unknown> = {};
+      const additionalProperties: Record<string, unknown> = Object.create(
+        null,
+      ) as Record<string, unknown>;
       for (const key of Object.keys(raw)) {
         if (!TEXT_NOTE_DECLARED.has(key)) {
           additionalProperties[key] = raw[key];
@@ -5931,11 +6250,14 @@ export const textNoteTransferTypeConverter =
 
     public toTransferType(value: TextNote): unknown {
       const violations: __nexgenDefinitions.Violation[] = [];
-      const out: Record<string, unknown> = {};
+      const out: Record<string, unknown> = Object.create(null) as Record<
+        string,
+        unknown
+      >;
       if (value.kind !== "text") {
         violations.push({ path: "kind", reason: `must equal "text"` });
       }
-      out.kind = value.kind;
+      out["kind"] = value.kind;
       {
         const codePoints = __nexgenDefinitions.codePointLength(value.body, 1);
         if (codePoints < 1) {
@@ -5945,7 +6267,7 @@ export const textNoteTransferTypeConverter =
           });
         }
       }
-      out.body = value.body;
+      out["body"] = value.body;
       for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
         if (TEXT_NOTE_DECLARED.has(key)) {
           violations.push({
@@ -5974,7 +6296,9 @@ export const tokensTransferTypeConverter =
       }
 
       const keys = Object.keys(raw);
-      const additionalProperties: Record<string, string> = {};
+      const additionalProperties: Record<string, string> = Object.create(
+        null,
+      ) as Record<string, string>;
       for (const key of keys) {
         let entry: string | undefined = undefined;
         if (typeof raw[key] !== "string") {
@@ -6015,7 +6339,10 @@ export const tokensTransferTypeConverter =
 
     public toTransferType(value: Tokens): unknown {
       const violations: __nexgenDefinitions.Violation[] = [];
-      const out: Record<string, unknown> = {};
+      const out: Record<string, unknown> = Object.create(null) as Record<
+        string,
+        unknown
+      >;
       for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
         {
           const codePoints = __nexgenDefinitions.codePointLength(entry, 2);
@@ -6060,56 +6387,64 @@ export const widgetTransferTypeConverter =
       }
 
       let id: string = undefined as unknown as string;
-      if (raw.id === undefined || raw.id === null) {
+      if (!Object.prototype.hasOwnProperty.call(raw, "id") || raw["id"] === null) {
         violations.push({ path: "id", reason: "required" });
       } else {
-        if (typeof raw.id !== "string") {
+        if (typeof raw["id"] !== "string") {
           violations.push({ path: "id", reason: "expected string" });
         } else {
-          id = raw.id;
+          id = raw["id"];
         }
       }
 
       let kind: string | undefined = undefined as unknown as string | undefined;
-      if (raw.kind === null) {
+      if (Object.prototype.hasOwnProperty.call(raw, "kind") && raw["kind"] === null) {
         violations.push({ path: "kind", reason: "explicit null not allowed" });
-      } else if (raw.kind !== undefined) {
-        if (typeof raw.kind !== "string") {
+      } else if (Object.prototype.hasOwnProperty.call(raw, "kind")) {
+        if (typeof raw["kind"] !== "string") {
           violations.push({ path: "kind", reason: "expected string" });
         } else {
-          kind = raw.kind;
+          kind = raw["kind"];
         }
       }
 
       let name: string = undefined as unknown as string;
-      if (raw.name === undefined || raw.name === null) {
+      if (!Object.prototype.hasOwnProperty.call(raw, "name") || raw["name"] === null) {
         violations.push({ path: "name", reason: "required" });
       } else {
-        if (typeof raw.name !== "string") {
+        if (typeof raw["name"] !== "string") {
           violations.push({ path: "name", reason: "expected string" });
         } else {
-          name = raw.name;
+          name = raw["name"];
         }
       }
 
       let size: number | undefined = undefined as unknown as number | undefined;
-      if (raw.size === null) {
+      if (Object.prototype.hasOwnProperty.call(raw, "size") && raw["size"] === null) {
         violations.push({ path: "size", reason: "explicit null not allowed" });
-      } else if (raw.size !== undefined) {
-        if (typeof raw.size !== "number" || !Number.isSafeInteger(raw.size)) {
+      } else if (Object.prototype.hasOwnProperty.call(raw, "size")) {
+        if (typeof raw["size"] !== "number" || !Number.isSafeInteger(raw["size"])) {
           violations.push({ path: "size", reason: "expected integer" });
         } else {
-          size = raw.size;
-          if (raw.size < 10) {
-            violations.push({ path: "size", reason: `must be >= 10, got ${raw.size}` });
+          size = raw["size"];
+          if (raw["size"] < 10) {
+            violations.push({
+              path: "size",
+              reason: `must be >= 10, got ${raw["size"]}`,
+            });
           }
-          if (raw.size > 20) {
-            violations.push({ path: "size", reason: `must be <= 20, got ${raw.size}` });
+          if (raw["size"] > 20) {
+            violations.push({
+              path: "size",
+              reason: `must be <= 20, got ${raw["size"]}`,
+            });
           }
         }
       }
 
-      const additionalProperties: Record<string, unknown> = {};
+      const additionalProperties: Record<string, unknown> = Object.create(
+        null,
+      ) as Record<string, unknown>;
       for (const key of Object.keys(raw)) {
         if (!WIDGET_DECLARED.has(key)) {
           additionalProperties[key] = raw[key];
@@ -6131,12 +6466,15 @@ export const widgetTransferTypeConverter =
 
     public toTransferType(value: Widget): unknown {
       const violations: __nexgenDefinitions.Violation[] = [];
-      const out: Record<string, unknown> = {};
-      out.id = value.id;
+      const out: Record<string, unknown> = Object.create(null) as Record<
+        string,
+        unknown
+      >;
+      out["id"] = value.id;
       if (value.kind !== undefined) {
-        out.kind = value.kind;
+        out["kind"] = value.kind;
       }
-      out.name = value.name;
+      out["name"] = value.name;
       if (value.size !== undefined) {
         if (!Number.isSafeInteger(value.size)) {
           violations.push({ path: "size", reason: "exceeds ±(2^53-1) integer cap" });
@@ -6154,7 +6492,7 @@ export const widgetTransferTypeConverter =
             });
           }
         }
-        out.size = value.size;
+        out["size"] = value.size;
       }
       for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
         if (WIDGET_DECLARED.has(key)) {
@@ -6186,28 +6524,30 @@ export const widgetBaseTransferTypeConverter =
       }
 
       let id: string = undefined as unknown as string;
-      if (raw.id === undefined || raw.id === null) {
+      if (!Object.prototype.hasOwnProperty.call(raw, "id") || raw["id"] === null) {
         violations.push({ path: "id", reason: "required" });
       } else {
-        if (typeof raw.id !== "string") {
+        if (typeof raw["id"] !== "string") {
           violations.push({ path: "id", reason: "expected string" });
         } else {
-          id = raw.id;
+          id = raw["id"];
         }
       }
 
       let kind: string | undefined = undefined as unknown as string | undefined;
-      if (raw.kind === null) {
+      if (Object.prototype.hasOwnProperty.call(raw, "kind") && raw["kind"] === null) {
         violations.push({ path: "kind", reason: "explicit null not allowed" });
-      } else if (raw.kind !== undefined) {
-        if (typeof raw.kind !== "string") {
+      } else if (Object.prototype.hasOwnProperty.call(raw, "kind")) {
+        if (typeof raw["kind"] !== "string") {
           violations.push({ path: "kind", reason: "expected string" });
         } else {
-          kind = raw.kind;
+          kind = raw["kind"];
         }
       }
 
-      const additionalProperties: Record<string, unknown> = {};
+      const additionalProperties: Record<string, unknown> = Object.create(
+        null,
+      ) as Record<string, unknown>;
       for (const key of Object.keys(raw)) {
         if (!WIDGET_BASE_DECLARED.has(key)) {
           additionalProperties[key] = raw[key];
@@ -6226,10 +6566,13 @@ export const widgetBaseTransferTypeConverter =
 
     public toTransferType(value: WidgetBase): unknown {
       const violations: __nexgenDefinitions.Violation[] = [];
-      const out: Record<string, unknown> = {};
-      out.id = value.id;
+      const out: Record<string, unknown> = Object.create(null) as Record<
+        string,
+        unknown
+      >;
+      out["id"] = value.id;
       if (value.kind !== undefined) {
-        out.kind = value.kind;
+        out["kind"] = value.kind;
       }
       for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
         if (WIDGET_BASE_DECLARED.has(key)) {

@@ -82,8 +82,13 @@ public final class ShowcaseLocation {
     public static final class Serializer extends com.fasterxml.jackson.databind.JsonSerializer<ShowcaseLocation> {
         @Override
         public void serialize(ShowcaseLocation value, JsonGenerator gen, SerializerProvider serializers) throws IOException {
+            JsonGenerator target = gen;
+            com.fasterxml.jackson.databind.util.TokenBuffer pending = new com.fasterxml.jackson.databind.util.TokenBuffer(gen.getCodec(), false);
+            gen = pending;
             List<Violation> violations = new ArrayList<>();
-            if (value.city != null) {
+            if (value.city == null) {
+                violations.add(new Violation("city", "required"));
+            } else {
                 int length = value.city.codePointCount(0, value.city.length());
                 if (length < 1) {
                     violations.add(new Violation("city", "must have length >= 1, got " + length));
@@ -109,8 +114,10 @@ public final class ShowcaseLocation {
             }
             if (value.geo != null) {
                 gen.writeFieldName("geo");
+                com.fasterxml.jackson.databind.util.TokenBuffer nestedBuffer0 = new com.fasterxml.jackson.databind.util.TokenBuffer(gen.getCodec(), false);
                 try {
-                    serializers.defaultSerializeValue(value.geo, gen);
+                    serializers.defaultSerializeValue(value.geo, nestedBuffer0);
+                    nestedBuffer0.serialize(gen);
                 } catch (ApplicationFailure nested0) {
                     if (!"PayloadValidationError".equals(nested0.getType()) || nested0.getDetails().getSize() == 0) {
                         throw nested0;
@@ -122,8 +129,7 @@ public final class ShowcaseLocation {
                     for (Violation nestedViolation0 : nestedViolations0) {
                         violations.add(nestedViolation0.withPathPrefix("geo"));
                     }
-                    // TODO: Use PayloadValidationException.newPayloadValidationException once it is available in an SDK release.
-                    throw ApplicationFailure.newNonRetryableFailure("Payload validation failed", "PayloadValidationError", violations);
+                    gen.writeNull();
                 }
             }
             if (value.additionalProperties != null) {
@@ -137,6 +143,7 @@ public final class ShowcaseLocation {
                 // TODO: Use PayloadValidationException.newPayloadValidationException once it is available in an SDK release.
                 throw ApplicationFailure.newNonRetryableFailure("Payload validation failed", "PayloadValidationError", violations);
             }
+            pending.serialize(target);
         }
     }
 

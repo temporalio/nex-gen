@@ -3522,6 +3522,9 @@ func (m *Showcase) UnmarshalJSON(data []byte) error {
 			}
 			rawMatchCount0 := 0
 			for _, rawElement0 := range elems0 {
+				if bytes.Equal(bytes.TrimSpace(rawElement0), []byte("null")) {
+					continue
+				}
 				var rawCandidate0 string
 				if err := json.Unmarshal(rawElement0, &rawCandidate0); err == nil && (rawCandidate0 == "admin") {
 					rawMatchCount0++
@@ -4144,6 +4147,9 @@ func (m *Showcase) UnmarshalJSON(data []byte) error {
 			}
 			rawMatchCount0 := 0
 			for _, rawElement0 := range elems0 {
+				if bytes.Equal(bytes.TrimSpace(rawElement0), []byte("null")) {
+					continue
+				}
 				var rawCandidate0 float64
 				if err := json.Unmarshal(rawElement0, &rawCandidate0); err == nil && math.IsInf(rawCandidate0, 0) == false && (math.Trunc(rawCandidate0) == rawCandidate0 && rawCandidate0 >= -integerCap && rawCandidate0 <= integerCap) {
 					rawMatchCount0++

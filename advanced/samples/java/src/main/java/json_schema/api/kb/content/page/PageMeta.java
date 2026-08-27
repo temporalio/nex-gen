@@ -72,7 +72,13 @@ public final class PageMeta {
     public static final class Serializer extends com.fasterxml.jackson.databind.JsonSerializer<PageMeta> {
         @Override
         public void serialize(PageMeta value, JsonGenerator gen, SerializerProvider serializers) throws IOException {
+            JsonGenerator target = gen;
+            com.fasterxml.jackson.databind.util.TokenBuffer pending = new com.fasterxml.jackson.databind.util.TokenBuffer(gen.getCodec(), false);
+            gen = pending;
             List<Violation> violations = new ArrayList<>();
+            if (value.author == null) {
+                violations.add(new Violation("author", "required"));
+            }
             if (value.wordCount != null) {
                 if (value.wordCount < -SpecNumbers.INTEGER_CAP || value.wordCount > SpecNumbers.INTEGER_CAP) {
                     violations.add(new Violation("wordCount", "exceeds \u00b1(2^53-1) integer cap"));
@@ -90,6 +96,7 @@ public final class PageMeta {
                 gen.writeNumberField("wordCount", value.wordCount);
             }
             gen.writeEndObject();
+            pending.serialize(target);
         }
     }
 

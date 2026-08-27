@@ -60,11 +60,23 @@ public final class GetCategoryTreeInput {
     public static final class Serializer extends com.fasterxml.jackson.databind.JsonSerializer<GetCategoryTreeInput> {
         @Override
         public void serialize(GetCategoryTreeInput value, JsonGenerator gen, SerializerProvider serializers) throws IOException {
+            JsonGenerator target = gen;
+            com.fasterxml.jackson.databind.util.TokenBuffer pending = new com.fasterxml.jackson.databind.util.TokenBuffer(gen.getCodec(), false);
+            gen = pending;
+            List<Violation> violations = new ArrayList<>();
+            if (value.rootId == null) {
+                violations.add(new Violation("rootId", "required"));
+            }
+            if (!violations.isEmpty()) {
+                // TODO: Use PayloadValidationException.newPayloadValidationException once it is available in an SDK release.
+                throw ApplicationFailure.newNonRetryableFailure("Payload validation failed", "PayloadValidationError", violations);
+            }
             gen.writeStartObject();
             if (value.rootId != null) {
                 gen.writeStringField("rootId", value.rootId);
             }
             gen.writeEndObject();
+            pending.serialize(target);
         }
     }
 

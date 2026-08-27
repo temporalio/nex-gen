@@ -174,17 +174,28 @@ public final class Temporal {
     public static final class Serializer extends com.fasterxml.jackson.databind.JsonSerializer<Temporal> {
         @Override
         public void serialize(Temporal value, JsonGenerator gen, SerializerProvider serializers) throws IOException {
+            JsonGenerator target = gen;
+            com.fasterxml.jackson.databind.util.TokenBuffer pending = new com.fasterxml.jackson.databind.util.TokenBuffer(gen.getCodec(), false);
+            gen = pending;
             List<Violation> violations = new ArrayList<>();
-            if (value.createdAt != null) {
+            if (value.createdAt == null) {
+                violations.add(new Violation("createdAt", "required"));
+            } else {
                 TemporalSupport.checkDateTime(value.createdAt, "createdAt", violations);
             }
-            if (value.birthday != null) {
+            if (value.birthday == null) {
+                violations.add(new Violation("birthday", "required"));
+            } else {
                 TemporalSupport.checkDate(value.birthday, "birthday", violations);
             }
-            if (value.alarm != null) {
+            if (value.alarm == null) {
+                violations.add(new Violation("alarm", "required"));
+            } else {
                 TemporalSupport.checkTime(value.alarm, "alarm", violations);
             }
-            if (value.timeout != null) {
+            if (value.timeout == null) {
+                violations.add(new Violation("timeout", "required"));
+            } else {
                 TemporalSupport.checkDuration(value.timeout, "timeout", violations);
             }
             if (value.updatedAt != null) {
@@ -241,6 +252,7 @@ public final class Temporal {
                 gen.writeStringField("archivedOn", TemporalSupport.formatDate(value.archivedOn));
             }
             gen.writeEndObject();
+            pending.serialize(target);
         }
     }
 

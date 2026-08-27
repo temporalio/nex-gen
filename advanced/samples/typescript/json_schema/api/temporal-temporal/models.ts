@@ -80,14 +80,17 @@ export const temporalTransferTypeConverter =
 
       let createdAt: Temporal.ZonedDateTime =
         undefined as unknown as Temporal.ZonedDateTime;
-      if (raw.createdAt === undefined || raw.createdAt === null) {
+      if (
+        !Object.prototype.hasOwnProperty.call(raw, "createdAt") ||
+        raw["createdAt"] === null
+      ) {
         violations.push({ path: "createdAt", reason: "required" });
       } else {
-        if (typeof raw.createdAt !== "string") {
+        if (typeof raw["createdAt"] !== "string") {
           violations.push({ path: "createdAt", reason: "expected string" });
         } else {
           const parsed = __nexgenDefinitions.parseTemporalDateTime(
-            raw.createdAt,
+            raw["createdAt"],
             "createdAt",
             violations,
           );
@@ -98,14 +101,17 @@ export const temporalTransferTypeConverter =
       }
 
       let birthday: Temporal.PlainDate = undefined as unknown as Temporal.PlainDate;
-      if (raw.birthday === undefined || raw.birthday === null) {
+      if (
+        !Object.prototype.hasOwnProperty.call(raw, "birthday") ||
+        raw["birthday"] === null
+      ) {
         violations.push({ path: "birthday", reason: "required" });
       } else {
-        if (typeof raw.birthday !== "string") {
+        if (typeof raw["birthday"] !== "string") {
           violations.push({ path: "birthday", reason: "expected string" });
         } else {
           const parsed = __nexgenDefinitions.parseTemporalDate(
-            raw.birthday,
+            raw["birthday"],
             "birthday",
             violations,
           );
@@ -116,14 +122,17 @@ export const temporalTransferTypeConverter =
       }
 
       let alarm: string = undefined as unknown as string;
-      if (raw.alarm === undefined || raw.alarm === null) {
+      if (
+        !Object.prototype.hasOwnProperty.call(raw, "alarm") ||
+        raw["alarm"] === null
+      ) {
         violations.push({ path: "alarm", reason: "required" });
       } else {
-        if (typeof raw.alarm !== "string") {
+        if (typeof raw["alarm"] !== "string") {
           violations.push({ path: "alarm", reason: "expected string" });
         } else {
           const parsed = __nexgenDefinitions.parseTemporalTime(
-            raw.alarm,
+            raw["alarm"],
             "alarm",
             violations,
           );
@@ -134,14 +143,17 @@ export const temporalTransferTypeConverter =
       }
 
       let timeout: Temporal.Duration = undefined as unknown as Temporal.Duration;
-      if (raw.timeout === undefined || raw.timeout === null) {
+      if (
+        !Object.prototype.hasOwnProperty.call(raw, "timeout") ||
+        raw["timeout"] === null
+      ) {
         violations.push({ path: "timeout", reason: "required" });
       } else {
-        if (typeof raw.timeout !== "string") {
+        if (typeof raw["timeout"] !== "string") {
           violations.push({ path: "timeout", reason: "expected string" });
         } else {
           const parsed = __nexgenDefinitions.parseTemporalDuration(
-            raw.timeout,
+            raw["timeout"],
             "timeout",
             violations,
           );
@@ -154,14 +166,17 @@ export const temporalTransferTypeConverter =
       let updatedAt: Temporal.ZonedDateTime | undefined = undefined as unknown as
         | Temporal.ZonedDateTime
         | undefined;
-      if (raw.updatedAt === null) {
+      if (
+        Object.prototype.hasOwnProperty.call(raw, "updatedAt") &&
+        raw["updatedAt"] === null
+      ) {
         violations.push({ path: "updatedAt", reason: "explicit null not allowed" });
-      } else if (raw.updatedAt !== undefined) {
-        if (typeof raw.updatedAt !== "string") {
+      } else if (Object.prototype.hasOwnProperty.call(raw, "updatedAt")) {
+        if (typeof raw["updatedAt"] !== "string") {
           violations.push({ path: "updatedAt", reason: "expected string" });
         } else {
           const parsed = __nexgenDefinitions.parseTemporalDateTime(
-            raw.updatedAt,
+            raw["updatedAt"],
             "updatedAt",
             violations,
           );
@@ -174,14 +189,17 @@ export const temporalTransferTypeConverter =
       let expiresOn: Temporal.PlainDate | undefined = undefined as unknown as
         | Temporal.PlainDate
         | undefined;
-      if (raw.expiresOn === null) {
+      if (
+        Object.prototype.hasOwnProperty.call(raw, "expiresOn") &&
+        raw["expiresOn"] === null
+      ) {
         violations.push({ path: "expiresOn", reason: "explicit null not allowed" });
-      } else if (raw.expiresOn !== undefined) {
-        if (typeof raw.expiresOn !== "string") {
+      } else if (Object.prototype.hasOwnProperty.call(raw, "expiresOn")) {
+        if (typeof raw["expiresOn"] !== "string") {
           violations.push({ path: "expiresOn", reason: "expected string" });
         } else {
           const parsed = __nexgenDefinitions.parseTemporalDate(
-            raw.expiresOn,
+            raw["expiresOn"],
             "expiresOn",
             violations,
           );
@@ -192,14 +210,17 @@ export const temporalTransferTypeConverter =
       }
 
       let reminder: string | undefined = undefined as unknown as string | undefined;
-      if (raw.reminder === null) {
+      if (
+        Object.prototype.hasOwnProperty.call(raw, "reminder") &&
+        raw["reminder"] === null
+      ) {
         violations.push({ path: "reminder", reason: "explicit null not allowed" });
-      } else if (raw.reminder !== undefined) {
-        if (typeof raw.reminder !== "string") {
+      } else if (Object.prototype.hasOwnProperty.call(raw, "reminder")) {
+        if (typeof raw["reminder"] !== "string") {
           violations.push({ path: "reminder", reason: "expected string" });
         } else {
           const parsed = __nexgenDefinitions.parseTemporalTime(
-            raw.reminder,
+            raw["reminder"],
             "reminder",
             violations,
           );
@@ -212,14 +233,17 @@ export const temporalTransferTypeConverter =
       let retryDelay: Temporal.Duration | undefined = undefined as unknown as
         | Temporal.Duration
         | undefined;
-      if (raw.retryDelay === null) {
+      if (
+        Object.prototype.hasOwnProperty.call(raw, "retryDelay") &&
+        raw["retryDelay"] === null
+      ) {
         violations.push({ path: "retryDelay", reason: "explicit null not allowed" });
-      } else if (raw.retryDelay !== undefined) {
-        if (typeof raw.retryDelay !== "string") {
+      } else if (Object.prototype.hasOwnProperty.call(raw, "retryDelay")) {
+        if (typeof raw["retryDelay"] !== "string") {
           violations.push({ path: "retryDelay", reason: "expected string" });
         } else {
           const parsed = __nexgenDefinitions.parseTemporalDuration(
-            raw.retryDelay,
+            raw["retryDelay"],
             "retryDelay",
             violations,
           );
@@ -231,15 +255,15 @@ export const temporalTransferTypeConverter =
 
       let deletedAt: Temporal.ZonedDateTime | null | undefined =
         undefined as unknown as Temporal.ZonedDateTime | null | undefined;
-      if (raw.deletedAt !== undefined) {
-        if (raw.deletedAt === null) {
+      if (Object.prototype.hasOwnProperty.call(raw, "deletedAt")) {
+        if (raw["deletedAt"] === null) {
           deletedAt = null;
         } else {
-          if (typeof raw.deletedAt !== "string") {
+          if (typeof raw["deletedAt"] !== "string") {
             violations.push({ path: "deletedAt", reason: "expected string" });
           } else {
             const parsed = __nexgenDefinitions.parseTemporalDateTime(
-              raw.deletedAt,
+              raw["deletedAt"],
               "deletedAt",
               violations,
             );
@@ -254,15 +278,15 @@ export const temporalTransferTypeConverter =
         | Temporal.PlainDate
         | null
         | undefined;
-      if (raw.archivedOn !== undefined) {
-        if (raw.archivedOn === null) {
+      if (Object.prototype.hasOwnProperty.call(raw, "archivedOn")) {
+        if (raw["archivedOn"] === null) {
           archivedOn = null;
         } else {
-          if (typeof raw.archivedOn !== "string") {
+          if (typeof raw["archivedOn"] !== "string") {
             violations.push({ path: "archivedOn", reason: "expected string" });
           } else {
             const parsed = __nexgenDefinitions.parseTemporalDate(
-              raw.archivedOn,
+              raw["archivedOn"],
               "archivedOn",
               violations,
             );
@@ -317,30 +341,35 @@ export const temporalTransferTypeConverter =
 
     public toTransferType(value: Temporal): unknown {
       const violations: __nexgenDefinitions.Violation[] = [];
-      const out: Record<string, unknown> = {};
+      const out: Record<string, unknown> = Object.create(null) as Record<
+        string,
+        unknown
+      >;
       __nexgenDefinitions.validateTemporalDateTime(
         value.createdAt,
         "createdAt",
         violations,
       );
-      out.createdAt = __nexgenDefinitions.serializeTemporalDateTime(value.createdAt);
+      out["createdAt"] = __nexgenDefinitions.serializeTemporalDateTime(value.createdAt);
       __nexgenDefinitions.validateTemporalDate(value.birthday, "birthday", violations);
-      out.birthday = __nexgenDefinitions.serializeTemporalDate(value.birthday);
+      out["birthday"] = __nexgenDefinitions.serializeTemporalDate(value.birthday);
       __nexgenDefinitions.validateTemporalTime(value.alarm, "alarm", violations);
-      out.alarm = value.alarm;
+      out["alarm"] = value.alarm;
       __nexgenDefinitions.validateTemporalDuration(
         value.timeout,
         "timeout",
         violations,
       );
-      out.timeout = __nexgenDefinitions.serializeTemporalDuration(value.timeout);
+      out["timeout"] = __nexgenDefinitions.serializeTemporalDuration(value.timeout);
       if (value.updatedAt !== undefined) {
         __nexgenDefinitions.validateTemporalDateTime(
           value.updatedAt,
           "updatedAt",
           violations,
         );
-        out.updatedAt = __nexgenDefinitions.serializeTemporalDateTime(value.updatedAt);
+        out["updatedAt"] = __nexgenDefinitions.serializeTemporalDateTime(
+          value.updatedAt,
+        );
       }
       if (value.expiresOn !== undefined) {
         __nexgenDefinitions.validateTemporalDate(
@@ -348,7 +377,7 @@ export const temporalTransferTypeConverter =
           "expiresOn",
           violations,
         );
-        out.expiresOn = __nexgenDefinitions.serializeTemporalDate(value.expiresOn);
+        out["expiresOn"] = __nexgenDefinitions.serializeTemporalDate(value.expiresOn);
       }
       if (value.reminder !== undefined) {
         __nexgenDefinitions.validateTemporalTime(
@@ -356,7 +385,7 @@ export const temporalTransferTypeConverter =
           "reminder",
           violations,
         );
-        out.reminder = value.reminder;
+        out["reminder"] = value.reminder;
       }
       if (value.retryDelay !== undefined) {
         __nexgenDefinitions.validateTemporalDuration(
@@ -364,7 +393,7 @@ export const temporalTransferTypeConverter =
           "retryDelay",
           violations,
         );
-        out.retryDelay = __nexgenDefinitions.serializeTemporalDuration(
+        out["retryDelay"] = __nexgenDefinitions.serializeTemporalDuration(
           value.retryDelay,
         );
       }
@@ -376,7 +405,7 @@ export const temporalTransferTypeConverter =
             violations,
           );
         }
-        out.deletedAt =
+        out["deletedAt"] =
           value.deletedAt === null
             ? null
             : __nexgenDefinitions.serializeTemporalDateTime(value.deletedAt);
@@ -389,7 +418,7 @@ export const temporalTransferTypeConverter =
             violations,
           );
         }
-        out.archivedOn =
+        out["archivedOn"] =
           value.archivedOn === null
             ? null
             : __nexgenDefinitions.serializeTemporalDate(value.archivedOn);

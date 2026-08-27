@@ -94,7 +94,19 @@ public final class Page {
     public static final class Serializer extends com.fasterxml.jackson.databind.JsonSerializer<Page> {
         @Override
         public void serialize(Page value, JsonGenerator gen, SerializerProvider serializers) throws IOException {
+            JsonGenerator target = gen;
+            com.fasterxml.jackson.databind.util.TokenBuffer pending = new com.fasterxml.jackson.databind.util.TokenBuffer(gen.getCodec(), false);
+            gen = pending;
             List<Violation> violations = new ArrayList<>();
+            if (value.pageId == null) {
+                violations.add(new Violation("pageId", "required"));
+            }
+            if (value.title == null) {
+                violations.add(new Violation("title", "required"));
+            }
+            if (value.meta == null) {
+                violations.add(new Violation("meta", "required"));
+            }
             gen.writeStartObject();
             if (value.pageId != null) {
                 gen.writeStringField("pageId", value.pageId);
@@ -104,8 +116,10 @@ public final class Page {
             }
             if (value.meta != null) {
                 gen.writeFieldName("meta");
+                com.fasterxml.jackson.databind.util.TokenBuffer nestedBuffer0 = new com.fasterxml.jackson.databind.util.TokenBuffer(gen.getCodec(), false);
                 try {
-                    serializers.defaultSerializeValue(value.meta, gen);
+                    serializers.defaultSerializeValue(value.meta, nestedBuffer0);
+                    nestedBuffer0.serialize(gen);
                 } catch (ApplicationFailure nested0) {
                     if (!"PayloadValidationError".equals(nested0.getType()) || nested0.getDetails().getSize() == 0) {
                         throw nested0;
@@ -117,8 +131,7 @@ public final class Page {
                     for (Violation nestedViolation0 : nestedViolations0) {
                         violations.add(nestedViolation0.withPathPrefix("meta"));
                     }
-                    // TODO: Use PayloadValidationException.newPayloadValidationException once it is available in an SDK release.
-                    throw ApplicationFailure.newNonRetryableFailure("Payload validation failed", "PayloadValidationError", violations);
+                    gen.writeNull();
                 }
             }
             if (value.blocks != null) {
@@ -129,8 +142,10 @@ public final class Page {
                     if (nestedElement0 == null) {
                         gen.writeNull();
                     } else {
+                        com.fasterxml.jackson.databind.util.TokenBuffer nestedBuffer1 = new com.fasterxml.jackson.databind.util.TokenBuffer(gen.getCodec(), false);
                         try {
-                            serializers.defaultSerializeValue(nestedElement0, gen);
+                            serializers.defaultSerializeValue(nestedElement0, nestedBuffer1);
+                            nestedBuffer1.serialize(gen);
                         } catch (ApplicationFailure nested1) {
                             if (!"PayloadValidationError".equals(nested1.getType()) || nested1.getDetails().getSize() == 0) {
                                 throw nested1;
@@ -142,8 +157,7 @@ public final class Page {
                             for (Violation nestedViolation1 : nestedViolations1) {
                                 violations.add(nestedViolation1.withPathPrefix("blocks" + "[" + nestedIndex0 + "]"));
                             }
-                            // TODO: Use PayloadValidationException.newPayloadValidationException once it is available in an SDK release.
-                            throw ApplicationFailure.newNonRetryableFailure("Payload validation failed", "PayloadValidationError", violations);
+                            gen.writeNull();
                         }
                     }
                 }
@@ -154,6 +168,7 @@ public final class Page {
                 // TODO: Use PayloadValidationException.newPayloadValidationException once it is available in an SDK release.
                 throw ApplicationFailure.newNonRetryableFailure("Payload validation failed", "PayloadValidationError", violations);
             }
+            pending.serialize(target);
         }
     }
 

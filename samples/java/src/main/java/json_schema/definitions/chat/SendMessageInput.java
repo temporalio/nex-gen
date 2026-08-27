@@ -69,15 +69,26 @@ public final class SendMessageInput {
     public static final class Serializer extends com.fasterxml.jackson.databind.JsonSerializer<SendMessageInput> {
         @Override
         public void serialize(SendMessageInput value, JsonGenerator gen, SerializerProvider serializers) throws IOException {
+            JsonGenerator target = gen;
+            com.fasterxml.jackson.databind.util.TokenBuffer pending = new com.fasterxml.jackson.databind.util.TokenBuffer(gen.getCodec(), false);
+            gen = pending;
             List<Violation> violations = new ArrayList<>();
+            if (value.roomId == null) {
+                violations.add(new Violation("roomId", "required"));
+            }
+            if (value.message == null) {
+                violations.add(new Violation("message", "required"));
+            }
             gen.writeStartObject();
             if (value.roomId != null) {
                 gen.writeStringField("roomId", value.roomId);
             }
             if (value.message != null) {
                 gen.writeFieldName("message");
+                com.fasterxml.jackson.databind.util.TokenBuffer nestedBuffer0 = new com.fasterxml.jackson.databind.util.TokenBuffer(gen.getCodec(), false);
                 try {
-                    serializers.defaultSerializeValue(value.message, gen);
+                    serializers.defaultSerializeValue(value.message, nestedBuffer0);
+                    nestedBuffer0.serialize(gen);
                 } catch (ApplicationFailure nested0) {
                     if (!"PayloadValidationError".equals(nested0.getType()) || nested0.getDetails().getSize() == 0) {
                         throw nested0;
@@ -89,8 +100,7 @@ public final class SendMessageInput {
                     for (Violation nestedViolation0 : nestedViolations0) {
                         violations.add(nestedViolation0.withPathPrefix("message"));
                     }
-                    // TODO: Use PayloadValidationException.newPayloadValidationException once it is available in an SDK release.
-                    throw ApplicationFailure.newNonRetryableFailure("Payload validation failed", "PayloadValidationError", violations);
+                    gen.writeNull();
                 }
             }
             gen.writeEndObject();
@@ -98,6 +108,7 @@ public final class SendMessageInput {
                 // TODO: Use PayloadValidationException.newPayloadValidationException once it is available in an SDK release.
                 throw ApplicationFailure.newNonRetryableFailure("Payload validation failed", "PayloadValidationError", violations);
             }
+            pending.serialize(target);
         }
     }
 

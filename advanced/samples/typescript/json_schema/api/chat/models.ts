@@ -85,13 +85,16 @@ export const getRoomInputTransferTypeConverter =
       }
 
       let roomId: string = undefined as unknown as string;
-      if (raw.roomId === undefined || raw.roomId === null) {
+      if (
+        !Object.prototype.hasOwnProperty.call(raw, "roomId") ||
+        raw["roomId"] === null
+      ) {
         violations.push({ path: "roomId", reason: "required" });
       } else {
-        if (typeof raw.roomId !== "string") {
+        if (typeof raw["roomId"] !== "string") {
           violations.push({ path: "roomId", reason: "expected string" });
         } else {
-          roomId = raw.roomId;
+          roomId = raw["roomId"];
         }
       }
 
@@ -109,8 +112,11 @@ export const getRoomInputTransferTypeConverter =
     }
 
     public toTransferType(value: GetRoomInput): unknown {
-      const out: Record<string, unknown> = {};
-      out.roomId = value.roomId;
+      const out: Record<string, unknown> = Object.create(null) as Record<
+        string,
+        unknown
+      >;
+      out["roomId"] = value.roomId;
       return out;
     }
   })();
@@ -132,7 +138,9 @@ export const labelsTransferTypeConverter =
           reason: `must have at most 50 properties, got ${keys.length}`,
         });
       }
-      const additionalProperties: Record<string, string> = {};
+      const additionalProperties: Record<string, string> = Object.create(
+        null,
+      ) as Record<string, string>;
       for (const key of keys) {
         let entry: string | undefined = undefined;
         if (typeof raw[key] !== "string") {
@@ -152,7 +160,10 @@ export const labelsTransferTypeConverter =
 
     public toTransferType(value: Labels): unknown {
       const violations: __nexgenDefinitions.Violation[] = [];
-      const out: Record<string, unknown> = {};
+      const out: Record<string, unknown> = Object.create(null) as Record<
+        string,
+        unknown
+      >;
       for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
         out[key] = entry;
       }
@@ -181,26 +192,26 @@ export const messageTransferTypeConverter =
       }
 
       let kind: "text" = undefined as unknown as "text";
-      if (raw.kind === undefined || raw.kind === null) {
+      if (!Object.prototype.hasOwnProperty.call(raw, "kind") || raw["kind"] === null) {
         violations.push({ path: "kind", reason: "required" });
       } else {
-        if (typeof raw.kind !== "string") {
+        if (typeof raw["kind"] !== "string") {
           violations.push({ path: "kind", reason: "expected string" });
-        } else if (raw.kind !== KIND_CONST) {
+        } else if (raw["kind"] !== KIND_CONST) {
           violations.push({ path: "kind", reason: `must equal "text"` });
         } else {
-          kind = raw.kind as "text";
+          kind = raw["kind"] as "text";
         }
       }
 
       let body: string = undefined as unknown as string;
-      if (raw.body === undefined || raw.body === null) {
+      if (!Object.prototype.hasOwnProperty.call(raw, "body") || raw["body"] === null) {
         violations.push({ path: "body", reason: "required" });
       } else {
-        if (typeof raw.body !== "string") {
+        if (typeof raw["body"] !== "string") {
           violations.push({ path: "body", reason: "expected string" });
         } else {
-          body = raw.body;
+          body = raw["body"];
         }
       }
 
@@ -208,26 +219,32 @@ export const messageTransferTypeConverter =
         | string
         | null
         | undefined;
-      if (raw.replyToId !== undefined) {
-        if (raw.replyToId === null) {
+      if (Object.prototype.hasOwnProperty.call(raw, "replyToId")) {
+        if (raw["replyToId"] === null) {
           replyToId = null;
         } else {
-          if (typeof raw.replyToId !== "string") {
+          if (typeof raw["replyToId"] !== "string") {
             violations.push({ path: "replyToId", reason: "expected string" });
           } else {
-            replyToId = raw.replyToId;
+            replyToId = raw["replyToId"];
           }
         }
       }
 
       let priority: number | undefined = undefined as unknown as number | undefined;
-      if (raw.priority === null) {
+      if (
+        Object.prototype.hasOwnProperty.call(raw, "priority") &&
+        raw["priority"] === null
+      ) {
         violations.push({ path: "priority", reason: "explicit null not allowed" });
-      } else if (raw.priority !== undefined) {
-        if (typeof raw.priority !== "number" || !Number.isSafeInteger(raw.priority)) {
+      } else if (Object.prototype.hasOwnProperty.call(raw, "priority")) {
+        if (
+          typeof raw["priority"] !== "number" ||
+          !Number.isSafeInteger(raw["priority"])
+        ) {
           violations.push({ path: "priority", reason: "expected integer" });
         } else {
-          priority = raw.priority;
+          priority = raw["priority"];
         }
       }
 
@@ -257,14 +274,17 @@ export const messageTransferTypeConverter =
 
     public toTransferType(value: Message): unknown {
       const violations: __nexgenDefinitions.Violation[] = [];
-      const out: Record<string, unknown> = {};
+      const out: Record<string, unknown> = Object.create(null) as Record<
+        string,
+        unknown
+      >;
       if (value.kind !== "text") {
         violations.push({ path: "kind", reason: `must equal "text"` });
       }
-      out.kind = value.kind;
-      out.body = value.body;
+      out["kind"] = value.kind;
+      out["body"] = value.body;
       if (value.replyToId !== undefined) {
-        out.replyToId = value.replyToId;
+        out["replyToId"] = value.replyToId;
       }
       if (value.priority !== undefined) {
         if (!Number.isSafeInteger(value.priority)) {
@@ -273,7 +293,7 @@ export const messageTransferTypeConverter =
             reason: "exceeds ±(2^53-1) integer cap",
           });
         }
-        out.priority = value.priority;
+        out["priority"] = value.priority;
       }
       if (violations.length) {
         throw __nexgenDefinitions.payloadValidationError(violations);
@@ -295,51 +315,60 @@ export const roomTransferTypeConverter =
       }
 
       let roomId: string = undefined as unknown as string;
-      if (raw.roomId === undefined || raw.roomId === null) {
+      if (
+        !Object.prototype.hasOwnProperty.call(raw, "roomId") ||
+        raw["roomId"] === null
+      ) {
         violations.push({ path: "roomId", reason: "required" });
       } else {
-        if (typeof raw.roomId !== "string") {
+        if (typeof raw["roomId"] !== "string") {
           violations.push({ path: "roomId", reason: "expected string" });
         } else {
-          roomId = raw.roomId;
+          roomId = raw["roomId"];
         }
       }
 
       let displayName: string = undefined as unknown as string;
-      if (raw.displayName === undefined || raw.displayName === null) {
+      if (
+        !Object.prototype.hasOwnProperty.call(raw, "displayName") ||
+        raw["displayName"] === null
+      ) {
         violations.push({ path: "displayName", reason: "required" });
       } else {
-        if (typeof raw.displayName !== "string") {
+        if (typeof raw["displayName"] !== "string") {
           violations.push({ path: "displayName", reason: "expected string" });
         } else {
-          displayName = raw.displayName;
+          displayName = raw["displayName"];
         }
       }
 
       let topic: string | null = undefined as unknown as string | null;
-      if (raw.topic === undefined) {
+      if (!Object.prototype.hasOwnProperty.call(raw, "topic")) {
         violations.push({ path: "topic", reason: "required" });
       } else {
-        if (raw.topic === null) {
+        if (raw["topic"] === null) {
           topic = null;
         } else {
-          if (typeof raw.topic !== "string") {
+          if (typeof raw["topic"] !== "string") {
             violations.push({ path: "topic", reason: "expected string" });
           } else {
-            topic = raw.topic;
+            topic = raw["topic"];
           }
         }
       }
 
       let members: string[] | undefined = undefined as unknown as string[] | undefined;
-      if (raw.members === null) {
+      if (
+        Object.prototype.hasOwnProperty.call(raw, "members") &&
+        raw["members"] === null
+      ) {
         violations.push({ path: "members", reason: "explicit null not allowed" });
-      } else if (raw.members !== undefined) {
-        if (!Array.isArray(raw.members)) {
+      } else if (Object.prototype.hasOwnProperty.call(raw, "members")) {
+        if (!Array.isArray(raw["members"])) {
           violations.push({ path: "members", reason: "expected array" });
         } else {
           members = [];
-          raw.members.forEach((element: unknown, index: number) => {
+          raw["members"].forEach((element: unknown, index: number) => {
             let item: string = undefined as unknown as string;
             if (typeof element !== "string") {
               violations.push({ path: `members[${index}]`, reason: "expected string" });
@@ -354,17 +383,22 @@ export const roomTransferTypeConverter =
       }
 
       let labels: Labels | undefined = undefined as unknown as Labels | undefined;
-      if (raw.labels === null) {
+      if (
+        Object.prototype.hasOwnProperty.call(raw, "labels") &&
+        raw["labels"] === null
+      ) {
         violations.push({ path: "labels", reason: "explicit null not allowed" });
-      } else if (raw.labels !== undefined) {
+      } else if (Object.prototype.hasOwnProperty.call(raw, "labels")) {
         try {
-          labels = labelsTransferTypeConverter.fromTransferType(raw.labels);
+          labels = labelsTransferTypeConverter.fromTransferType(raw["labels"]);
         } catch (error) {
           __nexgenDefinitions.collect(violations, "labels", error);
         }
       }
 
-      const additionalProperties: Record<string, unknown> = {};
+      const additionalProperties: Record<string, unknown> = Object.create(
+        null,
+      ) as Record<string, unknown>;
       for (const key of Object.keys(raw)) {
         if (!ROOM_DECLARED.has(key)) {
           additionalProperties[key] = raw[key];
@@ -386,15 +420,18 @@ export const roomTransferTypeConverter =
 
     public toTransferType(value: Room): unknown {
       const violations: __nexgenDefinitions.Violation[] = [];
-      const out: Record<string, unknown> = {};
-      out.roomId = value.roomId;
-      out.displayName = value.displayName;
-      out.topic = value.topic;
+      const out: Record<string, unknown> = Object.create(null) as Record<
+        string,
+        unknown
+      >;
+      out["roomId"] = value.roomId;
+      out["displayName"] = value.displayName;
+      out["topic"] = value.topic;
       if (value.members !== undefined) {
-        out.members = value.members;
+        out["members"] = value.members;
       }
       if (value.labels !== undefined) {
-        out.labels = (() => {
+        out["labels"] = (() => {
           try {
             return labelsTransferTypeConverter.toTransferType(value.labels);
           } catch (error) {
@@ -431,22 +468,28 @@ export const sendMessageInputTransferTypeConverter =
       }
 
       let roomId: string = undefined as unknown as string;
-      if (raw.roomId === undefined || raw.roomId === null) {
+      if (
+        !Object.prototype.hasOwnProperty.call(raw, "roomId") ||
+        raw["roomId"] === null
+      ) {
         violations.push({ path: "roomId", reason: "required" });
       } else {
-        if (typeof raw.roomId !== "string") {
+        if (typeof raw["roomId"] !== "string") {
           violations.push({ path: "roomId", reason: "expected string" });
         } else {
-          roomId = raw.roomId;
+          roomId = raw["roomId"];
         }
       }
 
       let message: Message = undefined as unknown as Message;
-      if (raw.message === undefined || raw.message === null) {
+      if (
+        !Object.prototype.hasOwnProperty.call(raw, "message") ||
+        raw["message"] === null
+      ) {
         violations.push({ path: "message", reason: "required" });
       } else {
         try {
-          message = messageTransferTypeConverter.fromTransferType(raw.message);
+          message = messageTransferTypeConverter.fromTransferType(raw["message"]);
         } catch (error) {
           __nexgenDefinitions.collect(violations, "message", error);
         }
@@ -467,9 +510,12 @@ export const sendMessageInputTransferTypeConverter =
 
     public toTransferType(value: SendMessageInput): unknown {
       const violations: __nexgenDefinitions.Violation[] = [];
-      const out: Record<string, unknown> = {};
-      out.roomId = value.roomId;
-      out.message = (() => {
+      const out: Record<string, unknown> = Object.create(null) as Record<
+        string,
+        unknown
+      >;
+      out["roomId"] = value.roomId;
+      out["message"] = (() => {
         try {
           return messageTransferTypeConverter.toTransferType(value.message);
         } catch (error) {
@@ -495,13 +541,16 @@ export const sendMessageOutputTransferTypeConverter =
       }
 
       let messageId: string = undefined as unknown as string;
-      if (raw.messageId === undefined || raw.messageId === null) {
+      if (
+        !Object.prototype.hasOwnProperty.call(raw, "messageId") ||
+        raw["messageId"] === null
+      ) {
         violations.push({ path: "messageId", reason: "required" });
       } else {
-        if (typeof raw.messageId !== "string") {
+        if (typeof raw["messageId"] !== "string") {
           violations.push({ path: "messageId", reason: "expected string" });
         } else {
-          messageId = raw.messageId;
+          messageId = raw["messageId"];
         }
       }
 
@@ -519,8 +568,11 @@ export const sendMessageOutputTransferTypeConverter =
     }
 
     public toTransferType(value: SendMessageOutput): unknown {
-      const out: Record<string, unknown> = {};
-      out.messageId = value.messageId;
+      const out: Record<string, unknown> = Object.create(null) as Record<
+        string,
+        unknown
+      >;
+      out["messageId"] = value.messageId;
       return out;
     }
   })();

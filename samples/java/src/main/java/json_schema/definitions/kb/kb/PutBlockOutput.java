@@ -68,7 +68,13 @@ public final class PutBlockOutput {
     public static final class Serializer extends com.fasterxml.jackson.databind.JsonSerializer<PutBlockOutput> {
         @Override
         public void serialize(PutBlockOutput value, JsonGenerator gen, SerializerProvider serializers) throws IOException {
+            JsonGenerator target = gen;
+            com.fasterxml.jackson.databind.util.TokenBuffer pending = new com.fasterxml.jackson.databind.util.TokenBuffer(gen.getCodec(), false);
+            gen = pending;
             List<Violation> violations = new ArrayList<>();
+            if (value.blockId == null) {
+                violations.add(new Violation("blockId", "required"));
+            }
             {
                 if (value.revision < -SpecNumbers.INTEGER_CAP || value.revision > SpecNumbers.INTEGER_CAP) {
                     violations.add(new Violation("revision", "exceeds \u00b1(2^53-1) integer cap"));
@@ -85,6 +91,7 @@ public final class PutBlockOutput {
             gen.writeNumberField("revision", value.revision);
 
             gen.writeEndObject();
+            pending.serialize(target);
         }
     }
 

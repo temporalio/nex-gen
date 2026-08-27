@@ -127,7 +127,13 @@ public final class Square implements ChoicesValue, Shape, Showcase.ShapeOrName {
     public static final class Serializer extends com.fasterxml.jackson.databind.JsonSerializer<Square> {
         @Override
         public void serialize(Square value, JsonGenerator gen, SerializerProvider serializers) throws IOException {
+            JsonGenerator target = gen;
+            com.fasterxml.jackson.databind.util.TokenBuffer pending = new com.fasterxml.jackson.databind.util.TokenBuffer(gen.getCodec(), false);
+            gen = pending;
             List<Violation> violations = new ArrayList<>();
+            if (value.kind == null) {
+                violations.add(new Violation("kind", "required"));
+            }
             {
                 if (!Double.isFinite(value.side)) {
                     violations.add(new Violation("side", "must be a finite number, got " + value.side));
@@ -162,6 +168,7 @@ public final class Square implements ChoicesValue, Shape, Showcase.ShapeOrName {
                 }
             }
             gen.writeEndObject();
+            pending.serialize(target);
         }
     }
 

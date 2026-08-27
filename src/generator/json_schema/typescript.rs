@@ -885,9 +885,9 @@ fn render_ts_dependent_required(
 
 /// Renders a TypeScript literal for a scalar matcher value in the element's
 /// static type.
-fn ts_scalar_literal(value: &Value, element_ty: Option<&str>) -> String {
+fn ts_scalar_literal(value: &Value, integer: bool) -> String {
     match value {
-        Value::Number(number) => ts_bound_literal(number, element_ty == Some("integer")),
+        Value::Number(number) => ts_bound_literal(number, integer),
         _ => typescript_value_literal(value).unwrap_or_else(|_| "undefined".to_string()),
     }
 }
@@ -920,8 +920,11 @@ fn scalar_matcher(schema: &Schema) -> ScalarMatcher {
 /// an empty condition set renders as the literal `true`.
 fn ts_matcher_condition(matcher: &Schema, elem: &str, element_ty: Option<&str>) -> String {
     let matcher = scalar_matcher(matcher);
-    let is_integer = element_ty == Some("integer")
-        || matcher.kind == Some(ScalarKind::Integer) && element_ty != Some("number");
+    let is_integer = match matcher.kind {
+        Some(ScalarKind::Number) => false,
+        Some(ScalarKind::Integer) => element_ty != Some("number"),
+        _ => element_ty == Some("integer"),
+    };
     // A matcher that declares no `type` still needs a runtime kind guard: the
     // raw wire array can hold anything, and an unguarded string/number predicate
     // either throws (`[...5]`) or silently coerces (`"9" >= 5`) instead of
@@ -945,14 +948,14 @@ fn ts_matcher_condition(matcher: &Schema, elem: &str, element_ty: Option<&str>) 
     if let Some(value) = &matcher.const_value {
         parts.push(format!(
             "{elem} === {}",
-            ts_scalar_literal(value, element_ty)
+            ts_scalar_literal(value, is_integer)
         ));
     }
     if !matcher.enum_values.is_empty() {
         let alternatives = matcher
             .enum_values
             .iter()
-            .map(|value| format!("{elem} === {}", ts_scalar_literal(value, element_ty)))
+            .map(|value| format!("{elem} === {}", ts_scalar_literal(value, is_integer)))
             .collect::<Vec<_>>()
             .join(" || ");
         if !alternatives.is_empty() {

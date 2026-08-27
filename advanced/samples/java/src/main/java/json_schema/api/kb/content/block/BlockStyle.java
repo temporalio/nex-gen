@@ -71,6 +71,9 @@ public final class BlockStyle {
     public static final class Serializer extends com.fasterxml.jackson.databind.JsonSerializer<BlockStyle> {
         @Override
         public void serialize(BlockStyle value, JsonGenerator gen, SerializerProvider serializers) throws IOException {
+            JsonGenerator target = gen;
+            com.fasterxml.jackson.databind.util.TokenBuffer pending = new com.fasterxml.jackson.databind.util.TokenBuffer(gen.getCodec(), false);
+            gen = pending;
             List<Violation> violations = new ArrayList<>();
             if (value.indent != null) {
                 if (value.indent < -SpecNumbers.INTEGER_CAP || value.indent > SpecNumbers.INTEGER_CAP) {
@@ -92,6 +95,7 @@ public final class BlockStyle {
                 gen.writeNumberField("indent", value.indent);
             }
             gen.writeEndObject();
+            pending.serialize(target);
         }
     }
 

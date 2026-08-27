@@ -41,47 +41,56 @@ export const pageTransferTypeConverter =
       }
 
       let pageId: string = undefined as unknown as string;
-      if (raw.pageId === undefined || raw.pageId === null) {
+      if (
+        !Object.prototype.hasOwnProperty.call(raw, "pageId") ||
+        raw["pageId"] === null
+      ) {
         violations.push({ path: "pageId", reason: "required" });
       } else {
-        if (typeof raw.pageId !== "string") {
+        if (typeof raw["pageId"] !== "string") {
           violations.push({ path: "pageId", reason: "expected string" });
         } else {
-          pageId = raw.pageId;
+          pageId = raw["pageId"];
         }
       }
 
       let title: string = undefined as unknown as string;
-      if (raw.title === undefined || raw.title === null) {
+      if (
+        !Object.prototype.hasOwnProperty.call(raw, "title") ||
+        raw["title"] === null
+      ) {
         violations.push({ path: "title", reason: "required" });
       } else {
-        if (typeof raw.title !== "string") {
+        if (typeof raw["title"] !== "string") {
           violations.push({ path: "title", reason: "expected string" });
         } else {
-          title = raw.title;
+          title = raw["title"];
         }
       }
 
       let meta: PageMeta = undefined as unknown as PageMeta;
-      if (raw.meta === undefined || raw.meta === null) {
+      if (!Object.prototype.hasOwnProperty.call(raw, "meta") || raw["meta"] === null) {
         violations.push({ path: "meta", reason: "required" });
       } else {
         try {
-          meta = pageMetaTransferTypeConverter.fromTransferType(raw.meta);
+          meta = pageMetaTransferTypeConverter.fromTransferType(raw["meta"]);
         } catch (error) {
           __nexgenDefinitions.collect(violations, "meta", error);
         }
       }
 
       let blocks: Block[] | undefined = undefined as unknown as Block[] | undefined;
-      if (raw.blocks === null) {
+      if (
+        Object.prototype.hasOwnProperty.call(raw, "blocks") &&
+        raw["blocks"] === null
+      ) {
         violations.push({ path: "blocks", reason: "explicit null not allowed" });
-      } else if (raw.blocks !== undefined) {
-        if (!Array.isArray(raw.blocks)) {
+      } else if (Object.prototype.hasOwnProperty.call(raw, "blocks")) {
+        if (!Array.isArray(raw["blocks"])) {
           violations.push({ path: "blocks", reason: "expected array" });
         } else {
           blocks = [];
-          raw.blocks.forEach((element: unknown, index: number) => {
+          raw["blocks"].forEach((element: unknown, index: number) => {
             let item: Block = undefined as unknown as Block;
             try {
               item = blockTransferTypeConverter.fromTransferType(element);
@@ -113,10 +122,13 @@ export const pageTransferTypeConverter =
 
     public toTransferType(value: Page): unknown {
       const violations: __nexgenDefinitions.Violation[] = [];
-      const out: Record<string, unknown> = {};
-      out.pageId = value.pageId;
-      out.title = value.title;
-      out.meta = (() => {
+      const out: Record<string, unknown> = Object.create(null) as Record<
+        string,
+        unknown
+      >;
+      out["pageId"] = value.pageId;
+      out["title"] = value.title;
+      out["meta"] = (() => {
         try {
           return pageMetaTransferTypeConverter.toTransferType(value.meta);
         } catch (error) {
@@ -126,7 +138,7 @@ export const pageTransferTypeConverter =
       })();
       if (value.blocks !== undefined) {
         value.blocks.forEach((element, index) => {});
-        out.blocks = value.blocks.map((element, index) =>
+        out["blocks"] = value.blocks.map((element, index) =>
           (() => {
             try {
               return blockTransferTypeConverter.toTransferType(element);
@@ -155,24 +167,33 @@ export const pageMetaTransferTypeConverter =
       }
 
       let author: string = undefined as unknown as string;
-      if (raw.author === undefined || raw.author === null) {
+      if (
+        !Object.prototype.hasOwnProperty.call(raw, "author") ||
+        raw["author"] === null
+      ) {
         violations.push({ path: "author", reason: "required" });
       } else {
-        if (typeof raw.author !== "string") {
+        if (typeof raw["author"] !== "string") {
           violations.push({ path: "author", reason: "expected string" });
         } else {
-          author = raw.author;
+          author = raw["author"];
         }
       }
 
       let wordCount: number | undefined = undefined as unknown as number | undefined;
-      if (raw.wordCount === null) {
+      if (
+        Object.prototype.hasOwnProperty.call(raw, "wordCount") &&
+        raw["wordCount"] === null
+      ) {
         violations.push({ path: "wordCount", reason: "explicit null not allowed" });
-      } else if (raw.wordCount !== undefined) {
-        if (typeof raw.wordCount !== "number" || !Number.isSafeInteger(raw.wordCount)) {
+      } else if (Object.prototype.hasOwnProperty.call(raw, "wordCount")) {
+        if (
+          typeof raw["wordCount"] !== "number" ||
+          !Number.isSafeInteger(raw["wordCount"])
+        ) {
           violations.push({ path: "wordCount", reason: "expected integer" });
         } else {
-          wordCount = raw.wordCount;
+          wordCount = raw["wordCount"];
         }
       }
 
@@ -194,8 +215,11 @@ export const pageMetaTransferTypeConverter =
 
     public toTransferType(value: PageMeta): unknown {
       const violations: __nexgenDefinitions.Violation[] = [];
-      const out: Record<string, unknown> = {};
-      out.author = value.author;
+      const out: Record<string, unknown> = Object.create(null) as Record<
+        string,
+        unknown
+      >;
+      out["author"] = value.author;
       if (value.wordCount !== undefined) {
         if (!Number.isSafeInteger(value.wordCount)) {
           violations.push({
@@ -203,7 +227,7 @@ export const pageMetaTransferTypeConverter =
             reason: "exceeds ±(2^53-1) integer cap",
           });
         }
-        out.wordCount = value.wordCount;
+        out["wordCount"] = value.wordCount;
       }
       if (violations.length) {
         throw __nexgenDefinitions.payloadValidationError(violations);

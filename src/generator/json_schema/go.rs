@@ -10,7 +10,7 @@ use crate::error::{Error, Result};
 use crate::generator::ExternalModelBackend;
 use crate::generator::go::{
     GoPackageContext, PlannedMessageSource, PlannedMessageType, PlannedValueType, go_field_name,
-    go_string_literal, render_go_doc_comment as render_wrapped_go_doc_comment,
+    render_go_doc_comment as render_wrapped_go_doc_comment,
 };
 use crate::generator::json_schema::build_json_name_manifest;
 use crate::generator::json_schema::register_cross_module_ref_names;
@@ -82,6 +82,13 @@ struct Schema {
     x_go_const_name: Option<String>,
     #[serde(rename = "x-go-enum-names")]
     x_go_enum_names: Option<IndexMap<String, String>>,
+}
+
+/// A JSON string literal is also a valid interpreted Go string literal. Using
+/// JSON escaping here avoids Rust `Debug`'s `\u{...}` spelling, which Go does
+/// not accept for non-printable Unicode scalars.
+fn go_string_literal(value: &str) -> String {
+    serde_json::to_string(value).expect("a Rust string is always JSON-serializable")
 }
 
 impl Schema {
@@ -524,14 +531,11 @@ fn render_go_pattern_check_to(
 
 /// Renders a Go literal for a scalar matcher value in the element's static type
 /// (`int64`/`float64`/`string`/`bool`).
-fn go_scalar_literal(value: &Value, element_ty: Option<&str>) -> String {
+fn go_scalar_literal(value: &Value, integer: bool) -> String {
     match value {
         Value::String(text) => go_string_literal(text),
         Value::Bool(boolean) => boolean.to_string(),
-        Value::Number(number) => match element_ty {
-            Some("integer") => go_bound_literal(number, true),
-            _ => number.to_string(),
-        },
+        Value::Number(number) => go_bound_literal(number, integer),
         _ => "nil".to_string(),
     }
 }
@@ -574,8 +578,11 @@ fn go_matcher_condition(
 ) -> String {
     let matcher = scalar_matcher(matcher);
     let var_position = go_contains_position(position);
-    let is_integer = element_ty == Some("integer")
-        || matcher.kind == Some(ScalarKind::Integer) && element_ty != Some("number");
+    let is_integer = match matcher.kind {
+        Some(ScalarKind::Number) => false,
+        Some(ScalarKind::Integer) => element_ty != Some("number"),
+        _ => element_ty == Some("integer"),
+    };
     let mut parts: Vec<String> = Vec::new();
     if matcher.kind == Some(ScalarKind::Integer) && element_ty == Some("number") {
         // An `integer` matcher over `number` elements admits exactly [[type]]'s
@@ -589,14 +596,14 @@ fn go_matcher_condition(
     if let Some(value) = &matcher.const_value {
         parts.push(format!(
             "{elem} == {}",
-            go_scalar_literal(value, element_ty)
+            go_scalar_literal(value, is_integer)
         ));
     }
     if !matcher.enum_values.is_empty() {
         let alternatives = matcher
             .enum_values
             .iter()
-            .map(|value| format!("{elem} == {}", go_scalar_literal(value, element_ty)))
+            .map(|value| format!("{elem} == {}", go_scalar_literal(value, is_integer)))
             .collect::<Vec<_>>()
             .join(" || ");
         if !alternatives.is_empty() {
@@ -778,7 +785,15 @@ fn render_go_array_checks(
         output.push_str("}\n");
     }
     if let Some(matcher) = &schema.contains {
-        let condition = go_matcher_condition(matcher, element, element_ty, model_name, position);
+        let matcher_element = if let Some(kind) = item.and_then(temporal_kind) {
+            format!("{}({element})", go_temporal_format_fn(kind))
+        } else if let Some(encoding) = item.and_then(content_encoding_kind) {
+            format!("{}({element})", go_content_encoding_encode_fn(encoding))
+        } else {
+            element.to_string()
+        };
+        let condition =
+            go_matcher_condition(matcher, &matcher_element, element_ty, model_name, position);
         let effective_min = schema.min_contains.unwrap_or(1);
         output.push_str(indent);
         output.push_str("{\n");
@@ -882,6 +897,9 @@ fn render_go_raw_array_checks(
         output.push_str(&format!("{indent}rawMatchCount{level} := 0\n"));
         output.push_str(&format!(
             "{indent}for _, rawElement{level} := range {elements} {{\n"
+        ));
+        output.push_str(&format!(
+            "{indent}\tif bytes.Equal(bytes.TrimSpace(rawElement{level}), []byte(\"null\")) {{\n{indent}\t\tcontinue\n{indent}\t}}\n"
         ));
         match element_ty {
             Some("integer") => {
@@ -2987,7 +3005,10 @@ fn render_validate(
             if let Some(encoding) = content_encoding_kind(property)
                 && (property.min_length.is_some()
                     || property.max_length.is_some()
-                    || property.pattern.is_some())
+                    || property.pattern.is_some()
+                    || property.format.as_deref().is_some_and(|format| {
+                        crate::json_schema::format::check_for(format).is_some()
+                    }))
             {
                 // A `[]byte` is nil-able, so the field is never behind a pointer;
                 // an optional one is skipped when absent.
@@ -3019,6 +3040,18 @@ fn render_validate(
                         &go_string_literal(json_name),
                         &go_pattern_var_name(&model.model_name, json_name),
                         pattern,
+                        indent,
+                    );
+                }
+                if let Some(format) = &property.format
+                    && crate::json_schema::format::check_for(format).is_some()
+                {
+                    render_go_format_check(
+                        output,
+                        &wire,
+                        &go_string_literal(json_name),
+                        &go_format_var_name(&model.model_name, json_name),
+                        format,
                         indent,
                     );
                 }
@@ -4569,6 +4602,18 @@ fn render_go_map_methods(
                     indent,
                 );
             }
+            if let Some(format) = &non_null.format
+                && crate::json_schema::format::check_for(format).is_some()
+            {
+                render_go_format_check(
+                    output,
+                    "wire",
+                    "k",
+                    &go_format_var_name(type_name, MAP_MEMBER_POSITION),
+                    format,
+                    indent,
+                );
+            }
         } else if let Some(kind) = temporal_kind(non_null) {
             output.push_str(indent);
             output.push_str(go_temporal_check_fn(kind));
@@ -4906,7 +4951,7 @@ fn render_go_member_checks(
         let values = closed_values(value);
         let literals = values
             .iter()
-            .map(|entry| go_scalar_literal(entry, ty))
+            .map(|entry| go_scalar_literal(entry, ty == Some("integer")))
             .collect::<Vec<_>>();
         let reason = go_closed_reason(&values, value_expr);
         output.push_str(indent);
@@ -5809,6 +5854,18 @@ fn render_content_encoding_property_unmarshal(
             &go_string_literal(json_name),
             &go_pattern_var_name(model_name, json_name),
             pattern,
+            "\t\t",
+        );
+    }
+    if let Some(format) = &property.format
+        && crate::json_schema::format::check_for(format).is_some()
+    {
+        render_go_format_check(
+            output,
+            "s",
+            &go_string_literal(json_name),
+            &go_format_var_name(model_name, json_name),
+            format,
             "\t\t",
         );
     }
