@@ -46,13 +46,18 @@ Loader behavior (mirror of [[maxLength]] with `≥`):
 - Value not a non-negative integer → reject: non-number, **negative**
   (`minLength:-1`), or **fractional** (`minLength:0.5`). `minLength:5.0`
   accepted (≡ `5`).
-- The portable count ceiling from [[maxItems]] applies.
+- A bound above the portable length ceiling → reject, and a bound in
+  `[2^31, 2^53−1]` obliges Java to emit a `long` literal — both exactly as in
+  [[maxLength]].
 - `minLength` on a non-string [[type]] → reject (**P7.1**).
 - **`minLength:0`** → accepted, treated as **omitted** (the spec's
   explicit equivalence); it constrains nothing. (Not rejected as
   "redundant" — it is a spec-sanctioned identity, and authors emit it from
   templated tooling; silently honoring it as a no-op is friendlier than a
-  diagnostic.)
+  diagnostic.) "Treated as omitted" is a rule about the **emitted code**, not
+  only about the verdict: **no comparison is emitted for it**. A dead
+  `≥ 0` check is not merely wasted — it makes an inert keyword an input to
+  whatever else the emitter derives from "this node has a length bound".
 - **`minLength` > `maxLength` → reject (unsatisfiable)**; `minLength ==
   maxLength` pins an **exact** length (accepted). All combined-length
   satisfiability lives in [[maxLength]].
@@ -89,7 +94,10 @@ Reason strings name the concrete bound and offending count
 
 Identical to [[maxLength]]: the predicate re-runs before emit over the
 decoded value; an in-memory under-length string fails serialize rather
-than being written. See [[maxLength]] serialize note (symmetric).
+than being written. See [[maxLength]] serialize note (symmetric), including
+the rule that on a materialized node both boundaries count the **canonical**
+wire string — projected **once per member** and shared with the closed-value
+comparison, since two projections are two operands (**P12.2**).
 
 ## Property-testing matrix
 
@@ -109,6 +117,7 @@ than being written. See [[maxLength]] serialize note (symmetric).
 | Value not a number | `minLength:"1"`, `minLength:false` |
 | Negative value | `minLength:-1` |
 | Fractional value | `minLength:0.5` |
+| Above the portable length ceiling | `minLength:9007199254740992` |
 | Type mismatch (P7.1) | `{type:"integer", minLength:1}` |
 | Unsatisfiable range | `{type:"string", minLength:10, maxLength:2}` |
 | Literal below bound | `{type:"string", minLength:5, const:"ab"}`, `{…, default:""}` |
@@ -138,7 +147,8 @@ than being written. See [[maxLength]] serialize note (symmetric).
 - **[[const]] / [[default]] / [[enum]]**: a supplied string literal MUST
   satisfy `minLength` at load (rule above). Closes the string-length
   portion of the deferred literal-vs-constraint obligation (see
-  [[maxLength]]).
+  [[maxLength]], which also owns the rule for a **closed value set** on the
+  same node — the count is taken over the value's underlying `string`).
 
 ## Ecosystem variance
 

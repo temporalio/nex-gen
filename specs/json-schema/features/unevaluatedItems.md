@@ -73,7 +73,11 @@ Distilled:
   unambiguous outcome (**P7**/**P7.1**).
 
 Loader behavior:
-- Any `unevaluatedItems` present → reject with a located diagnostic.
+- Any `unevaluatedItems` present → reject with a located diagnostic. This holds
+  on a raw [[allOf]] branch, and on the implicit conjunct of a
+  `$ref`-with-siblings: the location carries the branch index and the diagnostic
+  is this one, never a merge conflict over two branches' differing values — a
+  message that would imply the keyword is supported.
 - The diagnostic points to [[items]] as the supported array element
   schema (`{type:array, items:{type:T}}` — a homogeneous list).
 

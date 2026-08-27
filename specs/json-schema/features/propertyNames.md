@@ -29,7 +29,9 @@ Distilled:
 
 **Support:** partial — accepted **only** on a map-shaped object (an
 object with [[additionalProperties]] and **no** [[properties]]);
-**rejected** when [[properties]] is present.
+**rejected** when [[properties]] is present. The test is keyword
+**presence**, not member count: an explicit `properties: {}` is present, so it
+rejects too ([[properties]] states the same rule from its side).
 
 Rationale (citing [[PRINCIPLES.md]]):
 - **P10 (enforced)**: on a map, key constraints lower to a clean runtime
@@ -48,7 +50,8 @@ Loader behavior:
 - `propertyNames` value not a valid schema → reject.
 - Subschema not a string schema (or carrying non-string assertions) →
   reject; diagnostic explains keys are always strings.
-- `propertyNames` present **with** [[properties]] → reject; diagnostic
+- `propertyNames` present **with** [[properties]] — an empty
+  `properties: {}` included — → reject; diagnostic
   points at the map form. A future relaxation could validate declared names
   at generation time and apply the runtime check only to extras — deferred
   pending demand.
@@ -70,14 +73,22 @@ Record<string,T>` / `additional_properties: dict[str, V]`).
 ## Validator mapping
 
 Per **P10**/**P11**. Loop over the parsed object's keys; validate each key
-string against the (string) constraint.
+string against the (string) constraint. The violation's `path` is the offending
+key **rendered per P11.2** — a map key is arbitrary text, so it is not spliced
+raw into the path grammar; the spelling belongs to that clause and is not
+restated here.
 
 | Language | Strategy |
 |---|---|
-| Go | The key-constraint check is a predicate in the shared `Validate`, which `UnmarshalJSON` calls after decoding: iterate the decoded keys and run the check (compiled `regexp` for [[pattern]], length checks); a failure → `Violation{Path:key, Reason: fmt.Sprintf("invalid property name %q: %s", key, why)}` (`why` is the underlying assertion's reason, e.g. `must match ^[a-z]+$`), collected into one `PayloadValidationError` application failure. |
-| TypeScript | the shared `Validate` predicate over `Object.keys(parsed)` applies the check; a failure → push ``Violation{path:k, reason: `invalid property name "${k}": ${why}`}``, throw one `PayloadValidationError` application failure. |
-| Python | both directions of the `_<Model>TransferTypeConverter` (**PRINCIPLES Python §3**) loop the map's keys and apply the shared key check; a failure appends ``Violation(path=key, reason=f'invalid property name "{key}": {why}')`` per bad key into the single `PayloadValidationError` application failure. |
-| Java | in the per-POJO collecting deserializer (PRINCIPLES Java §5), iterate the parsed tree's keys, apply the shared key check, and push a `Violation{path:key, "invalid property name \"" + key + "\": " + why}` per bad key into the single `PayloadValidationError` application failure. |
+| Go | Iterate the wire keys and run the key predicate (compiled `regexp` for [[pattern]], length checks); a failure → a `Violation` at the key's path with `Reason: fmt.Sprintf("invalid property name %q: %s", key, why)` (`why` is the underlying assertion's reason, e.g. `must match ^[a-z]+$`), collected into one `PayloadValidationError` application failure. |
+| TypeScript | the same predicate over the wire object's own keys; a failure → push a `Violation` at the key's path with ``reason: `invalid property name "${k}": ${why}` ``, throw one `PayloadValidationError` application failure. |
+| Python | both directions of the `_<Model>TransferTypeConverter` (**PRINCIPLES Python §3**) loop the map's keys and apply the same key check; a failure appends a `Violation` at the key's path with ``reason=f'invalid property name "{key}": {why}'`` per bad key into the single `PayloadValidationError` application failure. |
+| Java | in the per-POJO collecting deserializer (PRINCIPLES Java §5), iterate the parsed tree's keys, apply the same key check, and push a `Violation` at the key's path with `"invalid property name \"" + key + "\": " + why` per bad key into the single `PayloadValidationError` application failure. |
+
+Every row states the same predicate and the same `invalid property name "<key>": `
+prefix on both paths; per **P12.2** that identity is the requirement, and whether
+a target reaches it through one exported validator or an inlined check is an
+emission choice.
 
 Reuses whatever the string-assertion specs ([[pattern]], [[minLength]],
 [[maxLength]], [[enum]], [[format]]) emit — `propertyNames` is just those
@@ -86,7 +97,7 @@ dialect/strategy decisions (notably [[pattern]]'s regex-dialect caveat).
 
 ### Serialize-side (P12)
 
-The key check is part of the shared `Validate`, so it runs again before
+The key check runs again before
 emit: every catch-all key about to be written is re-validated against the
 constraint, and a key inserted in memory that violates it (e.g. a map key
 not matching the `pattern`) fails serialization rather than emitting an
@@ -107,7 +118,7 @@ exactly the wire key the check applies to, in both directions.
 
 | Reason | Example |
 |---|---|
-| With `properties` (P7) | `{type:object, properties:{id:{type:integer}}, propertyNames:{type:string, pattern:"…"}}` |
+| With `properties` (P7) | `{type:object, properties:{id:{type:integer}}, propertyNames:{type:string, pattern:"…"}}`; and the empty-but-present `properties:{}` spelling |
 | Non-string subschema | `propertyNames:{type:integer}` |
 | Shapeless subschema | `propertyNames:{}`, `propertyNames:true` |
 | No host map | `propertyNames` with neither `properties` nor `additionalProperties` (caught by [[type]]) |
@@ -115,8 +126,8 @@ exactly the wire key the check applies to, in both directions.
 ### Runtime fixtures (validator)
 
 - All keys satisfy the constraint → OK.
-- One key violates (bad pattern / too long) → one
-  `Violation{path:key, reason}` in the payload-validation application failure.
+- One key violates (bad pattern / too long) → one `Violation` in the
+  payload-validation application failure, at that key's path (**P11.2**).
 - Multiple bad keys → all reported in one shot (P11).
 - Empty object → vacuously OK.
 
@@ -132,7 +143,10 @@ exactly the wire key the check applies to, in both directions.
 - **[[pattern]] / [[minLength]] / [[maxLength]] / [[enum]] / [[format]]**:
   the string assertions reused against keys; inherit their decisions.
 - **[[minProperties]] / [[maxProperties]]**: count constraints compose
-  with key-shape constraints on the same map.
+  with key-shape constraints on the same map. Where the key constraint makes the
+  key language **finite and enumerable** — an `enum`, a `maxLength: 0` — it caps
+  how many members the object can ever have, and reconciling that against a
+  count floor is owned by [[minProperties]].
 
 ## Ecosystem variance
 

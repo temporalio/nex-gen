@@ -33,13 +33,15 @@ Distilled:
   [[required]]) nor about unmatched members (that is
   [[additionalProperties]]).
 - Its matched-name set is an *annotation* consumed by
-  [[additionalProperties]] / [[unevaluatedProperties]] to decide which
-  members count as "additional."
-- An explicit empty `properties: {}` declares a zero-member struct. Omitting
-  `properties` instead declares a free-form object owned by
-  [[additionalProperties]]. Both are open by default, but when
-  `additionalProperties: false` is present the explicit empty form accepts
-  only `{}`, while the omitted form is rejected as shapeless under **P7.1**.
+  [[additionalProperties]] to decide which members count as "additional."
+  ([[unevaluatedProperties]], the standard's other consumer, is rejected at
+  load per **P6**, so it never reads the annotation here.)
+- An explicit empty `properties: {}` declares a zero-member struct; omitting
+  `properties` declares a free-form object owned by [[additionalProperties]].
+  Their *assertion* behavior coincides, as the quoted rule says, and both emit
+  the same catch-all-only aggregate. What differs is that `properties` is
+  **present**: presence is what selects the [[additionalProperties]] column and
+  what [[propertyNames]] rejects beside, and an empty map is present.
 
 ## Support decision
 
@@ -90,7 +92,15 @@ Field naming: JSON member names are mapped to each language's idiomatic
 identifier and the **original JSON name is always pinned** — by a Go
 struct tag and by the exact wire key the TypeScript, Python, and Java
 converters read and write — so the wire contract is stable regardless of
-the emitted identifier (**P2**, **P3**). The exact transform, collision
+the emitted identifier (**P2**, **P3**). A wire key is an arbitrary string and
+need not be a legal identifier in any target, so the three converter-based
+targets reach it by **key lookup** on the wire object — `raw["content-type"]`,
+`out["content-type"]`, `node.get("content-type")` — never by member access
+(`raw.content-type` is not a property read). Presence is decided over the
+wire object's **own** members only: in TypeScript a member named after anything
+the host object inherits (`toString`, `valueOf`, `constructor`, `__proto__`) must
+not read as present on a payload that never carried it, so "not `undefined`" is
+not a sufficient presence test there. The exact transform, collision
 policy, and escape hatch are specified in [Identifier
 case-mapping](#identifier-case-mapping) below.
 
@@ -151,6 +161,18 @@ method-local bindings, and Python emits attribute/binding identifiers. Go's
 exported `PascalCase` identifiers do not collide with its lowercase keywords.
 Consequently Go is the only target where a keyword-named property needs no
 override under the current emission strategy.
+
+What a target "reserves" in an emitted position is **not** its keyword list. It
+is every name already bound where the identifier lands, and for a converter-based
+target that includes the converter's own parameter and locals, and the bindings
+the language restricts without reserving (in TypeScript `undefined`, `eval` and
+`arguments`; the members an emitted `interface` inherits from `Object`). A
+member name that collides with one of those is a Stage-3 rejection with the
+`x-<lang>-name` remedy, exactly as a keyword is — never emitted and left to
+fail downstream. Where a target's collision surface is an artifact of *how* it
+stages members rather than of the language, prefixing the emitter's own bindings
+out of the member namespace is the alternative to rejecting; either is
+conformant, silently emitting a colliding binding is not.
 
 ### Stage 4 — Escape hatch (per-language override)
 
@@ -357,6 +379,7 @@ deserialize.
 | Self-reference via array items, **required** OK (see [[ref]]) | tree node; the empty array terminates, so `children` may be required: `{value:{type:string}, children:{type:array, items:{$ref:"#"}}}` |
 | Mutual / indirect self-reference (see [[ref]]) | two `$defs` types referencing each other (cycle through `$ref`) |
 | Name needing recasing | `{properties:{user_id:{type:string}}}` → Go `UserId`, TS `userId`, Python `user_id` |
+| Wire key that is not an identifier | `{properties:{"content-type":{type:string}}}` → Go `ContentType` with `json:"content-type"`, TS `contentType` read and written as `raw["content-type"]` / `out["content-type"]` |
 | Acronym folded | `{properties:{userID:{…}, httpServer:{…}}}` → Go `UserId`, `HttpServer` |
 | Per-language override admits an otherwise-rejected name | `{properties:{class:{type:string, x-ts-name:"klass", x-py-name:"klass", x-java-name:"klazz"}}}` |
 | Keyword-named member needs no override in Go | `{properties:{class:{type:string}}}` generating Go only → `Class` |
@@ -372,6 +395,7 @@ deserialize.
 | `properties` without `type:object` | `{properties:{...}}` (no `type`) — per [[type]] |
 | Name collision after recasing (emitted lang) | `{properties:{user_id:{…}, userId:{…}}}` → one Go `UserId` |
 | Invalid identifier in an emitted lang (no override) | `{properties:{class:{…}}}` when emitting TypeScript/Python/Java; `{properties:{"2fa":{…}}}` (leading digit); `{properties:{"":{…}}}` (empty) |
+| Collides with a name the converter binds (emitted lang) | `{properties:{violations:{…}}}`, `{properties:{undefined:{…}}}`, `{properties:{toString:{…}}}` when emitting TypeScript; the Java deserializer's locals likewise |
 | Override not a legal identifier | `x-py-name:"2fa"` / `x-py-name:"class"` (reserved) |
 | Override collides | two members whose `x-go-name` both resolve to `Foo` |
 | Unsatisfiable direct self-reference (see [[ref]] satisfiability check) | direct `$ref:"#"` member that is **required and non-nullable** — the chain can never terminate, so no finite instance exists (a satisfiability constraint, not a nullability one). A terminating form is required: optional (absent ends it), required+nullable (`null` ends it), or a collection wrapper. |
@@ -413,9 +437,11 @@ deserialize.
   `oneOf` null pattern is nullable; it is optional+nullable when absent
   from `required` and required+nullable when listed (both supported —
   presence and null-acceptance are orthogonal per **P8**).
-- **[[dependentRequired]] / [[propertyNames]] / [[minProperties]] /
-  [[maxProperties]]**: layer additional object-level assertions over the same
-  member set. [[dependentSchemas]] is unsupported and rejected at load time.
+- **[[dependentRequired]] / [[minProperties]] / [[maxProperties]]**: layer
+  additional object-level assertions over the same member set.
+  [[propertyNames]] layers a key-shape assertion, but only on the map form —
+  beside `properties`, including an empty `properties: {}`, it is rejected.
+  [[dependentSchemas]] is unsupported and rejected at load time.
 - **[[ref]]**: a member schema may be a `$ref`, including one
   that resolves back to the containing object (direct, via-array, or
   mutual recursion). This is the only way to express recursive types;

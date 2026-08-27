@@ -33,16 +33,17 @@ Distilled:
 ## Support decision
 
 **Support:** yes — runtime element-count comparison, [[maxItems]] with
-`≥`. The parse adapter counts the original wire array and the
-serialize/shared-validation path counts the decoded collection, using the same
-comparison and reason in both directions (**P10** / **P11** / **P12**). No
-effect on emitted types.
+`≥`. Both directions count the array's complete element sequence — the wire
+array inbound (never the partially-built typed collection), the decoded
+collection outbound — with the same comparison and reason (**P10** / **P11** /
+**P12**). No effect on emitted types.
 
 Loader behavior (mirror of [[maxItems]] with `≥`):
 - Value not a non-negative integer → reject: non-number, **negative**
   (`minItems:-1`), or **fractional** (`minItems:0.5`). `minItems:2.0`
   accepted (≡ `2`).
-- The portable count ceiling from [[maxItems]] applies.
+- The portable count ceiling from [[maxItems]], and the emitted-literal
+  obligation that comes with a bound above 2^31−1, apply here unchanged.
 - `minItems` on a non-array [[type]] → reject (**P7.1**).
 - `minItems` present without `type:"array"` → reject per [[type]]; a
   `type:"array"` still requires [[items]].
@@ -106,6 +107,7 @@ encoder decision itself is owned by [[nullability]], see [[items]]).
 | Value not a number | `minItems:"1"`, `minItems:false` |
 | Negative value | `minItems:-1` |
 | Fractional value | `minItems:0.5` |
+| Above the portable count ceiling | `minItems:9007199254740992` |
 | Type mismatch (P7.1) | `{type:"string", minItems:1}` |
 | Unsatisfiable range | `{type:"array", items:{type:string}, minItems:10, maxItems:2}` |
 

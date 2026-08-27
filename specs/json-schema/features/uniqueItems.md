@@ -51,18 +51,25 @@ composite members (the deep structural-equality check is correct in
 principle, just costly — revisit on demand).
 
 Grounding ([[PRINCIPLES.md]]): **P10** (enforced at the boundary), **P11**
-(aggregated), **P12** (a pure predicate over the decoded value in the
-**shared `Validate`** layer, identical both directions — no serialize-side
-adapter logic of its own). No effect on emitted types. The scalar
+(aggregated), **P12** (**one** all-distinct walk over one kind of operand — the
+array's complete element sequence — applied at both boundaries with the same
+equality and the same reason). No effect on emitted types. The scalar
 restriction is the **P1** line: element-vs-element equality over a scalar
 type is the same value comparison [[enum]] already specifies value-for-value
 across all four targets, whereas a portable composite deep-equal is extra
 surface we don't yet commit to.
 
-A scalar element that materializes to a native value ([[format]] temporals or
-[[contentEncoding]] bytes) is also deferred. Distinct JSON strings can collapse
-to one canonical native value, so comparing raw elements inbound and canonical
-elements outbound would make a successfully parsed model unserializable.
+A scalar element carrying a **temporal [[format]]** is also **deferred**, for a
+different reason: the element materializes to a native value that no longer
+holds the authored lexeme. Two distinct JSON strings — `"…T00:00:00Z"` and
+`"…T00:00:00.000Z"` — are distinct under the JSON equality this keyword asserts,
+and collapse to one canonical native value, so no single projection is both
+element-to-element JSON equality inbound and available outbound; the pair would
+parse and then refuse to re-serialize. A [[contentEncoding]] element is
+**supported**: its codec admits only the canonical spelling, so the authored and
+canonical wire forms coincide and one equality serves both directions. That
+support is contingent on that strictness — a codec that ever admitted two
+spellings of one value would fall under the same deferral.
 
 Loader behavior:
 - Value not a boolean (`uniqueItems:"true"`, `uniqueItems:1`,
@@ -81,8 +88,10 @@ Loader behavior:
   with a "not yet supported" diagnostic (deferred; see Support decision).
   A `uniqueItems: false` over the same composite `items` is still a no-op
   and accepted — nothing is asserted, so no equality is needed.
-- **`uniqueItems: true` with a materializing scalar `items`** → reject until
-  one canonical equality projection can be applied in both directions.
+- **`uniqueItems: true` with a temporal [[format]] on a scalar `items`** →
+  **reject** with a "not yet supported" diagnostic (deferred; see Support
+  decision). A `uniqueItems: false` over the same element is a no-op and
+  accepted.
 
 ## Type mapping
 
@@ -117,8 +126,11 @@ keyword.
 `==`**, never an epsilon — identical to [[enum]] / [[const]]: the wire
 values are IEEE-754 binary64 from correctly-rounded decimal→double
 parsing, so the same decimal yields the identical bit pattern in every
-target. An integer-valued number member such as `1.0` normalizes to an
-integer at load (as in [[enum]]), so `[1, 1.0]` in a `number` array is a
+target. The comparison key is that binary64 value on **both** sides,
+whatever numeric width the host language would otherwise give the wire
+token: two integer tokens that round to one `double` are one value in
+every target. Equality is over the mathematical number rather than the
+authored spelling (as in [[enum]]), so `[1, 1.0]` in a `number` array is a
 runtime duplicate (both are the same value), not two distinct elements.
 `-0.0` equals `0.0`; `NaN`/`±Infinity` cannot appear.
 
@@ -129,8 +141,10 @@ the decoded value, so an in-memory slice/list holding duplicates fails
 serialize with the same aggregated primitive rather than being written.
 Real teeth in every target: building the collection in memory is
 unchecked in all four (same rationale as the [[maxItems]] bound
-re-check). The element count and values are the same in memory as on the
-wire, so the check is the identical all-distinct walk in both directions.
+re-check). Both directions walk the array's complete element sequence and
+compare the same values — for a [[contentEncoding]] element the byte value and
+its one canonical spelling partition the elements identically — so the check is
+the identical all-distinct walk in both directions.
 
 ## Property-testing matrix
 
@@ -146,6 +160,7 @@ wire, so the check is the identical all-distinct walk in both directions.
 | No-op false over composite (nothing asserted) | `{type:"array", items:{type:object, …}, uniqueItems:false}` |
 | Combined with count bounds | `{type:"array", items:{type:string}, minItems:1, maxItems:10, uniqueItems:true}` |
 | Nullable scalar element | `{type:"array", items:{oneOf:[{type:string},{type:"null"}]}, uniqueItems:true}` — `null` is one value; two `null`s are a duplicate |
+| `contentEncoding` element (one canonical spelling) | `{type:"array", items:{type:string, contentEncoding:"base64"}, uniqueItems:true}` |
 
 ### Rejected at load time (negative)
 
@@ -154,7 +169,7 @@ wire, so the check is the identical all-distinct walk in both directions.
 | Value not a boolean | `uniqueItems:"true"`, `uniqueItems:1`, `uniqueItems:null` |
 | Type mismatch (P7.1) | `{type:"string", uniqueItems:true}` |
 | Composite element, deferred | `{type:"array", items:{type:object, …}, uniqueItems:true}`, `{type:"array", items:{type:array, …}, uniqueItems:true}` |
-| Materializing scalar element, deferred | `{type:"array", items:{type:"string", format:"date-time"}, uniqueItems:true}` |
+| Temporal `format` element, deferred | `{type:"array", items:{type:"string", format:"date-time"}, uniqueItems:true}` |
 
 ### Runtime fixtures (validator)
 
@@ -186,6 +201,10 @@ wire, so the check is the identical all-distinct walk in both directions.
   them distinct; orthogonal where both apply.
 - **[[type]]**: gates applicability to `type:"array"`; a mismatch is a load
   reject (**P7.1**). The emitted collection type is unchanged.
+- **[[format]] / [[contentEncoding]]**: a temporal [[format]] on the element is
+  a load reject (Support decision) — the native value it materializes to cannot
+  answer element-to-element JSON equality. A [[contentEncoding]] element is
+  supported because its codec accepts one spelling per value.
 - **[[enum]] / [[const]]**: share the **scalar value-equality** definition
   used here (exact `==` for numbers, normalized integer-valued numbers).
   An array whose `items` carries an `enum` may also set `uniqueItems`; the

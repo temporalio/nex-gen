@@ -82,6 +82,29 @@ Loader behavior:
   ignored**: the keyword is dropped wholesale, so a malformed `examples`
   is inert rather than a load error. The array-MUST and per-value
   validity return when the doc-comment feature lands (Open questions).
+- An `examples` value is **opaque instance data**, never schema. No pass
+  may interpret anything inside it: a `$ref`-shaped object among the sample
+  values is a sample value, not a reference edge, and must not enter the
+  `$ref` closure, pull a file into the input set, raise the input root, or
+  change one module, package or file name ([[ref]],
+  [[generated-file-layout]]). This is what "inert" has to mean for a
+  keyword whose value is arbitrary JSON, and it is the precondition for the
+  P7.1 accept-and-ignore exception above: the keyword may not affect the
+  emitted type, any identifier, or the wire.
+- `examples` as a **sibling of `$ref`** leaves the reference intact: it is
+  dropped **before** the loader decides whether the reference needs an
+  implicit merge, so it can neither clone the target into a use-site type
+  nor add a P15 identifier ([[ref]], [[allOf]] state the same rule from the
+  merge side).
+  *(Status: unimplemented — the fold gate admits only the four
+  `x-<lang>-name` keywords, so today an `examples` sibling triggers the
+  fold; the inert-stripping step runs one statement after the decision it
+  should precede.)*
+- `examples` on a [[nullability]] `null` branch → **reject**: a `null`
+  branch must be exactly `{type: "null"}` with no siblings, an invariant
+  [[nullability]] owns and an inert annotation does not override. At a
+  **document root** — definitions-only or Nexus envelope — `examples` is
+  accepted and dropped, as [[description]] is there.
 
 ## Type mapping
 
@@ -102,9 +125,22 @@ is at generation time, in the emitted doc comment.
 |---|---|
 | `examples` array on any node | `{type:"string", examples:["alice","bob"]}` → accepted, dropped, no output |
 | Malformed `examples` value | `{examples:"alice"}`, `{examples:{a:1}}` → also ignored (array-MUST not enforced while ignored) |
+| A sample value shaped like a reference | `{type:"object", examples:[{"$ref":"../other/victim.yaml"}]}` → the object is data; the input set, the input root and every emitted module name are byte-identical to the same schema without it |
+| Sibling of a `$ref` | `{$ref:"#/$defs/User", examples:[{…}]}` → dropped, reference unchanged |
+| At a document root | a definitions-only or Nexus envelope root carrying `examples` → dropped |
 
-There are no rejected or runtime fixtures: the keyword is inert — it never
-blocks generation and produces no output while ignored.
+### Rejected at load time (negative)
+
+| Reason | Example |
+|---|---|
+| On a nullability `null` branch | `{oneOf:[{type:"string"},{type:"null", examples:["x"]}]}` (see [[nullability]]) |
+
+There are no runtime fixtures: the keyword is inert at runtime — it
+produces no output while ignored. What does need a barrier is the inertness
+itself: a structural regression that generates otherwise-identical schemas
+with and without `examples` — including a sample value containing a
+`$ref`-shaped object, and an `examples` beside a `$ref` — and compares the
+whole emitted file map.
 
 ## Interactions
 
@@ -120,6 +156,10 @@ blocks generation and produces no output while ignored.
 - **[[const]] / [[enum]]**: supplied value sets whose members a supported
   `examples` would be validated against at load (same cross-cutting
   literal-validity obligation).
+- **[[ref]]** / **[[generated-file-layout]]**: an `examples` value is data,
+  so it contributes no closure edge, no input file, and no change to the
+  input root — which is what keeps module, package and file names a
+  function of the schema rather than of its documentation.
 
 ## Ecosystem variance
 
@@ -158,6 +198,8 @@ blocks generation and produces no output while ignored.
 - [[readOnly]] / [[writeOnly]] — metadata that *rejects* (directional
   intent that ignoring would violate), the contrast to this *inert,
   ignored* annotation.
+- [[ref]] — an `examples` value is opaque data: no closure edge, and as a
+  `$ref` sibling it drops without folding.
 - [[PRINCIPLES.md]] — **P2** (idiomatic, hand-written-feeling output),
   **P7/P7.1** (the loud-reject stance, and the inert-annotation exception
   to it), **P12**

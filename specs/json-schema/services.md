@@ -62,8 +62,8 @@ Rationale (citing [[PRINCIPLES.md]]):
 - **P14 / P15 ([[generated-file-layout]])**: bindings emit into the
   declaring file's module (Java the one-class-per-file exception); every
   synthesized identifier and I/O type name enters the collision pass for
-  that module — which in Go is the whole package, since every module
-  flattens into one.
+  its scope — run-wide for Go, TypeScript and Python, the declaring package
+  for Java.
 
 ## Document gating
 
@@ -263,6 +263,30 @@ signature, validation, or dispatch behavior. A non-boolean value rejects.
   param (zero ⇒ absent input) and returns `void` (absent output) or a
   convertible type, no `throws`.
 
+### The Go `--native-api` client
+
+In `--native-api` mode Go emits, beside the `var <Service>` binding, a
+workflow-side client per service:
+
+```go
+type <Service>Client struct{ client workflow.NexusClient }
+
+func New<Service>Client(endpoint string) *<Service>Client
+func (c *<Service>Client) <Op>(ctx workflow.Context, request In) workflow.Future
+```
+
+`<Service>` is the resolved Go service identifier, so an `x-go-name` moves the
+client with the binding, and `<Op>` is the operation's Go field identifier; a
+void-input operation takes no `request` parameter. This is the only place
+generated Go depends on `go.temporal.io/sdk/workflow`; definitions-only mode
+emits none of it.
+
+`<Service>Client` and `New<Service>Client` are synthesized from the service key,
+so per **P15** they are in the collision pass like any other name: a
+`$defs/AlphaClient` beside a service `Alpha` is a load reject, not a Go
+redeclaration. The pass runs over the same namespace in both modes, so a
+document does not load in one mode and emit uncompilable output in the other.
+
 ## Worked example
 
 Input is the `ChatService` from the [Input grammar](#input-grammar)
@@ -416,10 +440,14 @@ Per [[generated-file-layout]]:
 - Aggregators re-export services: `index.ts` re-exports `./services` and
   `__init__.py` includes them in `__all__`. Go/Java rely on exported
   visibility (capitalized / `public`).
-- Service identifiers, operation field identifiers, and synthesized I/O type
-  names are checked **per emitted target**. The scope is run-wide for Go,
-  TypeScript, and Python (flat package or root barrel), and per declaring Java
-  package; see [[generated-file-layout]] and P15.
+- Service identifiers and synthesized I/O type names live in the declaring
+  module's identifier namespace and are checked **per emitted target**: the
+  scope is run-wide for Go, TypeScript and Python (flat package or root barrel)
+  and the declaring package for Java; see [[generated-file-layout]] and P15.
+- **Operation identifiers are members, not module-level bindings** — a Go struct
+  field, a TypeScript object key, a Python class attribute, a Java interface
+  method — so they share one scope **per service** and are checked there. An
+  operation `page` beside a `$defs/Page` in the same module does not collide.
 
 > **A generated service and a generated model that resolve to the same
 > identifier collide, and the generator fails the build (P7.1/P15).** A
@@ -440,6 +468,34 @@ Per [[generated-file-layout]]:
 > (the `fqn` wire name is unaffected — only the *code identifier*
 > collides). The check runs per emitted target, so a pair that collides
 > in one language may be fine in another and still rejects.
+
+**Two services collide too.** The key grammar admits both `HTTPService` and
+`HttpService`, which resolve to one identifier, so the check compares the
+**authored keys** and not the identifiers they fold to: a second service landing
+on an identifier another service in the same module already claims is a reject
+naming both keys, never a re-insertion of "the same" service. Python is why this
+cannot be left to the target — one module gets two `class HttpService:`
+statements, the later definition silently replaces the earlier, and one whole
+service binding is gone from the package with no diagnostic. This is the P15
+case-mapping rule applied to service keys.
+
+**A service file's imports occupy its namespace.** P15 makes an imported bare
+name reserved against everything else in the scope; what this spec supplies is
+*which* names each target's service file imports:
+
+| Target | Imported bare names |
+|---|---|
+| Go | `nexus` |
+| TypeScript | `nexus` |
+| Python | `Operation`, `service` |
+| Java | `Operation`, `Service` |
+
+Two routes reach them, and both are load rejects. An `x-<lang>-name` on a
+service or operation may name one directly. And a `$defs` model may be named
+`Operation` or `Service` with no override anywhere, entering the service file
+because an operation's `input`/`output` points at it — so the reservation covers
+model and synthesized I/O names reached through operation I/O, not only service
+identifiers.
 
 ## Validator / serializer (P12)
 
@@ -530,6 +586,7 @@ emission code rather than duplicate it:
 | Acronym op name | `sendHTTPRequest` → field `SendHttpRequest`, type `SendHttpRequestInput` (folded; `x-*-name` to refine) |
 | `x-<lang>-name` on a service/op | code identifier overridden verbatim for that target; wire `fqn` independent |
 | `x-<lang>-name` on an operation | method/field renamed; synthesized `<Op>Input`/`Output` names still from the op key |
+| Operation identifier equal to a module type name | operation `page` + a `$defs/Page` in the same module — a member and a type, different scopes |
 
 ### Rejected at load time (negative)
 
@@ -545,6 +602,9 @@ emission code rather than duplicate it:
 | Non-object I/O (`$ref`) | `input: {$ref: '#/$defs/Y'}` where `Y` is not `type: object` |
 | Synthesized name collides | inline `sendMessage.input` + a `$defs/SendMessageInput` |
 | Service collides with a model | service `ChatService` + a `$defs/ChatService` model (same per-package identifier) |
+| Two service keys resolve to one identifier | `HTTPService` + `HttpService` in one document (Python would emit one `class HttpService:` twice) |
+| Identifier collides with a service file's SDK import | a `$defs/Operation` used as an operation's I/O; `x-py-name: Operation` on a service |
+| Go client identifier collides | `$defs/AlphaClient` beside service `Alpha` |
 | TS converter identifiers fold together | `$defs/HTTPError` (kept verbatim by `x-ts-name`) + `$defs/HttpError` → one `httpErrorTransferTypeConverter` |
 | `$ref` I/O unresolvable / non-`$defs` | `input: {$ref: '#/properties/x'}` — per [[ref]] |
 | Identifier invalid/reserved in an emitted lang (no override) | a service/op key mapping to a reserved word |

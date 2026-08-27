@@ -26,7 +26,13 @@ property:
   `description`. It is **not itself a type** and emits **no file-root
   type**. Any schema-shaped root keyword (`type`, `properties`,
   `additionalProperties`, …) → **load reject** with a fix-it ("move the
-  type into `$defs`").
+  type into `$defs`"). A root keyword that is a recognized *schema* keyword but
+  is not an envelope member rejects on **its own** grounds instead — `$vocabulary`
+  and `$id` because they are rejected anywhere, anything else because the
+  envelope's member list is closed. None of them may be reported as a
+  schema-shaped root: "move the type into `$defs`" is not their remedy, and for
+  `$vocabulary` and `$id` it names a position where they are equally illegal, so
+  following it produces a second, different error.
 - **Pure JSON Schema** — no `nexusrpc` property. The file is an ordinary
   type schema exactly as the rest of these specs describe: its root **is
   a type**, named from the file basename ([[ref]] type-name derivation).
@@ -58,7 +64,17 @@ from any file in the closure ([[ref]]).
 | `$schema` | both | **Optional.** If present, must be exactly `"https://json-schema.org/draft/2020-12/schema"` (P5). Absent → 2020-12 assumed. Any other dialect URI → reject. Applies in **both** modes (a Nexus document's `$defs` are 2020-12 too). |
 | `$id` | both | **Rejected anywhere** (root or nested) — refs resolve by file path + JSON pointer, with no URI re-basing. Owned by [[ref]]. |
 | `$vocabulary` | both | **Rejected anywhere.** A meta-schema-only keyword (it declares which vocabularies a *dialect* requires); it has no meaning in an instance-validating type schema, and the dialect here is fixed to 2020-12 (`$schema`). Presence → reject with a fix-it ("remove `$vocabulary`; the dialect is pinned to 2020-12"). |
-| `description` | both | Optional; the document/type doc comment, per the usual annotation handling. |
+| `description` | both | Optional. In pure mode it is the file-root type's doc comment, per the usual annotation handling. A Nexus envelope emits no type to carry it — *(Status: open — an envelope `description` is validated and then dropped; either it surfaces as a module-level doc comment, or the spec declares it accepted-and-inert. Neither is decided.)* |
+
+**An explicit `null` is a value, not an absence.** `nexusrpc: null`,
+`$schema: null` and `services: null` are *present* members and are judged by the
+rules above, not treated as though the key were unwritten: `nexusrpc: null` is a
+non-string and rejects, `$schema: null` is not the 2020-12 URI and rejects, and
+`services: null` is a present `services` member, so in a file with no `nexusrpc`
+it fires the stray-`services` guard. Reading any of them as absent selects the
+wrong mode for the document — for `nexusrpc` it routes a Nexus document into
+pure mode, where a schema-shaped root emits exactly the file-root type the
+envelope rule forbids.
 
 ### `nexusrpc` — the version marker
 
@@ -107,7 +123,11 @@ A top-level `services` key in a file with **no** `nexusrpc` property is
 almost always a forgotten version marker, so it is **rejected with a
 fix-it** ("add `nexusrpc: \"1.0.0\"` to enable Nexus service
 generation") rather than silently ignored. This is the only place
-pure-JSON-Schema mode inspects `services`. The same loud-reject stance
+pure-JSON-Schema mode inspects `services`, and it runs **before** any service or
+operation member is looked at: a file with no marker reports the missing marker,
+never a member defect inside a `services` map that mode does not recognize. No
+diagnostic on such a file may describe it as a Nexus document. The same
+loud-reject stance
 ([[PRINCIPLES.md]] P7.1) that catches a misspelled keyword anywhere else
 catches a Nexus document missing its opt-in here.
 
@@ -119,7 +139,8 @@ and the strict-subset gate (see [[pipeline]]).
 
 - The **input set** — the transitive closure of local `$ref`s reachable
   from the entry file(s) — and the **input root** (their common-ancestor
-  directory) are computed by [[ref]] after the per-file mode is known.
+  directory, which [[ref]] bounds by the invocation root) are computed by
+  [[ref]] after the per-file mode is known.
 - Each reachable file (Nexus document or pure JSON Schema) becomes one
   per-input **module**, named from its path relative to the input root
   ([[generated-file-layout]] module-name encoding). A Nexus document
@@ -152,14 +173,21 @@ see those specs for the detail.
 
 | Reason | Example |
 |---|---|
-| `services` without `nexusrpc` (P7.1) | top-level `services` + no `nexusrpc` → fix-it "add `nexusrpc: \"1.0.0\"`" |
-| `nexusrpc` not exactly `"1.0.0"` | `nexusrpc: "1.1.0"` / `"2.0.0"` / `"0.9.0"` → fix-it naming the required `"1.0.0"` |
-| Malformed/non-string `nexusrpc` | `nexusrpc: 1` / `1.0` / `"1.0"` / `"v1"` |
-| Wrong `$schema` dialect | `$schema: ".../draft-07/schema#"` → fix-it naming the 2020-12 URI |
+| `services` without `nexusrpc` (P7.1) | top-level `services` + no `nexusrpc`, including `services: null` → fix-it "add `nexusrpc: \"1.0.0\"`" |
+| `nexusrpc` not exactly `"1.0.0"` | `nexusrpc: "1.1.0"` / `"2.0.0"` / `"0.9.0"` → fix-it naming the required `"1.0.0"` and echoing the declared value |
+| Malformed/non-string `nexusrpc` | `nexusrpc: 1` / `1.0` / `"1.0"` / `"v1"` / `null` |
+| Wrong `$schema` dialect | `$schema: ".../draft-07/schema#"` / `null` → fix-it naming the 2020-12 URI |
 | Schema-shaped root in a Nexus document | root `type`/`properties`/`additionalProperties` alongside `nexusrpc` → "move the type into `$defs`" |
 | `$id` present (anywhere) | root or nested `$id` — owned by [[ref]] |
 | `$vocabulary` present | root `$vocabulary` — meta-schema-only keyword, no place in a type schema (P5/P6) |
 | No root shape and no definitions | `{}`, a description-only document, or `$defs: {}` |
+
+Every reject in this table names the **file it is about** and a remedy that works
+at a site the author controls (**P7.2**). Where the closure is what made a file
+reachable, that means naming the `$ref` that pulled it in rather than only the
+entry file the author did not touch — the module-level counterpart of this rule,
+and the reserved-name and module-segment rejects it governs, are in
+[[generated-file-layout]].
 
 ## Interactions
 

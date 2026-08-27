@@ -65,13 +65,14 @@ Distilled:
   in-place applicators that would make it *differ* from
   [[additionalProperties]] either leave **no unevaluated residue** or are
   **rejected**. `anyOf`, `not`, `if`/`then`/`else`, [[patternProperties]],
-  and [[prefixItems]] are rejected. The two admitted applicators do not
+  and [[prefixItems]] are rejected. The admitted applicators do not
   reintroduce the problem: [[allOf]] is **flattened to a single schema at
   load** (its branches' `properties` are merged in, so nothing survives as
-  an in-place sibling), and [[oneOf]] is a **closed sum type** whose object
+  an in-place sibling), [[oneOf]] is a **closed sum type** whose object
   branches are complete, discriminated types (no shared residual object
-  shape at the location). With no residual in-place applicator, the
-  transitive evaluated set collapses to exactly [[properties]]'s matched
+  shape at the location), and a [[ref]] either names a model or folds its
+  siblings into that same `allOf` merge. With no residual in-place applicator,
+  the transitive evaluated set collapses to exactly [[properties]]'s matched
   names, so `unevaluatedProperties` would mean *precisely* what
   [[additionalProperties]] already means. Supporting it would add a second
   spelling of one behavior (violating the one-canonical-spelling stance the
@@ -80,7 +81,11 @@ Distilled:
   (**P7**/**P7.1**).
 
 Loader behavior:
-- Any `unevaluatedProperties` present → reject with a located diagnostic.
+- Any `unevaluatedProperties` present → reject with a located diagnostic. This
+  holds on a raw [[allOf]] branch, and on the implicit conjunct of a
+  `$ref`-with-siblings: the location carries the branch index and the diagnostic
+  is this one, never a merge conflict over two branches' differing values — a
+  message that would imply the keyword is supported.
 - The diagnostic points to [[additionalProperties]] as the supported
   object catch-all: `false` for a closed struct, `true`/`{type:T}` for an
   open or typed one.

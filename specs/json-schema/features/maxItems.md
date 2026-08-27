@@ -35,11 +35,12 @@ Distilled:
 **Support:** yes — runtime element-count comparison.
 
 Lowers to the same `≤` count predicate at two generator-owned call sites in
-every language; no effect on emitted types. The parse adapter counts the
-original wire array, while the serialize/shared-validation path counts the
-decoded collection. The operands deliberately differ when an element cannot be
-converted, but the comparison and reason are identical (**P10** / **P11** /
-**P12**).
+every language; no effect on emitted types. Both count **the array's complete
+element sequence**: the parse adapter counts the wire array rather than the
+partially-built typed collection — precisely so that a failed element cannot
+change the count — and the serialize path counts the decoded collection. One
+comparison, one kind of operand, one reason, in both directions (**P10** /
+**P11** / **P12**).
 
 Loader behavior:
 - Value not a non-negative integer → reject: a non-number
@@ -49,14 +50,14 @@ Loader behavior:
   from [[type]]).
 - A bound greater than `9007199254740991` (2^53−1) → reject. Count bounds
   must be exactly representable in every target.
-- **A bound in `[2^31, 2^53−1]` obliges Java to emit a `long` literal**
-  (`{n}L`). Java integer literals stop at 2^31−1, so a bound above it emitted
-  bare is a `javac` "integer number too large" error — the bound loads and the
-  generated package does not compile. The ceiling above is *not* what makes the
-  range safe, and must not be read as implying it: the range is only conformant
-  once the emitter suffixes the literal. Narrowing the cap to
-  `Integer.MAX_VALUE` instead would also be conformant, but is a stricter accept
-  set and is not what this spec chooses.
+- A bound in `[2^31, 2^53−1]` is **accepted**, and the emitted constant must
+  then be written in a form wide enough to hold it — in Java the `long` literal
+  (`{n}L`), because a bare Java integer literal stops at 2^31−1. The ceiling
+  above is a representability limit, not a licence to emit the bound bare.
+  *(Status: unimplemented for Java — the literal is emitted bare, so a bound in
+  this range loads and the generated Java package does not compile. The fix is
+  the literal, not a narrower ceiling: **P1** requires fixing the outlier target
+  rather than narrowing the shared accept set.)*
 - `maxItems` on a non-array [[type]] (`{type:"string", maxItems:3}`) →
   reject per **P7.1** (statically meaningless — the string-length analog
   is [[maxLength]], the object member-count analog is [[maxProperties]]).
@@ -99,10 +100,9 @@ computed at runtime.
 
 ### Serialize-side (P12)
 
-The bound is a shared-`Validate` predicate, so it **re-runs before emit**
-over the decoded value — a model constructed with an over-long slice/list
-in memory fails serialize with the same aggregated primitive rather than
-emitting an out-of-bounds array. Real teeth in the statically-typed
+The bound **re-runs before emit** over the decoded value — a model
+constructed with an over-long slice/list in memory fails serialize with the
+same aggregated primitive rather than emitting an out-of-bounds array. Real teeth in the statically-typed
 targets, where in-memory construction is unchecked (identical rationale
 to the [[type]] integer-cap re-check and the [[maxLength]] bound
 re-check). The element count is the same in memory as on the wire (no
