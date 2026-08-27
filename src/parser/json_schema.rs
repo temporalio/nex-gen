@@ -3815,10 +3815,40 @@ fn validate_object_constraints(path: &Path, schema: &Schema, context: &str) -> R
         validate_string_constraints(path, &subschema, &format!("{context}.propertyNames"))?;
         validate_format(path, &subschema, &format!("{context}.propertyNames"))?;
 
-        // `maxLength: 0` leaves at most the empty string as a possible key.
-        // Together with an enum, use the tighter enumerable cap.
+        // `maxLength: 0` leaves exactly one *candidate* key: the empty string.
+        // Every sibling assertion still filters that candidate. In particular,
+        // `pattern: ^a$` and every asserted format exclude it, so the finite
+        // language has capacity zero rather than one. Together with an enum,
+        // use the tighter enumerable cap.
         if subschema.extra.get("maxLength").and_then(Value::as_f64) == Some(0.0) {
-            property_names_capacity = Some(property_names_capacity.unwrap_or(1).min(1));
+            let empty_admitted = subschema
+                .extra
+                .get("minLength")
+                .and_then(Value::as_u64)
+                .is_none_or(|min| min == 0)
+                && subschema
+                    .extra
+                    .get("enum")
+                    .and_then(Value::as_array)
+                    .is_none_or(|values| values.iter().any(|value| value.as_str() == Some("")))
+                && subschema
+                    .extra
+                    .get("pattern")
+                    .and_then(Value::as_str)
+                    .is_none_or(|pattern| {
+                        regex::Regex::new(pattern).is_ok_and(|matcher| matcher.is_match(""))
+                    })
+                && subschema
+                    .extra
+                    .get("format")
+                    .and_then(Value::as_str)
+                    .is_none_or(|format| crate::json_schema::format::is_valid(format, ""));
+            let zero_length_capacity = u64::from(empty_admitted);
+            property_names_capacity = Some(
+                property_names_capacity
+                    .unwrap_or(zero_length_capacity)
+                    .min(zero_length_capacity),
+            );
         }
     }
 
@@ -3889,10 +3919,10 @@ fn validate_object_constraints(path: &Path, schema: &Schema, context: &str) -> R
         }
     }
 
-    // A present trigger forces its entire transitive dependency closure. If
-    // any one such closure is larger than `maxProperties`, the schema admits
-    // that trigger syntactically but can never validate an object containing
-    // it, so reject the statically uninhabitable combination.
+    // A present trigger forces its entire transitive dependency closure *in
+    // addition to* every always-present `required` key. Compare the union:
+    // checking either set alone misses e.g. required [d] plus a -> b -> c under
+    // maxProperties 3.
     if let Some(max) = max_properties {
         for trigger in dependency_graph.keys() {
             let mut closure = BTreeSet::from([trigger.clone()]);
@@ -3906,11 +3936,13 @@ fn validate_object_constraints(path: &Path, schema: &Schema, context: &str) -> R
                     }
                 }
             }
-            if closure.len() as u64 > max {
+            let mut forced = closure;
+            forced.extend(required.iter().cloned());
+            if forced.len() as u64 > max {
                 return reject(format!(
-                    "{context}: `maxProperties` ({max}) is below the {}-member closure forced by `dependentRequired` trigger `{trigger}` ({}); the object can never satisfy the cap",
-                    closure.len(),
-                    closure.into_iter().collect::<Vec<_>>().join(", ")
+                    "{context}: `maxProperties` ({max}) is below the {}-member closure forced by `dependentRequired` trigger `{trigger}` together with always-required members ({}); the object can never satisfy the cap",
+                    forced.len(),
+                    forced.into_iter().collect::<Vec<_>>().join(", ")
                 ));
             }
         }
@@ -11292,6 +11324,27 @@ properties:
     }
 
     #[test]
+    fn max_length_zero_property_names_capacity_honors_sibling_assertions() {
+        for excluded_by in [
+            "pattern: '^a$'",
+            "pattern: 'a'",
+            "format: email",
+            "format: hostname",
+        ] {
+            let error = numeric_reject(&format!(
+                "type: object\nadditionalProperties: true\nminProperties: 1\npropertyNames: {{ type: string, maxLength: 0, {excluded_by} }}"
+            ));
+            assert!(error.contains("capacity (0)"), "{excluded_by}: {error}");
+        }
+
+        for admitted_by in ["pattern: '^$'", "pattern: ''", "enum: ['']"] {
+            numeric_accept(&format!(
+                "type: object\nadditionalProperties: true\nminProperties: 1\npropertyNames: {{ type: string, maxLength: 0, {admitted_by} }}"
+            ));
+        }
+    }
+
+    #[test]
     fn rejects_property_names_alongside_properties() {
         let error = numeric_reject(
             "type: object\nproperties: { id: { type: string } }\npropertyNames: { type: string, maxLength: 8 }",
@@ -11442,6 +11495,16 @@ $defs:
         numeric_accept(
             "type: object\nproperties: { a: {type: string}, b: {type: string}, c: {type: string}, d: {type: string} }\nmaxProperties: 2\ndependentRequired: { a: [b], c: [d] }",
         );
+    }
+
+    #[test]
+    fn dependent_required_capacity_includes_always_required_keys() {
+        let base = "type: object\nproperties: { a: {type: string}, b: {type: string}, c: {type: string}, d: {type: string} }\nrequired: [d]\ndependentRequired: { a: [b], b: [c] }";
+        let error = numeric_reject(&format!("{base}\nmaxProperties: 3"));
+        assert!(error.contains("4-member closure"), "{error}");
+        assert!(error.contains("a, b, c, d"), "{error}");
+
+        numeric_accept(&format!("{base}\nmaxProperties: 4"));
     }
 
     #[test]
