@@ -1527,10 +1527,11 @@ public final class Showcase {
     }
 
     /**
-     * Optional two-word phrase separated by whitespace (`^\S+\s\S+$`). Exercises the
-     * loader's `\s`/`\S` → ASCII-class normalization and the per-target `$` end-anchor
-     * rewrite (Python `\Z` / Java `\z`), so a Unicode space (NBSP) and a trailing
-     * newline are rejected consistently across all four languages.
+     * Optional two-word phrase separated by whitespace (`^&#92;S+&#92;s&#92;S+$`).
+     * Exercises the loader's `&#92;s`/`&#92;S` → ASCII-class normalization and the
+     * per-target `$` end-anchor rewrite (Python `&#92;Z` / Java `&#92;z`), so a Unicode
+     * space (NBSP) and a trailing newline are rejected consistently across all four
+     * languages.
      */
     public @Nullable String getPhrase() {
         return phrase;
@@ -2044,7 +2045,7 @@ public final class Showcase {
 
     /**
      * A pattern containing a bare dot, normalized to an explicit negated class so the
-     * four regex engines agree on line terminators (`\r`, U+0085, U+2028, U+2029),
+     * four regex engines agree on line terminators (`&#92;r`, U+0085, U+2028, U+2029),
      * which their native `.` does not.
      */
     public @Nullable String getWildcard() {
