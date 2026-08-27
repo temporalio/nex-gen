@@ -38,6 +38,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- JSON Schema emitted-name planning now covers Go and Java compiled-regex
+  identifiers and Java inline-union nested types. Member overrides move these
+  derived names, and collisions reject before generation. TypeScript, Python,
+  and Java generated-file path conflicts now report both claimants and a
+  working rename remedy. Native TypeScript package barrels now export the
+  validation runtime, and serializer object guards preserve the model's member
+  types during TypeScript narrowing.
 - JSON Schema descriptions now reject source-breaking control characters,
   neutralize Go build/tool directives in generated comments, and escape Java
   backslashes from Unicode-escape preprocessing.

@@ -80,29 +80,23 @@ would be. Six consequences, each normative:
   verdict may legitimately differ per target, and what may never differ is the
   accepted and rejected wire value set (P1). (Module and file names are a
   different family, reserved as the union across targets by deliberate choice —
-  see [[generated-file-layout]].) **Status: open** — the value-token checks run
-  with no target at all, so two `enum` members folding to one identifier, or a
-  member whose token is not a legal identifier, reject for TypeScript and Python
-  as well, though both close the type inline and synthesize no constant. The
-  remedy offered is then a Go/Java-only override keyword, which is the P7.2
-  failure again.
+  see [[generated-file-layout]].) Value-token legality and collision checks run
+  only for Go and Java, the targets that emit value constants; TypeScript and
+  Python literal types do not inherit those rejects.
 * **Imported bare names are reserved.** Whatever a generated file binds by
   importing it — a bare symbol, a namespace alias, a package qualifier — is
   reserved against everything else in that file's scope, exactly as the
   generated runtime's own `Violation` already is. A declared model or service
   whose identifier lands on one, with no override anywhere, must **reject**
   rather than shadow the import. Each target's service file binds a different
-  set, enumerated in [[services]]. **Status: open** — the reserved set covers
-  only the modules that carry models, so a service file's imports are unchecked
-  in all four targets: the shadowing is silent in one Java layout, binding the
-  imported annotation type as the operation's parameter, and a build or
-  import-time failure in the rest.
+  set, enumerated in [[services]]. The service-file scope contains only the
+  services and operation I/O models actually rendered in that file, so an
+  unrelated `$defs` model does not cause a false collision.
 * **Identifiers synthesized from a service key are in the pass.** Go's
   `--native-api` output adds `<Service>Client` and `New<Service>Client` to the
   flat package, so a `$defs` model named `AlphaClient` beside a service `Alpha`
-  is a redeclaration. **Status: open** — these never enter the pass, which also
-  makes the accept set depend on whether the API surface is generated; P1 does
-  not permit a mode-dependent accept set.
+  is a redeclaration. Both names are reserved even outside `--native-api`, so
+  the accepted schema set does not depend on generation mode.
 * **A synthesized name is a function of its own origin only.** The identifier
   synthesized from a model's member depends on that model and that member and
   nothing else. Deriving it from how many *other* models declare a same-named
@@ -112,15 +106,12 @@ would be. Six consequences, each normative:
   the second declaration rejects, with the member override as its fix-it.
 * **Case-mapping must not hide a clash.** Two authored names that fold to one
   emitted identifier collide, whichever of the two the diagnostic names as the
-  prior origin. **Status: open** — two service keys differing only in case are
-  accepted today and emit the same Python class twice, the later definition
-  silently shadowing the earlier, which is reachable silently-wrong output.
+  prior origin. Service keys participate after each target's case mapping, just
+  like model and member names.
 * **The override offered has to move the offending name** (P7.2 is the general
-  obligation; this is its P15-specific half). **Status: open** for the type an
-  annotated `$ref` property folds into: it collides under a name that the
-  `x-<lang>-name` the diagnostic asks for, applied at the site the author
-  edited, does not reach — so the only working fix is deleting the annotation,
-  which no diagnostic mentions.
+  obligation; this is its P15-specific half). Pure annotations beside a `$ref`
+  do not clone or rename the referenced type, while a member-name override stays
+  on the member and moves every member-derived identifier.
 
 Target-specific P15 details: Java also synthesizes `get<Field>OrDefault()` for a
 default-bearing member. Go and Java value constants are value-derived and use

@@ -738,15 +738,16 @@ fn api_spec_tree_from_json_schema_sources(
 
     for source in &sources {
         let module_path = module_path_from_relative_source(&source.relative_path);
-        if let Some(segment) = module_path
+        if let Some((_, segment)) = module_path
             .0
             .iter()
-            .find(|segment| is_reserved_module_name(segment))
+            .enumerate()
+            .find(|(depth, segment)| is_reserved_module_name(segment, *depth))
         {
             return Err(Error::InvalidJsonSchema {
                 path: source.path.clone(),
                 reason: format!(
-                    "input `{}` maps to the reserved module name `{segment}`, which collides with a generated file (models/services/definitions/_definitions/index/_recursive/__init__); rename the input file or directory",
+                    "input `{}` maps to the reserved module name `{segment}`, which collides with a generated runtime or aggregator file; rename the input file or directory",
                     source.relative_path.display()
                 ),
             });
@@ -810,16 +811,22 @@ fn insert_leaf_at(
     leaf: ApiSpecLeaf,
 ) -> Result<()> {
     if rest.is_empty() {
-        if branch
-            .children
-            .insert(segment.to_string(), ApiSpecNode::Leaf(leaf))
-            .is_some()
-        {
+        if let Some(existing) = branch.children.get(segment) {
+            let first = first_leaf_source(existing)
+                .unwrap_or_else(|| PathBuf::from("<existing JSON schema module>"));
             return Err(Error::InvalidJsonSchema {
-                path: PathBuf::from(segment),
-                reason: "duplicate JSON schema module path".to_string(),
+                path: leaf.source_path.clone(),
+                reason: format!(
+                    "JSON schema inputs `{}` and `{}` map to the same module path `{}`; rename one input file or directory so their module paths differ",
+                    first.display(),
+                    leaf.source_path.display(),
+                    leaf.module_path.as_module_key(),
+                ),
             });
         }
+        branch
+            .children
+            .insert(segment.to_string(), ApiSpecNode::Leaf(leaf));
         return Ok(());
     }
 
@@ -834,12 +841,25 @@ fn insert_leaf_at(
             })
         });
     let ApiSpecNode::Branch(child_branch) = child else {
+        let first = first_leaf_source(child)
+            .unwrap_or_else(|| PathBuf::from("<existing JSON schema module>"));
         return Err(Error::InvalidJsonSchema {
-            path: leaf.source_path,
-            reason: "JSON schema module path conflicts with another module".to_string(),
+            path: leaf.source_path.clone(),
+            reason: format!(
+                "JSON schema inputs `{}` and `{}` conflict because one module path is a prefix of the other; rename one input file or directory so a module is not also a module directory",
+                first.display(),
+                leaf.source_path.display(),
+            ),
         });
     };
     insert_leaf_at(child_branch, &rest[0], &rest[1..], leaf)
+}
+
+fn first_leaf_source(node: &ApiSpecNode) -> Option<PathBuf> {
+    match node {
+        ApiSpecNode::Leaf(leaf) => Some(leaf.source_path.clone()),
+        ApiSpecNode::Branch(branch) => branch.children.values().find_map(first_leaf_source),
+    }
 }
 
 /// Whether a module-path segment collides with a name the generators reserve
@@ -848,24 +868,16 @@ fn insert_leaf_at(
 /// reserved in *any* target is rejected for *all*, keeping the flat package
 /// coherent everywhere.
 ///
-/// Both spellings of the shared runtime module are reserved, because the targets
-/// spell it differently: Go and TypeScript emit `definitions.go` / `definitions.ts`,
-/// while Python emits `_definitions.py` (module-private, like the `_recursive.py`
-/// hoist module beside it). An input named `_definitions.yaml` would otherwise
-/// emit a `_definitions/` package *directory* at the runtime module's own import
-/// path — and a package shadows a sibling module, so every
-/// `from .._definitions import ...` in the tree fails at import.
-fn is_reserved_module_name(segment: &str) -> bool {
-    matches!(
-        segment,
-        "definitions"
-            | "_definitions"
-            | "_recursive"
-            | "models"
-            | "services"
-            | "index"
-            | "__init__"
-    )
+/// Both spellings of the shared runtime module are reserved at the package root,
+/// because the targets spell it differently: Go and TypeScript emit
+/// `definitions.go` / `definitions.ts`, while Python emits `_definitions.py`
+/// (module-private, like `_recursive.py`). The aggregator names are reserved at
+/// every depth because a parent's `./index` / `.__init__` import self-resolves.
+/// `models` and `services` are generated *inside* a leaf directory; a leaf can
+/// never also have children, so a module segment of either name is harmless.
+fn is_reserved_module_name(segment: &str, depth: usize) -> bool {
+    matches!(segment, "index" | "__init__")
+        || (depth == 0 && matches!(segment, "definitions" | "_definitions" | "_recursive"))
 }
 
 /// Whether a module-path segment cannot be emitted as a module/package name,
@@ -11989,7 +12001,9 @@ $defs:
             .expect_err("two sources mapping to the same module path should be rejected")
             .to_string();
         assert!(
-            error.contains("duplicate JSON schema module path"),
+            error.contains("foo.yaml")
+                && error.contains("foo.json")
+                && error.contains("rename one input"),
             "{error}"
         );
     }
@@ -12005,7 +12019,28 @@ $defs:
         let error = api_spec_tree_from_json_schema_sources(Language::Python, sources)
             .expect_err("a source colliding with an existing module branch should be rejected")
             .to_string();
-        assert!(error.contains("conflicts with another module"), "{error}");
+        assert!(
+            error.contains("foo.yaml")
+                && error.contains("foo/bar.yaml")
+                && error.contains("rename one input"),
+            "{error}"
+        );
+
+        // The diagnostic is symmetric: inserting the directory-shaped module
+        // first must retain its authored source when the shorter leaf arrives.
+        let sources = vec![
+            module_collision_source("foo/bar.yaml", "Bar"),
+            module_collision_source("foo.yaml", "Foo"),
+        ];
+        let error = api_spec_tree_from_json_schema_sources(Language::Python, sources)
+            .expect_err("a module branch colliding with a later leaf should be rejected")
+            .to_string();
+        assert!(
+            error.contains("foo.yaml")
+                && error.contains("foo/bar.yaml")
+                && error.contains("rename one input"),
+            "{error}"
+        );
     }
 
     #[test]
@@ -16371,17 +16406,51 @@ properties:
     }
 
     #[test]
-    fn rejects_reserved_module_name() {
-        // A source file whose relative path strips to a reserved module segment
-        // (`models`) collides with a generated file name.
-        let sources = vec![
-            module_collision_source("models.yaml", "Models"),
-            module_collision_source("other.yaml", "Other"),
-        ];
-        let error = api_spec_tree_from_json_schema_sources(Language::Python, sources)
-            .expect_err("a source mapping to a reserved module name should be rejected")
-            .to_string();
-        assert!(error.contains("reserved module name"), "{error}");
+    fn scopes_reserved_module_names_to_their_generated_files() {
+        for path in ["models.yaml", "services/x.yaml", "a/definitions.yaml"] {
+            let sources = vec![
+                module_collision_source(path, "Allowed"),
+                module_collision_source("other.yaml", "Other"),
+            ];
+            api_spec_tree_from_json_schema_sources(Language::Python, sources)
+                .unwrap_or_else(|error| panic!("`{path}` has no file collision: {error}"));
+        }
+
+        for path in ["index/x.yaml", "a/__init__/x.yaml"] {
+            let sources = vec![
+                module_collision_source(path, "Reserved"),
+                module_collision_source("other.yaml", "Other"),
+            ];
+            let error = api_spec_tree_from_json_schema_sources(Language::Python, sources)
+                .expect_err("aggregator names are reserved at every depth")
+                .to_string();
+            assert!(error.contains("reserved module name"), "{path}: {error}");
+        }
+    }
+
+    #[test]
+    fn nexusrpc_infix_is_stripped_from_module_and_root_type_names() {
+        let tree = api_spec_tree_from_json_schema_sources(
+            Language::Go,
+            vec![
+                module_collision_source("room.nexusrpc.yaml", "IgnoredTitle"),
+                module_collision_source("other.yaml", "Other"),
+            ],
+        )
+        .expect("a pure schema may use the .nexusrpc naming infix");
+        let ApiSpecNode::Branch(root) = tree.root else {
+            panic!("two inputs produce a branch");
+        };
+        let ApiSpecNode::Leaf(room) = &root.children["room"] else {
+            panic!("room should be a leaf module");
+        };
+        assert_eq!(room.module_path.as_module_key(), "room");
+        let model = room
+            .spec
+            .external_types()
+            .find_map(|(_, binding)| binding.json_model())
+            .expect("the root model uses the stripped file name");
+        assert_eq!(model.model_name, "Room");
     }
 
     #[test]

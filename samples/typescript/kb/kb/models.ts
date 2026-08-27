@@ -57,7 +57,8 @@ export const getCategoryTreeInputTransferTypeConverter =
     }
 
     public toTransferType(value: GetCategoryTreeInput): unknown {
-      if (!__nexgenDefinitions.isPlainObject(value)) {
+      const candidate: unknown = value;
+      if (!__nexgenDefinitions.isPlainObject(candidate)) {
         throw __nexgenDefinitions.payloadValidationError([
           { path: "", reason: "expected object" },
         ]);
@@ -124,7 +125,8 @@ export const getPageInputTransferTypeConverter =
     }
 
     public toTransferType(value: GetPageInput): unknown {
-      if (!__nexgenDefinitions.isPlainObject(value)) {
+      const candidate: unknown = value;
+      if (!__nexgenDefinitions.isPlainObject(candidate)) {
         throw __nexgenDefinitions.payloadValidationError([
           { path: "", reason: "expected object" },
         ]);
@@ -208,7 +210,8 @@ export const putBlockOutputTransferTypeConverter =
     }
 
     public toTransferType(value: PutBlockOutput): unknown {
-      if (!__nexgenDefinitions.isPlainObject(value)) {
+      const candidate: unknown = value;
+      if (!__nexgenDefinitions.isPlainObject(candidate)) {
         throw __nexgenDefinitions.payloadValidationError([
           { path: "", reason: "expected object" },
         ]);

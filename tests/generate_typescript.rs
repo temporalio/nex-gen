@@ -1533,6 +1533,48 @@ fn typescript_json_maps_element_position_unions() {
     fs::remove_dir_all(temp_dir).unwrap();
 }
 
+#[test]
+fn typescript_json_native_barrel_exports_validation_runtime() {
+    let temp_dir = unique_output_path("ts-json-native-runtime-exports");
+    fs::create_dir_all(&temp_dir).unwrap();
+    let input_path = temp_dir.join("probe.yaml");
+    fs::write(
+        &input_path,
+        "$schema: https://json-schema.org/draft/2020-12/schema\ntype: object\nproperties:\n  value: { type: string }\n",
+    )
+    .unwrap();
+    let output_path = temp_dir.join("probe");
+    generate_to_file(&GenerateRequest {
+        language: nexgen::language::Language::TypeScript,
+        input_paths: vec![input_path],
+        support_paths: Vec::new(),
+        descriptor_paths: Vec::new(),
+        output_path: output_path.clone(),
+        format: false,
+        generate_native_api: true,
+        java_package_name: None,
+        ts_date_time_types: Default::default(),
+    })
+    .unwrap();
+    let index = fs::read_to_string(output_path.join("index.ts")).unwrap();
+    let models = fs::read_to_string(output_path.join("models.ts")).unwrap();
+    assert!(
+        index.contains("export { payloadValidationError } from './definitions';"),
+        "{index}"
+    );
+    assert!(
+        index.contains("export type { Violation } from './definitions';"),
+        "{index}"
+    );
+    assert!(
+        models.contains("const candidate: unknown = value;"),
+        "{models}"
+    );
+    assert!(models.contains(".isPlainObject(candidate)"), "{models}");
+    assert!(!models.contains(".isPlainObject(value)"), "{models}");
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
 /// A one-sided operation: the non-void side carries its converter as operation
 /// type info, the void side carries no field at all (there is no value to
 /// convert, so an empty `TypeInfo` would assert a conversion that does not

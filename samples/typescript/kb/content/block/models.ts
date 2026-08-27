@@ -150,7 +150,8 @@ export const blockTransferTypeConverter =
     }
 
     public toTransferType(value: Block): unknown {
-      if (!__nexgenDefinitions.isPlainObject(value)) {
+      const candidate: unknown = value;
+      if (!__nexgenDefinitions.isPlainObject(candidate)) {
         throw __nexgenDefinitions.payloadValidationError([
           { path: "", reason: "expected object" },
         ]);
@@ -303,7 +304,8 @@ export const blockStyleTransferTypeConverter =
     }
 
     public toTransferType(value: BlockStyle): unknown {
-      if (!__nexgenDefinitions.isPlainObject(value)) {
+      const candidate: unknown = value;
+      if (!__nexgenDefinitions.isPlainObject(candidate)) {
         throw __nexgenDefinitions.payloadValidationError([
           { path: "", reason: "expected object" },
         ]);

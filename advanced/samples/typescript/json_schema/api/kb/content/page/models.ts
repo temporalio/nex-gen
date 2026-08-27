@@ -135,7 +135,8 @@ export const pageTransferTypeConverter =
     }
 
     public toTransferType(value: Page): unknown {
-      if (!__nexgenDefinitions.isPlainObject(value)) {
+      const candidate: unknown = value;
+      if (!__nexgenDefinitions.isPlainObject(candidate)) {
         throw __nexgenDefinitions.payloadValidationError([
           { path: "", reason: "expected object" },
         ]);
@@ -270,7 +271,8 @@ export const pageMetaTransferTypeConverter =
     }
 
     public toTransferType(value: PageMeta): unknown {
-      if (!__nexgenDefinitions.isPlainObject(value)) {
+      const candidate: unknown = value;
+      if (!__nexgenDefinitions.isPlainObject(candidate)) {
         throw __nexgenDefinitions.payloadValidationError([
           { path: "", reason: "expected object" },
         ]);

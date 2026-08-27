@@ -104,7 +104,8 @@ export const getRoomInputTransferTypeConverter =
     }
 
     public toTransferType(value: GetRoomInput): unknown {
-      if (!__nexgenDefinitions.isPlainObject(value)) {
+      const candidate: unknown = value;
+      if (!__nexgenDefinitions.isPlainObject(candidate)) {
         throw __nexgenDefinitions.payloadValidationError([
           { path: "", reason: "expected object" },
         ]);
@@ -169,7 +170,8 @@ export const labelsTransferTypeConverter =
     }
 
     public toTransferType(value: Labels): unknown {
-      if (!__nexgenDefinitions.isPlainObject(value)) {
+      const candidate: unknown = value;
+      if (!__nexgenDefinitions.isPlainObject(candidate)) {
         throw __nexgenDefinitions.payloadValidationError([
           { path: "", reason: "expected object" },
         ]);
@@ -301,7 +303,8 @@ export const messageTransferTypeConverter =
     }
 
     public toTransferType(value: Message): unknown {
-      if (!__nexgenDefinitions.isPlainObject(value)) {
+      const candidate: unknown = value;
+      if (!__nexgenDefinitions.isPlainObject(candidate)) {
         throw __nexgenDefinitions.payloadValidationError([
           { path: "", reason: "expected object" },
         ]);
@@ -484,7 +487,8 @@ export const roomTransferTypeConverter =
     }
 
     public toTransferType(value: Room): unknown {
-      if (!__nexgenDefinitions.isPlainObject(value)) {
+      const candidate: unknown = value;
+      if (!__nexgenDefinitions.isPlainObject(candidate)) {
         throw __nexgenDefinitions.payloadValidationError([
           { path: "", reason: "expected object" },
         ]);
@@ -629,7 +633,8 @@ export const sendMessageInputTransferTypeConverter =
     }
 
     public toTransferType(value: SendMessageInput): unknown {
-      if (!__nexgenDefinitions.isPlainObject(value)) {
+      const candidate: unknown = value;
+      if (!__nexgenDefinitions.isPlainObject(candidate)) {
         throw __nexgenDefinitions.payloadValidationError([
           { path: "", reason: "expected object" },
         ]);
@@ -711,7 +716,8 @@ export const sendMessageOutputTransferTypeConverter =
     }
 
     public toTransferType(value: SendMessageOutput): unknown {
-      if (!__nexgenDefinitions.isPlainObject(value)) {
+      const candidate: unknown = value;
+      if (!__nexgenDefinitions.isPlainObject(candidate)) {
         throw __nexgenDefinitions.payloadValidationError([
           { path: "", reason: "expected object" },
         ]);

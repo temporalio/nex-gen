@@ -12,7 +12,10 @@ use crate::generator::proto::typescript::{
     model_typescript_interface_ref, model_typescript_type_id, typescript_replacement_type_name,
 };
 use crate::generator::render_request_plan;
-use crate::generator::{ExternalModelBackend, GeneratedFiles, GenerationMode, TsDateTimeTypes};
+use crate::generator::{
+    ExternalModelBackend, GeneratedFiles, GenerationMode, TsDateTimeTypes,
+    insert_generated_file_with_origin,
+};
 use crate::language::Language;
 use crate::planning::{
     PlannedFamily, PlannedOperationResourceFieldBinding, PlannedOperationResourceReturn,
@@ -88,16 +91,27 @@ fn generate_tree(
     support: &crate::SupportFiles,
     ts_date_time_types: TsDateTimeTypes,
 ) -> Result<GeneratedFiles> {
-    let mode = crate::nexgen_config::current().mode;
     let mut files = BTreeMap::new();
+    let mut origins = BTreeMap::new();
     let mut warnings = Vec::new();
     let tree_support_files = render_tree_support_files(branch);
-    let has_json_runtime_module = mode != GenerationMode::NativeApi
-        && tree_support_files.contains_key(&PathBuf::from("definitions.ts"));
-    insert_branch_index_file(&mut files, branch, has_json_runtime_module)?;
-    insert_files(&mut files, tree_support_files)?;
+    let has_json_runtime_module = tree_support_files.contains_key(&PathBuf::from("definitions.ts"));
+    insert_branch_index_file(&mut files, &mut origins, branch, has_json_runtime_module)?;
+    insert_files(
+        &mut files,
+        &mut origins,
+        tree_support_files,
+        PathBuf::from("<generated TypeScript JSON runtime>"),
+    )?;
     for node in branch.children.values() {
-        generate_tree_node(node, support, ts_date_time_types, &mut files, &mut warnings)?;
+        generate_tree_node(
+            node,
+            support,
+            ts_date_time_types,
+            &mut files,
+            &mut origins,
+            &mut warnings,
+        )?;
     }
     Ok(GeneratedFiles {
         layout: crate::generator::GeneratedOutputLayout::Directory,
@@ -111,6 +125,7 @@ fn generate_tree_node(
     support: &crate::SupportFiles,
     ts_date_time_types: TsDateTimeTypes,
     files: &mut BTreeMap<PathBuf, String>,
+    origins: &mut BTreeMap<PathBuf, PathBuf>,
     warnings: &mut Vec<String>,
 ) -> Result<()> {
     match node {
@@ -125,14 +140,21 @@ fn generate_tree_node(
                 {
                     contents.push_str("export {};\n");
                 }
-                insert_generated_file(files, prefix.join(path), contents)?;
+                insert_generated_file_with_origin(
+                    files,
+                    origins,
+                    prefix.join(path),
+                    contents,
+                    leaf.source_path.clone(),
+                    "rename one input file or directory so the generated module paths differ",
+                )?;
             }
             Ok(())
         }
         ApiSpecNode::Branch(branch) => {
-            insert_branch_index_file(files, branch, false)?;
+            insert_branch_index_file(files, origins, branch, false)?;
             for node in branch.children.values() {
-                generate_tree_node(node, support, ts_date_time_types, files, warnings)?;
+                generate_tree_node(node, support, ts_date_time_types, files, origins, warnings)?;
             }
             Ok(())
         }
@@ -141,6 +163,7 @@ fn generate_tree_node(
 
 fn insert_branch_index_file(
     files: &mut BTreeMap<PathBuf, String>,
+    origins: &mut BTreeMap<PathBuf, PathBuf>,
     branch: &ApiSpecBranch<PlannedFamily>,
     has_json_runtime_module: bool,
 ) -> Result<()> {
@@ -157,26 +180,34 @@ fn insert_branch_index_file(
         contents.push_str("export { payloadValidationError } from './definitions';\n");
         contents.push_str("export type { Violation } from './definitions';\n");
     }
-    insert_generated_file(files, path, contents)
+    insert_generated_file_with_origin(
+        files,
+        origins,
+        path,
+        contents,
+        PathBuf::from(format!(
+            "<generated TypeScript barrel for module {}>",
+            branch.module_path.as_module_key()
+        )),
+        "rename one input file or directory so a module and barrel do not claim the same path",
+    )
 }
 
 fn insert_files(
     files: &mut BTreeMap<PathBuf, String>,
+    origins: &mut BTreeMap<PathBuf, PathBuf>,
     generated: BTreeMap<PathBuf, String>,
+    origin: PathBuf,
 ) -> Result<()> {
     for (path, contents) in generated {
-        insert_generated_file(files, path, contents)?;
-    }
-    Ok(())
-}
-
-fn insert_generated_file(
-    files: &mut BTreeMap<PathBuf, String>,
-    path: PathBuf,
-    contents: String,
-) -> Result<()> {
-    if files.insert(path.clone(), contents).is_some() {
-        return Err(Error::GeneratedFileConflict { path });
+        insert_generated_file_with_origin(
+            files,
+            origins,
+            path,
+            contents,
+            origin.clone(),
+            "rename the input module that conflicts with the generated TypeScript runtime file",
+        )?;
     }
     Ok(())
 }
@@ -3106,7 +3137,11 @@ fn render_module_files(
     files.insert(
         "index.ts".into(),
         if mode == GenerationMode::NativeApi {
-            render_index_module(services, &model_fragments.type_exported_names)
+            render_index_module(
+                services,
+                &model_fragments.type_exported_names,
+                has_json_runtime_module,
+            )
         } else {
             render_definitions_only_index_module(
                 services,
@@ -3601,6 +3636,7 @@ fn render_support_module(support_source: &str) -> String {
 fn render_index_module(
     services: &[RenderedService<'_>],
     model_type_names: &BTreeSet<String>,
+    has_json_runtime_module: bool,
 ) -> String {
     let mut body = String::new();
     for service in services {
@@ -3660,6 +3696,10 @@ fn render_index_module(
                 .join(", "),
         );
         body.push_str(" } from './models';\n");
+    }
+    if has_json_runtime_module {
+        body.push_str("export { payloadValidationError } from './definitions';\n");
+        body.push_str("export type { Violation } from './definitions';\n");
     }
     render_generated_module(String::new(), body)
 }
