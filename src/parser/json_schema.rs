@@ -298,8 +298,29 @@ fn validate_raw_schema_position(
             )?;
         }
     }
-    // `items` has its own tolerant deserializer so tuple, boolean, and scalar
-    // forms retain the more specific uniform-element diagnostic.
+    if let Some(items) = object.get("items") {
+        let items_context = format!("{context}.items");
+        match items {
+            Value::Object(_) => {
+                validate_raw_schema_position(path, items, &items_context, false)?;
+            }
+            Value::Bool(boolean) => {
+                return reject(format!(
+                    "{items_context}: boolean schema `{boolean}` is not supported for `items`; use one schema object describing the uniform element type"
+                ));
+            }
+            Value::Array(_) => {
+                return reject(format!(
+                    "{items_context}: tuple-valued `items` is not supported; use one schema object describing the uniform element type (or `prefixItems` in a tool that supports tuples)"
+                ));
+            }
+            other => {
+                return reject(format!(
+                    "{items_context}: `items` must be a schema object describing the uniform element type, got {other}"
+                ));
+            }
+        }
+    }
     if let Some(branches) = object.get("oneOf").and_then(Value::as_array) {
         for (index, branch) in branches.iter().enumerate() {
             validate_raw_schema_position(path, branch, &format!("{context}.oneOf[{index}]"), true)?;
@@ -526,10 +547,19 @@ fn expand_json_schema_sources(input_paths: &[PathBuf]) -> Result<Vec<JsonSource>
         collect_local_ref_file_parts(&document, &mut references)?;
         for (file_part, reference, context) in references {
             if Path::new(&file_part).is_absolute() {
+                let target = canonical(Path::new(&file_part));
+                let invocation_remedy = (!target.starts_with(&invocation_root)).then(|| {
+                    format!(
+                        "; the target `{}` is also outside the invocation root `{}`, so widen the invocation to include that ancestor or pass the target as an additional input",
+                        target.display(),
+                        invocation_root.display(),
+                    )
+                });
                 return Err(Error::InvalidJsonSchema {
                     path: path.clone(),
                     reason: format!(
-                        "{context}: absolute-path `$ref` `{reference}` is not supported; use a path relative to the referring schema"
+                        "{context}: absolute-path `$ref` `{reference}` is not supported; use a path relative to the referring schema{}",
+                        invocation_remedy.unwrap_or_default(),
                     ),
                 });
             }
@@ -1149,13 +1179,15 @@ fn parse_json_documents(
         doc_paths: &doc_paths,
         raw_models: &raw_models,
     };
+    let mut ref_fold_annotations = RefFoldAnnotations::new();
     let canonical_paths: Vec<PathBuf> = docs.keys().cloned().collect();
     for canonical_path in &canonical_paths {
         let (path, doc) = docs
             .get_mut(canonical_path)
             .expect("document present for canonical path");
         let path = path.clone();
-        normalize_document(&path, canonical_path, doc, &merge_ctx)?;
+        let annotations = ref_fold_annotations.entry(path.clone()).or_default();
+        normalize_document(&path, canonical_path, doc, &merge_ctx, annotations)?;
     }
 
     for (path, doc) in docs.values() {
@@ -1173,7 +1205,7 @@ fn parse_json_documents(
     // per-model validation above (so a defect inside a shape is reported at the
     // position the user wrote it) and before models are collected, so a hoisted
     // definition is an ordinary model from here on.
-    hoist_inline_object_shapes(language, &mut docs)?;
+    hoist_inline_object_shapes(language, &mut docs, &ref_fold_annotations)?;
 
     let mut models = BTreeMap::<TypeKey, JsonModel>::new();
     for (canonical_path, (path, doc)) in &docs {
@@ -4571,6 +4603,25 @@ fn validate_schema_refs(
             models,
         )?;
     }
+    if let Some(Value::Object(members)) = &schema.additional_properties {
+        let additional: Schema =
+            serde_json::from_value(Value::Object(members.clone())).map_err(|error| {
+                Error::InvalidJsonSchema {
+                    path: path.to_path_buf(),
+                    reason: format!(
+                        "{context}.additionalProperties is not a valid schema object: {error}"
+                    ),
+                }
+            })?;
+        validate_schema_refs(
+            path,
+            canonical_path,
+            &additional,
+            &format!("{context}.additionalProperties"),
+            docs,
+            models,
+        )?;
+    }
     if let Some(one_of) = &schema.one_of {
         for branch in one_of {
             validate_schema_refs(
@@ -4882,8 +4933,10 @@ fn is_inline_object_shape(schema: &Schema) -> bool {
 fn hoist_inline_object_shapes(
     language: Language,
     docs: &mut IndexMap<PathBuf, (PathBuf, Document)>,
+    ref_fold_annotations: &RefFoldAnnotations,
 ) -> Result<()> {
     for (path, doc) in docs.values_mut() {
+        let document_ref_folds = ref_fold_annotations.get(path);
         // Definitions inserted by this pass remain in `doc.defs` on later
         // fixpoint iterations. Keep their authored origins separately so a
         // collision with another synthesized shape does not falsely claim the
@@ -4953,17 +5006,32 @@ fn hoist_inline_object_shapes(
             } in hoisted
             {
                 if root_model.as_deref() == Some(name.as_str()) {
+                    let remedy = annotated_ref_collision_remedy(
+                        document_ref_folds,
+                        &[origin.as_str()],
+                    )
+                    .map(|remedy| {
+                        format!(
+                            "{remedy}, or rename the file so the root schema derives a different name"
+                        )
+                    })
+                    .unwrap_or_else(|| {
+                        format!(
+                            "name the inline shape with an `{}` override where it takes one (a `oneOf` branch, an array element, a map member), move it into `$defs` under a name of your own and `$ref` it, or rename the file so the root schema derives a different name",
+                            lang_name_keyword(language).unwrap_or("x-<lang>-name"),
+                        )
+                    });
                     return Err(Error::InvalidJsonSchema {
                         path: path.to_path_buf(),
                         reason: format!(
-                            "the name `{name}` synthesized for the inline shape at `{origin}` is the type name the root schema derives from the file name `{}`; the two are different schemas that would emit one type. Name the inline shape with an `{}` override where it takes one (a `oneOf` branch, an array element, a map member), move it into `$defs` under a name of your own and `$ref` it, or rename the file so the root schema derives a different name (P15 — the generator never auto-mangles)",
+                            "the name `{name}` synthesized for the inline shape at `{origin}` is the type name the root schema derives from the file name `{}`; the two are different schemas that would emit one type. {remedy} (P15 — the generator never auto-mangles)",
                             root_file_name(path),
-                            lang_name_keyword(language).unwrap_or("x-<lang>-name"),
                         ),
                     });
                 }
                 if defs.contains_key(&name) {
-                    let detail = synthesized_origins.get(&name).map_or_else(
+                    let previous_origin = synthesized_origins.get(&name);
+                    let detail = previous_origin.map_or_else(
                         || format!("is already declared in `$defs`"),
                         |previous_origin| {
                             format!(
@@ -4971,11 +5039,26 @@ fn hoist_inline_object_shapes(
                             )
                         },
                     );
+                    let mut origins = vec![origin.as_str()];
+                    if let Some(previous_origin) = previous_origin {
+                        origins.push(previous_origin.as_str());
+                    }
+                    let remedy = annotated_ref_collision_remedy(document_ref_folds, &origins)
+                        .map(|remedy| {
+                            format!(
+                                "{remedy}, or rename the conflicting `$defs` declaration"
+                            )
+                        })
+                        .unwrap_or_else(|| {
+                            format!(
+                                "rename either one, name the inline shape with an `{}` override where it takes one (a `oneOf` branch, an array element, a map member), or move it into `$defs` under a distinct name and `$ref` it",
+                                lang_name_keyword(language).unwrap_or("x-<lang>-name"),
+                            )
+                        });
                     return Err(Error::InvalidJsonSchema {
                         path: path.to_path_buf(),
                         reason: format!(
-                            "the name `{name}` synthesized for the inline shape at `{origin}` {detail}; rename either one, name the inline shape with an `{}` override where it takes one (a `oneOf` branch, an array element, a map member), or move it into `$defs` under a distinct name and `$ref` it (P15 — the generator never auto-mangles)",
-                            lang_name_keyword(language).unwrap_or("x-<lang>-name"),
+                            "the name `{name}` synthesized for the inline shape at `{origin}` {detail}; {remedy} (P15 — the generator never auto-mangles)",
                         ),
                     });
                 }
@@ -4985,6 +5068,30 @@ fn hoist_inline_object_shapes(
         }
     }
     Ok(())
+}
+
+fn annotated_ref_collision_remedy(
+    annotations: Option<&BTreeMap<String, Vec<String>>>,
+    origins: &[&str],
+) -> Option<String> {
+    let (origin, keywords) = origins.iter().find_map(|origin| {
+        annotations?
+            .get(*origin)
+            .map(|keywords| (*origin, keywords))
+    })?;
+    let keywords = keywords
+        .iter()
+        .map(|keyword| format!("`{keyword}`"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let noun = if keywords.contains(',') {
+        "annotations"
+    } else {
+        "annotation"
+    };
+    Some(format!(
+        "the `$ref` at `{origin}` was materialized under this position-derived name because it carries the {keywords} {noun}; remove the {noun} from that use site so it remains a reference, or relocate the {noun} to the referenced declaration"
+    ))
 }
 
 /// One inline shape queued for insertion into `$defs` by
@@ -6103,6 +6210,12 @@ struct MergeCtx<'a> {
     raw_models: &'a BTreeMap<TypeKey, Schema>,
 }
 
+/// Annotation siblings that caused a `$ref` use site to materialize into a
+/// position-named declaration. Normalization removes the reference itself, so
+/// the authored cause has to travel separately until hoist collision checking
+/// can offer a remedy that is still applicable at that use site.
+type RefFoldAnnotations = BTreeMap<PathBuf, BTreeMap<String, Vec<String>>>;
+
 /// Snapshots every named model schema (each `$defs` entry and each schema-shaped
 /// document root) as a raw, pre-merge [`Schema`], keyed by [`TypeKey`]. This is
 /// the map the `allOf`/`$ref`-sibling fold resolves a branch `$ref` against so it
@@ -6213,6 +6326,7 @@ fn normalize_document(
     canonical_path: &Path,
     doc: &mut Document,
     ctx: &MergeCtx,
+    ref_fold_annotations: &mut BTreeMap<String, Vec<String>>,
 ) -> Result<()> {
     if let Some(defs) = &mut doc.defs {
         for (name, schema) in defs.iter_mut() {
@@ -6231,6 +6345,7 @@ fn normalize_document(
                 ctx,
                 &mut cycle,
                 &format!("$defs.{name}"),
+                ref_fold_annotations,
             )?;
         }
     }
@@ -6243,6 +6358,7 @@ fn normalize_document(
             ctx,
             &mut cycle,
             "root schema",
+            ref_fold_annotations,
         )?;
     }
     if let Some(services) = &mut doc.services {
@@ -6257,6 +6373,7 @@ fn normalize_document(
                         ctx,
                         &mut cycle,
                         &format!("services.{service_name}.operations.{operation_name}.input"),
+                        ref_fold_annotations,
                     )?;
                 }
                 if let Some(output) = &mut operation.output {
@@ -6268,6 +6385,7 @@ fn normalize_document(
                         ctx,
                         &mut cycle,
                         &format!("services.{service_name}.operations.{operation_name}.output"),
+                        ref_fold_annotations,
                     )?;
                 }
             }
@@ -6289,6 +6407,7 @@ fn normalize_schema(
     ctx: &MergeCtx,
     cycle: &mut Vec<TypeKey>,
     context: &str,
+    ref_fold_annotations: &mut BTreeMap<String, Vec<String>>,
 ) -> Result<Schema> {
     let has_all_of = schema.extra.contains_key("allOf");
     // An `x-<lang>-name` beside a `$ref` names the *member* and asserts nothing
@@ -6296,6 +6415,13 @@ fn normalize_schema(
     // referenced target into the use site instead of referencing it.
     let ref_with_siblings =
         schema.reference.is_some() && !schema.is_ref_with_non_conjunct_siblings_only();
+
+    if ref_with_siblings {
+        let annotations = ref_fold_annotation_keywords(schema);
+        if !annotations.is_empty() {
+            ref_fold_annotations.insert(context.to_string(), annotations);
+        }
+    }
 
     if has_all_of || ref_with_siblings {
         if has_all_of {
@@ -6349,12 +6475,42 @@ fn normalize_schema(
                 cycle.push(key);
             }
         }
-        let normalized = normalize_children(path, canonical_path, merged, ctx, cycle, context);
+        let normalized = normalize_children(
+            path,
+            canonical_path,
+            merged,
+            ctx,
+            cycle,
+            context,
+            ref_fold_annotations,
+        );
         cycle.truncate(stack_len);
         return normalized;
     }
 
-    normalize_children(path, canonical_path, schema.clone(), ctx, cycle, context)
+    normalize_children(
+        path,
+        canonical_path,
+        schema.clone(),
+        ctx,
+        cycle,
+        context,
+        ref_fold_annotations,
+    )
+}
+
+fn ref_fold_annotation_keywords(schema: &Schema) -> Vec<String> {
+    let mut annotations = Vec::new();
+    if schema.title.is_some() {
+        annotations.push("title".to_string());
+    }
+    if schema.description.is_some() {
+        annotations.push("description".to_string());
+    }
+    if schema.extra.contains_key("default") {
+        annotations.push("default".to_string());
+    }
+    annotations
 }
 
 /// Recursively normalizes a schema's child schemas (leaving its own keywords
@@ -6366,6 +6522,7 @@ fn normalize_children(
     ctx: &MergeCtx,
     cycle: &mut Vec<TypeKey>,
     context: &str,
+    ref_fold_annotations: &mut BTreeMap<String, Vec<String>>,
 ) -> Result<Schema> {
     if let Some(properties) = schema.properties.take() {
         let mut normalized = IndexMap::new();
@@ -6377,6 +6534,7 @@ fn normalize_children(
                 ctx,
                 cycle,
                 &format!("{context}.properties.{name}"),
+                ref_fold_annotations,
             )?;
             normalized.insert(name, normalized_property);
         }
@@ -6390,6 +6548,7 @@ fn normalize_children(
             ctx,
             cycle,
             &format!("{context}.items"),
+            ref_fold_annotations,
         )?));
     }
     if let Some(one_of) = schema.one_of.take() {
@@ -6402,6 +6561,7 @@ fn normalize_children(
                 ctx,
                 cycle,
                 &format!("{context}.oneOf"),
+                ref_fold_annotations,
             )?);
         }
         schema.one_of = Some(normalized);
@@ -6423,6 +6583,7 @@ fn normalize_children(
             ctx,
             cycle,
             &format!("{context}.additionalProperties"),
+            ref_fold_annotations,
         )?;
         schema.additional_properties =
             Some(serde_json::to_value(&normalized).map_err(|error| {
@@ -6450,6 +6611,7 @@ fn normalize_children(
                     ctx,
                     cycle,
                     &format!("{context}.$defs.{name}"),
+                    ref_fold_annotations,
                 )?,
             );
         }
@@ -6480,6 +6642,7 @@ fn normalize_children(
                 ctx,
                 cycle,
                 &format!("{context}.{keyword}"),
+                ref_fold_annotations,
             )?;
             schema.extra.insert(
                 keyword.to_string(),
@@ -12339,6 +12502,34 @@ $defs:
     }
 
     #[test]
+    fn validates_refs_inside_schema_valued_additional_properties() {
+        for (reference, expected) in [
+            ("#/$defs/Missing", "declares no `$defs.Missing` entry"),
+            ("#/$defs/bad~2name", "invalid RFC 6901 escape `~2`"),
+        ] {
+            let error = doc_reject(&format!(
+                "$schema: https://json-schema.org/draft/2020-12/schema\ntype: object\nadditionalProperties: {{ $ref: {reference:?} }}"
+            ));
+            assert!(
+                error.contains("Api.additionalProperties") && error.contains(expected),
+                "{reference}: {error}"
+            );
+        }
+
+        parse(
+            r##"
+$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+additionalProperties: { $ref: "#/$defs/Value" }
+$defs:
+  Value:
+    type: object
+    properties: { text: { type: string } }
+"##,
+        );
+    }
+
+    #[test]
     fn ref_pointer_rejections_name_the_schema_position_and_remedy() {
         for (reference, detail, remedy) in [
             (
@@ -13916,6 +14107,63 @@ properties:
     }
 
     #[test]
+    fn annotated_ref_hoist_collision_offers_an_applicable_annotation_remedy() {
+        let input = r##"
+$schema: https://json-schema.org/draft/2020-12/schema
+$defs:
+  Target:
+    type: object
+    properties: { value: { type: string } }
+  User:
+    type: object
+    properties:
+      profile:
+        $ref: "#/$defs/Target"
+        description: use-site documentation
+        x-ts-name: renamedMember
+  UserProfile:
+    type: object
+    properties: { other: { type: string } }
+"##;
+        let error = reject_for(Language::TypeScript, input);
+        assert!(
+            error.contains("$defs.User.properties.profile")
+                && error.contains("position-derived name")
+                && error.contains("`description` annotation")
+                && error.contains("remove the annotation")
+                && error.contains("relocate the annotation to the referenced declaration")
+                && !error.contains("name the inline shape with an `x-ts-name` override"),
+            "{error}"
+        );
+
+        let title_input = input.replace(
+            "description: use-site documentation",
+            "title: Use-site documentation",
+        );
+        let title_error = reject_for(Language::TypeScript, &title_input);
+        assert!(
+            title_error.contains("`title` annotation")
+                && title_error.contains("remove the annotation")
+                && title_error.contains("relocate the annotation"),
+            "{title_error}"
+        );
+
+        let corrected = input.replace(
+            "        description: use-site documentation\n        x-ts-name: renamedMember",
+            "        x-ts-name: renamedMember",
+        );
+        parse_for(Language::TypeScript, &corrected)
+            .expect("removing the use-site annotation keeps the node as a reference");
+
+        let relocated = corrected.replace(
+            "  Target:\n    type: object",
+            "  Target:\n    description: declaration documentation\n    type: object",
+        );
+        parse_for(Language::TypeScript, &relocated)
+            .expect("relocating the annotation to the target also resolves the hoist collision");
+    }
+
+    #[test]
     fn hoists_inline_union_inside_items() {
         // The element union is named `<Model><Property>Item` and moved into
         // `$defs`; its own inline object branch is then named in turn, so the
@@ -14425,6 +14673,46 @@ services:
                 && operation.contains("explicit `type`"),
             "{operation}"
         );
+    }
+
+    #[test]
+    fn rejects_boolean_and_tuple_items_with_nested_breadcrumbs() {
+        for (schema, context, detail, remedy) in [
+            (
+                "type: array\nitems: true",
+                "root schema.items",
+                "boolean schema `true`",
+                "uniform element type",
+            ),
+            (
+                "type: object\nproperties:\n  values:\n    type: array\n    items: false",
+                "root schema.properties.values.items",
+                "boolean schema `false`",
+                "uniform element type",
+            ),
+            (
+                "type: array\nitems:\n  type: object\n  properties:\n    bad: true",
+                "root schema.items.properties.bad",
+                "boolean schema `true`",
+                "explicit `type`",
+            ),
+            (
+                "type: array\nitems:\n  type: array\n  items: [{ type: string }]",
+                "root schema.items.items",
+                "tuple-valued `items`",
+                "uniform element type",
+            ),
+        ] {
+            let error = doc_reject(&format!(
+                "$schema: https://json-schema.org/draft/2020-12/schema\n{schema}"
+            ));
+            assert!(
+                error.contains(context) && error.contains(detail) && error.contains(remedy),
+                "{schema}: {error}"
+            );
+        }
+
+        parse("type: object\nproperties:\n  values:\n    type: array\n    items: { type: string }");
     }
 
     #[test]
@@ -16841,7 +17129,9 @@ properties:
     fn rejects_tuple_items() {
         let error = numeric_reject("type: array\nitems: [ { type: string } ]");
         assert!(
-            error.contains("tuple-valued `items`") && error.contains("uniform element type"),
+            error.contains("properties.value.items")
+                && error.contains("tuple-valued `items`")
+                && error.contains("uniform element type"),
             "{error}"
         );
     }
@@ -16860,7 +17150,8 @@ properties:
     fn rejects_boolean_items_with_uniform_element_fix() {
         let error = numeric_reject("type: array\nitems: true");
         assert!(
-            error.contains("boolean `items` schemas are not supported")
+            error.contains("properties.value.items")
+                && error.contains("boolean schema `true` is not supported for `items`")
                 && error.contains("uniform element type"),
             "{error}"
         );
@@ -18138,7 +18429,14 @@ properties:
         let error = expand_json_schema_sources(std::slice::from_ref(&absolute))
             .unwrap_err()
             .to_string();
-        assert!(error.contains("absolute-path `$ref`"), "{error}");
+        assert!(
+            error.contains("absolute-path `$ref`")
+                && error.contains("use a path relative")
+                && error.contains("outside the invocation root")
+                && error.contains("widen the invocation")
+                && error.contains("additional input"),
+            "{error}"
+        );
 
         let escape_root = temp.path().join("escape-root");
         fs::create_dir_all(&escape_root).unwrap();
