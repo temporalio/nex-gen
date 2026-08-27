@@ -729,11 +729,33 @@ $defs:
       label: { type: string }
   Event:
     type: object
-    required: [authored, timestamp]
+    required: [authored, timestamp, nullableCollection, nullableElement]
     properties:
       authored: { $ref: "#/$defs/DateTime" }
       timestamp: { type: string, format: date-time }
       optionalTimestamp: { type: string, format: date-time }
+      optionalCollection:
+        type: array
+        items: { type: string, format: date-time }
+      nullableCollection:
+        oneOf:
+          - type: array
+            items: { type: string, format: date-time }
+          - { type: "null" }
+      nullableElement:
+        type: array
+        items:
+          oneOf:
+            - { type: string, format: date-time }
+            - { type: "null" }
+      bothCombined:
+        oneOf:
+          - type: array
+            items:
+              oneOf:
+                - { type: string, format: date-time }
+                - { type: "null" }
+          - { type: "null" }
 "##,
     )
     .unwrap();
@@ -760,6 +782,14 @@ $defs:
         event.contains("TemporalSupport.@Nullable DateTime optionalTimestamp"),
         "{event}"
     );
+    for declaration in [
+        "@Nullable List<TemporalSupport.DateTime> optionalCollection",
+        "@Nullable List<TemporalSupport.DateTime> nullableCollection",
+        "List<TemporalSupport.@Nullable DateTime> nullableElement",
+        "@Nullable List<TemporalSupport.@Nullable DateTime> bothCombined",
+    ] {
+        assert!(event.contains(declaration), "{declaration}\n{event}");
+    }
     assert!(event.contains("DateTime authored"), "{event}");
     assert!(!event.contains("import example.shadow.TemporalSupport.DateTime;"));
 
@@ -770,6 +800,8 @@ $defs:
         r#"package example.shadow;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
 final class DateTimeTypeIdentityTest {
@@ -777,6 +809,23 @@ final class DateTimeTypeIdentityTest {
     void authoredAndTemporalDateTimesRemainDistinct() throws Exception {
         assertEquals(DateTime.class, Event.class.getMethod("getAuthored").getReturnType());
         assertEquals(TemporalSupport.DateTime.class, Event.class.getMethod("getTimestamp").getReturnType());
+    }
+
+    @Test
+    void collectionAndElementNullabilityRemainIndependent() throws Exception {
+        ObjectMapper mapper = new ObjectMapper();
+        Event event = mapper.readValue(
+            "{\"authored\":{},\"timestamp\":\"2024-01-02T03:04:05Z\"," +
+            "\"nullableCollection\":null," +
+            "\"nullableElement\":[null,\"2024-01-02T03:04:05Z\"]," +
+            "\"bothCombined\":[null]}",
+            Event.class);
+        assertNull(event.getOptionalCollection());
+        assertNull(event.getNullableCollection());
+        assertNull(event.getNullableElement().get(0));
+        assertNull(event.getBothCombined().get(0));
+        assertEquals(2, mapper.readValue(mapper.writeValueAsString(event), Event.class)
+            .getNullableElement().size());
     }
 }
 "#,
