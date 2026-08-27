@@ -2948,11 +2948,7 @@ type: object
 required: [content-type]
 properties:
   content-type: { type: string }
-  toString: { type: string }
-  valueOf: { type: string }
 additionalProperties: true
-dependentRequired:
-  toString: [valueOf]
 "#,
     )
     .unwrap();
@@ -2971,7 +2967,7 @@ dependentRequired:
     .unwrap();
 
     let models = fs::read_to_string(output_path.join("models.ts")).unwrap();
-    assert!(models.contains("export type WireKeys = {"), "{models}");
+    assert!(models.contains("export interface WireKeys {"), "{models}");
     assert!(
         models.contains("Object.prototype.hasOwnProperty.call(raw, \"content-type\")"),
         "{models}"
