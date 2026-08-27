@@ -19,6 +19,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- JSON Schema load errors now retain schema-position breadcrumbs and actionable
+  remedies for malformed or unresolved `$ref` pointers, unsupported boolean
+  subschemas, empty member names, and duplicate scalar `oneOf` branches.
+- JSON Schema reference discovery now ignores `$ref`-shaped annotation data,
+  rejects `$defs` outside model positions and references outside the invocation
+  root, and keeps `$comment`, `examples`, and `deprecated` siblings as inert
+  member annotations instead of materializing a new type.
 - JSON Schema object-count satisfiability checks now reject a
   `minProperties` floor above a finite `propertyNames` key space and a
   `maxProperties` cap below the union of always-required keys and a
