@@ -1821,7 +1821,7 @@ fn render_external_models(
 
     render_ts_inline_union_serializers(&mut output, json_models)?;
 
-    for model in json_models {
+    for model in converter_dependency_order(json_models)? {
         output.push('\n');
         render_model_transfer_type_converter(&mut output, model, json_models)?;
     }
@@ -1838,6 +1838,52 @@ fn render_external_models(
             .map(|model| ts_transfer_type_converter_name(&model.model_name))
             .collect(),
     })
+}
+
+/// Orders converter value declarations by same-module bare-alias dependencies.
+///
+/// Type aliases themselves are hoisted by TypeScript, but the companion
+/// converters are `const` values: `aConverter = zConverter` executes at module
+/// initialization and cannot precede `zConverter`. Cross-module targets are
+/// imports and therefore already initialized; ordinary models have no ordering
+/// dependency here. The parser rejects alias cycles, while the defensive error
+/// below keeps a malformed planned graph from becoming a TDZ at runtime.
+fn converter_dependency_order<'a>(
+    models: &[&'a PlannedJsonType],
+) -> Result<Vec<&'a PlannedJsonType>> {
+    let local_names = models
+        .iter()
+        .map(|model| model.model_name.as_str())
+        .collect::<BTreeSet<_>>();
+    let mut emitted = BTreeSet::<String>::new();
+    let mut pending = models.to_vec();
+    let mut ordered = Vec::with_capacity(models.len());
+
+    while !pending.is_empty() {
+        let Some(index) = pending.iter().position(|model| {
+            let Some(reference) = bare_ref_target(model) else {
+                return true;
+            };
+            let target = reference_model_name(reference);
+            !local_names.contains(target.as_str()) || emitted.contains(&target)
+        }) else {
+            return Err(Error::InvalidJsonSchema {
+                path: PathBuf::from("<json-generator>"),
+                reason: format!(
+                    "bare-`$ref` alias converter cycle among {}; break the alias cycle by making one declaration a concrete schema",
+                    pending
+                        .iter()
+                        .map(|model| model.model_name.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ),
+            });
+        };
+        let model = pending.remove(index);
+        emitted.insert(model.model_name.clone());
+        ordered.push(model);
+    }
+    Ok(ordered)
 }
 
 /// The namespace under which every generated `models.ts` imports its sibling

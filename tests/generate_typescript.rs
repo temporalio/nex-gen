@@ -1728,6 +1728,130 @@ describe("bare-ref alias", () => {
     fs::remove_dir_all(temp_dir).unwrap();
 }
 
+#[test]
+fn typescript_json_same_module_alias_chain_orders_converter_values() {
+    let temp_dir = unique_typescript_runtime_path("ts-json-same-module-alias-chain");
+    fs::create_dir_all(&temp_dir).unwrap();
+    let input_path = temp_dir.join("chain.yaml");
+    fs::write(
+        &input_path,
+        r##"$schema: https://json-schema.org/draft/2020-12/schema
+title: Chain
+type: object
+additionalProperties: false
+required: [item, longItem]
+properties:
+  item: { $ref: "#/$defs/A" }
+  longItem: { $ref: "#/$defs/LongA" }
+$defs:
+  A: { $ref: "#/$defs/Z" }
+  Z: { $ref: "#/$defs/Target" }
+  LongA: { $ref: "#/$defs/LongM" }
+  LongM: { $ref: "#/$defs/LongZ" }
+  LongZ: { $ref: "#/$defs/Target" }
+  Target:
+    type: object
+    additionalProperties: false
+    required: [value]
+    properties:
+      value: { type: string }
+"##,
+    )
+    .unwrap();
+    let output_path = temp_dir.join("output");
+    generate_to_file(&GenerateRequest {
+        language: nexgen::language::Language::TypeScript,
+        input_paths: vec![input_path],
+        support_paths: Vec::new(),
+        descriptor_paths: Vec::new(),
+        output_path: output_path.clone(),
+        format: false,
+        generate_native_api: false,
+        java_package_name: None,
+        ts_date_time_types: Default::default(),
+    })
+    .unwrap();
+
+    let models = fs::read_to_string(output_path.join("models.ts")).unwrap();
+    let target = models
+        .find("export const targetTransferTypeConverter")
+        .expect("target converter");
+    let z = models
+        .find("export const zTransferTypeConverter")
+        .expect("Z converter");
+    let a = models
+        .find("export const aTransferTypeConverter")
+        .expect("A converter");
+    assert!(target < z && z < a, "{models}");
+    let long_z = models
+        .find("export const longZTransferTypeConverter")
+        .expect("LongZ converter");
+    let long_m = models
+        .find("export const longMTransferTypeConverter")
+        .expect("LongM converter");
+    let long_a = models
+        .find("export const longATransferTypeConverter")
+        .expect("LongA converter");
+    assert!(
+        target < long_z && long_z < long_m && long_m < long_a,
+        "{models}"
+    );
+
+    let runtime = output_path.join("alias-chain.test.ts");
+    fs::write(
+        &runtime,
+        r#"import { expect, test } from "vitest";
+import { aTransferTypeConverter, longATransferTypeConverter } from "./models";
+
+test("same-module alias chains delegate after initialization", () => {
+  expect(aTransferTypeConverter.fromTransferType({ value: "ok" })).toEqual({ value: "ok" });
+  expect(() => aTransferTypeConverter.fromTransferType({})).toThrow();
+  expect(longATransferTypeConverter.fromTransferType({ value: "long" })).toEqual({ value: "long" });
+});
+"#,
+    )
+    .unwrap();
+    typecheck_generated_typescript(&output_path, "same-module bare-ref alias chain");
+    run_generated_typescript_test(&temp_dir, &runtime, "same-module bare-ref alias chain");
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+#[test]
+fn typescript_json_bare_ref_alias_cycle_rejects_without_ordering_loop() {
+    let temp_dir = unique_output_path("ts-json-bare-ref-alias-cycle");
+    fs::create_dir_all(&temp_dir).unwrap();
+    let input_path = temp_dir.join("cycle.yaml");
+    fs::write(
+        &input_path,
+        r##"$schema: https://json-schema.org/draft/2020-12/schema
+title: Cycle
+$ref: "#/$defs/A"
+$defs:
+  A: { $ref: "#/$defs/Z" }
+  Z: { $ref: "#/$defs/A" }
+"##,
+    )
+    .unwrap();
+    let error = generate_to_file(&GenerateRequest {
+        language: nexgen::language::Language::TypeScript,
+        input_paths: vec![input_path],
+        support_paths: Vec::new(),
+        descriptor_paths: Vec::new(),
+        output_path: temp_dir.join("output"),
+        format: false,
+        generate_native_api: false,
+        java_package_name: None,
+        ts_date_time_types: Default::default(),
+    })
+    .expect_err("alias cycle must reject");
+    let message = error.to_string();
+    assert!(
+        message.contains("cycle") || message.contains("recursion"),
+        "{message}"
+    );
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
 /// A name synthesized from a member follows that member's `x-ts-name`: the
 /// `DEFAULT_<FIELD>` constant is built from the emitted identifier, not the JSON
 /// key. A shape named after its *position* does not move — the hoisted inline
