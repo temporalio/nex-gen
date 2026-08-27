@@ -1762,6 +1762,39 @@ fn go_rejects_reserved_generated_name_collision() {
     fs::remove_dir_all(temp_dir).unwrap();
 }
 
+#[test]
+fn go_rejects_single_input_output_named_definitions_with_a_remedy() {
+    let temp_dir = unique_output_path("go-json-output-name-collision");
+    fs::create_dir_all(&temp_dir).unwrap();
+    let input_path = temp_dir.join("other.json");
+    fs::write(
+        &input_path,
+        r#"{"type":"object","properties":{"id":{"type":"string"}}}"#,
+    )
+    .unwrap();
+
+    let error = generate_to_file(&GenerateRequest {
+        language: nexgen::language::Language::Go,
+        input_paths: vec![input_path.clone()],
+        support_paths: Vec::new(),
+        descriptor_paths: Vec::new(),
+        output_path: temp_dir.join("definitions"),
+        format: false,
+        generate_native_api: false,
+        java_package_name: None,
+        ts_date_time_types: Default::default(),
+    })
+    .expect_err("the model file must not overwrite the generated runtime")
+    .to_string();
+
+    assert!(error.contains("definitions.go"), "{error}");
+    assert!(error.contains("other.json"), "{error}");
+    assert!(error.contains("generated Go validation runtime"), "{error}");
+    assert!(error.contains("--output"), "{error}");
+    assert!(error.contains("not `definitions`"), "{error}");
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
 fn go_json_output_path(root: &Path, mode: &str, example_id: &str) -> PathBuf {
     // Definitions are the beginner-facing samples (samples/go/<pkg>); native-api
     // output is snapshot-only under the advanced project.

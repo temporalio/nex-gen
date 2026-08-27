@@ -115,6 +115,11 @@ All output lands at the package root (no per-input subdirectory, no
 | **Go** | one `<package>.go` (types and services) + the shared `definitions.go` |
 | **Java** | one `.java` per public class + the runtime classes and root `package-info.java`; nothing to aggregate |
 
+Go derives `<package>` from the `--output` directory basename. Because that
+model file shares the directory with `definitions.go`, a single-input output
+directory named `definitions` is rejected with both claimants and the remedy to
+choose a differently named output directory.
+
 For Java, in both layouts, the package root is the required `--package-name`.
 Its final dot-separated segment must match the output directory name. A
 `package-info.java` carrying `@NullMarked` is emitted for each package that
