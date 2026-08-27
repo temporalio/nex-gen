@@ -27,6 +27,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- JSON Schema descriptions now reject source-breaking control characters,
+  neutralize Go build/tool directives in generated comments, and escape Java
+  backslashes from Unicode-escape preprocessing.
 - Python JSON Schema packages now derive imports of models moved into
   `_recursive.py` from planned reference edges. Generated imports no longer
   depend on a type name appearing in rendered source text or documentation.

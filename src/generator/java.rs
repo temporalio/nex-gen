@@ -412,7 +412,8 @@ fn push_wrapped_java_doc_line(
         .replace('&', "&amp;")
         .replace('<', "&lt;")
         .replace('>', "&gt;")
-        .replace("*/", "* /");
+        .replace("*/", "* /")
+        .replace('\\', "&#92;");
     let mut prefix = first_prefix;
     let mut current = String::new();
     for word in escaped.split_whitespace() {

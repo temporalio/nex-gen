@@ -1382,6 +1382,16 @@ fn validate_raw_document_grammar(path: &Path, doc: &Document) -> Result<()> {
                     "service `{service_name}`: `description` must not be empty or whitespace-only"
                 ));
             }
+            if let Some(control) = service.description.as_deref().and_then(|description| {
+                description
+                    .chars()
+                    .find(|character| *character < ' ' && !matches!(character, '\n' | '\t'))
+            }) {
+                return reject(format!(
+                    "service `{service_name}`: `description` must not contain control character U+{:04X}",
+                    control as u32
+                ));
+            }
 
             for (operation_name, operation) in &service.operations {
                 for (keyword, value) in &operation.extra {
@@ -1407,6 +1417,16 @@ fn validate_raw_document_grammar(path: &Path, doc: &Document) -> Result<()> {
                 {
                     return reject(format!(
                         "operation `{operation_name}`: `description` must not be empty or whitespace-only"
+                    ));
+                }
+                if let Some(control) = operation.description.as_deref().and_then(|description| {
+                    description
+                        .chars()
+                        .find(|character| *character < ' ' && !matches!(character, '\n' | '\t'))
+                }) {
+                    return reject(format!(
+                        "operation `{operation_name}`: `description` must not contain control character U+{:04X}",
+                        control as u32
                     ));
                 }
                 for (label, schema) in [
@@ -3178,12 +3198,21 @@ fn validate_annotations(path: &Path, schema: &Schema, context: &str) -> Result<(
     // `description` — the doc body; may span paragraphs, but an empty or
     // whitespace-only string renders a dead doc body (see
     // `specs/json-schema/features/description.md`).
-    if let Some(description) = &schema.description
-        && description.trim().is_empty()
-    {
-        return reject(format!(
-            "{context}: `description` must not be empty or whitespace-only; drop it, or give it text"
-        ));
+    if let Some(description) = &schema.description {
+        if description.trim().is_empty() {
+            return reject(format!(
+                "{context}: `description` must not be empty or whitespace-only; drop it, or give it text"
+            ));
+        }
+        if let Some(control) = description
+            .chars()
+            .find(|character| *character < ' ' && !matches!(character, '\n' | '\t'))
+        {
+            return reject(format!(
+                "{context}: `description` must not contain control character U+{:04X}; remove it or replace it with printable prose",
+                control as u32
+            ));
+        }
     }
     // `deprecated` — the spec's own MUST: boolean. `false` is accepted and inert.
     if let Some(value) = schema.extra.get("deprecated")
@@ -15615,6 +15644,27 @@ properties:
     fn rejects_whitespace_description() {
         let error = numeric_reject("type: string\ndescription: \"   \"");
         assert!(error.contains("`description` must not be empty"), "{error}");
+    }
+
+    #[test]
+    fn rejects_control_characters_in_descriptions() {
+        let schema = doc_reject(
+            "$schema: https://json-schema.org/draft/2020-12/schema\ntype: string\ndescription: \"bad \\0 prose\"",
+        );
+        assert!(schema.contains("control character U+0000"), "{schema}");
+
+        let service = doc_reject(
+            "nexusrpc: \"1.0.0\"\nservices:\n  Chat:\n    description: \"bad \\x01 prose\"\n    operations:\n      send:\n        input: { type: object, properties: {} }",
+        );
+        assert!(service.contains("control character U+0001"), "{service}");
+
+        let operation = doc_reject(
+            "nexusrpc: \"1.0.0\"\nservices:\n  Chat:\n    operations:\n      send:\n        description: \"bad \\x02 prose\"\n        input: { type: object, properties: {} }",
+        );
+        assert!(
+            operation.contains("control character U+0002"),
+            "{operation}"
+        );
     }
 
     // --- operation I/O must resolve to an object (require_object_io) ---
