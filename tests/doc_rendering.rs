@@ -22,6 +22,8 @@ services:
 
       +build ignore
 
+      +builder is ordinary prose
+
       go:generate hostile-tool
     operations:
       run:
@@ -181,6 +183,8 @@ fn go_hostile_documentation_is_wrapped_and_syntax_safe() {
     assert!(rendered.contains("\t//\n\t// Deprecated: This field is deprecated."));
     assert!(rendered.contains("// Service second paragraph."));
     assert!(rendered.contains("// \\+build ignore"));
+    assert!(rendered.contains("// +builder is ordinary prose"));
+    assert!(!rendered.contains("// \\+builder"));
     assert!(rendered.contains("// go\\:generate hostile-tool"));
     assert!(rendered.contains("\t// Operation second paragraph."));
     assert_hostile_comment_lines_fit(&rendered);
