@@ -953,6 +953,14 @@ fn parse_json_documents(
 
     let mut docs = IndexMap::new();
     for (path, input) in sources {
+        if let Some(literal) = crate::json_schema::yaml_lex::fractional_integer_literal(&input) {
+            return Err(Error::InvalidJsonSchema {
+                path,
+                reason: format!(
+                    "{literal} is incompatible with `type: integer`: the written fractional part must be zero"
+                ),
+            });
+        }
         let doc =
             serde_yaml::from_str::<Document>(&input).map_err(|error| Error::JsonSchemaParse {
                 path: path.clone(),
@@ -2552,32 +2560,18 @@ fn validate_numeric_constraints(path: &Path, schema: &Schema, context: &str) -> 
         }
     }
 
-    // Range + `multipleOf`: reject when no multiple lies in the range. Not
-    // gated on `is_integer` — `multipleOf` restricts a `number` to the same
-    // discrete lattice, so `{type: number, minimum: 1, maximum: 2,
-    // multipleOf: 5}` is exactly as empty as its integer twin.
+    // Range + `multipleOf`: reject when no runtime-representable binary64
+    // multiple lies in the range. Not gated on `is_integer` — `multipleOf`
+    // restricts a `number` to the same discrete lattice, so `{type: number,
+    // minimum: 1, maximum: 2, multipleOf: 5}` is exactly as empty as its
+    // integer twin.
     if let Some(divisor) = multiple_of
         && divisor.is_finite()
         && divisor > 0.0
         && let (Some((lo, lo_exclusive)), Some((hi, hi_exclusive))) = (lower, upper)
     {
         let authored_divisor = &schema.extra["multipleOf"];
-        if lo == hi && !lo_exclusive && !hi_exclusive && lo % divisor != 0.0 {
-            return reject(format!(
-                "{context}: no multiple of {authored_divisor} lies within the accepted range"
-            ));
-        }
-        // The smallest multiple of `divisor` that satisfies the lower bound.
-        let mut smallest = (lo / divisor).ceil() * divisor;
-        if lo_exclusive && smallest <= lo {
-            smallest += divisor;
-        }
-        let satisfies_upper = if hi_exclusive {
-            smallest < hi
-        } else {
-            smallest <= hi
-        };
-        if !satisfies_upper {
+        if !binary64_range_contains_multiple(lo, lo_exclusive, hi, hi_exclusive, divisor) {
             return reject(format!(
                 "{context}: no multiple of {authored_divisor} lies within the accepted range"
             ));
@@ -2643,6 +2637,125 @@ fn validate_numeric_constraints(path: &Path, schema: &Schema, context: &str) -> 
     }
 
     Ok(())
+}
+
+/// Whether the bounded binary64 interval contains a value for which every
+/// generated runtime's `%`/`fmod` check reports an exact zero remainder.
+///
+/// Computing `(lo / divisor).ceil() * divisor` is insufficient: above 2^52 the
+/// multiply can round a mathematical multiple onto an adjacent double whose
+/// runtime remainder is nonzero. Instead, inspect the binary64 lattice one
+/// exponent bin at a time. A positive normal double is `significand * 2^step`;
+/// after factoring the integral divisor into `odd * 2^power`, divisibility is a
+/// simple significand modulus. The final `%` is deliberate: it pins this
+/// load-time proof to the check emitted by all four targets.
+fn binary64_range_contains_multiple(
+    lo: f64,
+    lo_exclusive: bool,
+    hi: f64,
+    hi_exclusive: bool,
+    divisor: f64,
+) -> bool {
+    let lower = if lo_exclusive { next_binary64(lo) } else { lo };
+    let upper = if hi_exclusive {
+        previous_binary64(hi)
+    } else {
+        hi
+    };
+    if lower > upper {
+        return false;
+    }
+    if lower <= 0.0 && upper >= 0.0 {
+        return true;
+    }
+    if upper < 0.0 {
+        return positive_binary64_range_contains_multiple(-upper, -lower, divisor);
+    }
+    positive_binary64_range_contains_multiple(lower, upper, divisor)
+}
+
+fn next_binary64(value: f64) -> f64 {
+    if value == f64::INFINITY {
+        return value;
+    }
+    if value == -0.0 {
+        return f64::from_bits(1);
+    }
+    let bits = value.to_bits();
+    f64::from_bits(if value > 0.0 { bits + 1 } else { bits - 1 })
+}
+
+fn previous_binary64(value: f64) -> f64 {
+    if value == f64::NEG_INFINITY {
+        return value;
+    }
+    if value == 0.0 {
+        return -f64::from_bits(1);
+    }
+    let bits = value.to_bits();
+    f64::from_bits(if value > 0.0 { bits - 1 } else { bits + 1 })
+}
+
+fn positive_binary64_range_contains_multiple(lower: f64, upper: f64, divisor: f64) -> bool {
+    // `multipleOf` is already gated to a positive integral binary64 value.
+    // Factor its exact representation into odd * 2^power.
+    let divisor_bits = divisor.to_bits();
+    let divisor_exponent = ((divisor_bits >> 52) & 0x7ff) as i32 - 1023 - 52;
+    let divisor_significand = (1_u64 << 52) | (divisor_bits & ((1_u64 << 52) - 1));
+    let trailing = divisor_significand.trailing_zeros();
+    let divisor_odd = divisor_significand >> trailing;
+    let divisor_power = divisor_exponent + trailing as i32;
+    debug_assert!(divisor_power >= 0, "validated divisor is integral");
+
+    let lower = lower.max(1.0);
+    if lower > upper {
+        return false;
+    }
+    let lower_bits = lower.to_bits();
+    let upper_bits = upper.to_bits();
+    let first_bin = (lower_bits >> 52) & 0x7ff;
+    let last_bin = (upper_bits >> 52) & 0x7ff;
+    let fraction_mask = (1_u64 << 52) - 1;
+
+    for exponent_bits in first_bin..=last_bin {
+        // Intersect the accepted interval with this exponent bin and translate
+        // its endpoints to the exact 53-bit significand interval.
+        let bin_start = exponent_bits << 52;
+        let bin_end = bin_start | fraction_mask;
+        let start_bits = lower_bits.max(bin_start);
+        let end_bits = upper_bits.min(bin_end);
+        if start_bits > end_bits {
+            continue;
+        }
+        let start = (1_u64 << 52) | (start_bits & fraction_mask);
+        let end = (1_u64 << 52) | (end_bits & fraction_mask);
+        let value_power = exponent_bits as i32 - 1023 - 52;
+
+        let modulus = if value_power >= divisor_power {
+            divisor_odd as u128
+        } else {
+            let shift = (divisor_power - value_power) as u32;
+            let Some(modulus) = (divisor_odd as u128).checked_shl(shift) else {
+                continue;
+            };
+            modulus
+        };
+        let start = start as u128;
+        let end = end as u128;
+        let first = start.div_ceil(modulus) * modulus;
+        if first > end {
+            continue;
+        }
+
+        let candidate_significand = first as u64;
+        let candidate = f64::from_bits(
+            bin_start | (candidate_significand.saturating_sub(1_u64 << 52) & fraction_mask),
+        );
+        if candidate >= lower && candidate <= upper && candidate % divisor == 0.0 {
+            return true;
+        }
+    }
+    false
 }
 
 /// Load-time validation of the string-length keywords (`minLength`,
@@ -5779,7 +5892,14 @@ fn normalize_document(
 ) -> Result<()> {
     if let Some(defs) = &mut doc.defs {
         for (name, schema) in defs.iter_mut() {
-            let mut cycle = Vec::new();
+            // Seed the ancestry with the declared model itself. A descendant
+            // `$ref`-with-siblings back to this model is a recursive merge,
+            // while references to models inherited by an outer `allOf` remain
+            // independent paths and must not be mistaken for ancestors.
+            let mut cycle = vec![TypeKey::Def(
+                canonical_path.to_path_buf(),
+                vec![name.clone()],
+            )];
             *schema = normalize_schema(
                 path,
                 canonical_path,
@@ -5791,7 +5911,7 @@ fn normalize_document(
         }
     }
     if root_is_schema_shaped(&doc.root) && !doc.root.is_bare_ref() {
-        let mut cycle = Vec::new();
+        let mut cycle = vec![TypeKey::Root(canonical_path.to_path_buf())];
         doc.root = normalize_schema(
             path,
             canonical_path,
@@ -5887,12 +6007,19 @@ fn normalize_schema(
             ));
         }
         let merged = merge_branch_list(path, branches, context)?;
-        // Keep every model flattened by this merge on the stack while walking
-        // the merged node's children. Otherwise a back-edge under
-        // `properties`/`items`/`additionalProperties` sees an empty stack and
-        // recursively expands until process stack overflow.
+        // A direct `$ref`-with-siblings is an implicit merge of that target, so
+        // keep that one followed edge active while walking the merged target's
+        // descendants. Explicit `allOf` branch targets are not all ancestors of
+        // every merged child: retaining that global set falsely rejected an
+        // acyclic child reference to one of a model's inherited traits.
         let stack_len = cycle.len();
-        for key in merge_target_keys(path, canonical_path, schema, ctx)? {
+        if ref_with_siblings {
+            let key = resolve_ref_key(
+                path,
+                canonical_path,
+                schema.reference.as_deref().expect("reference is present"),
+                ctx.doc_paths,
+            )?;
             if !cycle.contains(&key) {
                 cycle.push(key);
             }
@@ -5903,47 +6030,6 @@ fn normalize_schema(
     }
 
     normalize_children(path, canonical_path, schema.clone(), ctx, cycle, context)
-}
-
-fn merge_target_keys(
-    path: &Path,
-    canonical_path: &Path,
-    schema: &Schema,
-    ctx: &MergeCtx,
-) -> Result<Vec<TypeKey>> {
-    fn collect(
-        path: &Path,
-        canonical_path: &Path,
-        schema: &Schema,
-        ctx: &MergeCtx,
-        keys: &mut Vec<TypeKey>,
-    ) -> Result<()> {
-        if let Some(reference) = &schema.reference {
-            let key = resolve_ref_key(path, canonical_path, reference, ctx.doc_paths)?;
-            if !keys.contains(&key) {
-                keys.push(key.clone());
-                if let Some(target) = ctx.raw_models.get(&key) {
-                    let target_path = type_key_path(&key);
-                    collect(target_path, target_path, target, ctx, keys)?;
-                }
-            }
-        }
-        if let Some(Value::Array(branches)) = schema.extra.get("allOf") {
-            for branch in branches {
-                if branch.is_object() {
-                    let branch: Schema =
-                        serde_json::from_value(branch.clone()).map_err(|error| {
-                            merge_reject(path, format!("invalid `allOf` branch: {error}"))
-                        })?;
-                    collect(path, canonical_path, &branch, ctx, keys)?;
-                }
-            }
-        }
-        Ok(())
-    }
-    let mut keys = Vec::new();
-    collect(path, canonical_path, schema, ctx, &mut keys)?;
-    Ok(keys)
 }
 
 /// Recursively normalizes a schema's child schemas (leaving its own keywords
@@ -6775,23 +6861,9 @@ fn merge_formats(path: &Path, acc: &Value, branch: &Value, context: &str) -> Res
             format!("{context}: `format` must be a string"),
         ));
     };
-    let contained_by = |narrower: &str, wider: &str| {
-        matches!(
-            (narrower, wider),
-            ("uri", "uri-reference")
-                | ("hostname", "uri-reference")
-                | ("uuid", "hostname")
-                | ("ipv4", "hostname")
-                | ("date", "hostname")
-                | ("duration", "uri-reference")
-                | ("uuid", "uri-reference")
-                | ("ipv4", "uri-reference")
-                | ("date", "uri-reference")
-        )
-    };
-    if contained_by(a, b) {
+    if crate::json_schema::format::accepted_set_is_contained_by(a, b) {
         Ok(acc.clone())
-    } else if contained_by(b, a) {
+    } else if crate::json_schema::format::accepted_set_is_contained_by(b, a) {
         Ok(branch.clone())
     } else {
         Err(merge_reject(
@@ -9972,6 +10044,24 @@ properties:
     }
 
     #[test]
+    fn rejects_written_fraction_that_rounds_to_an_integral_binary64() {
+        let error = numeric_reject("type: integer\nconst: 4503599627370496.5");
+        assert!(error.contains("incompatible"), "{error}");
+
+        // A written zero fractional part remains an integer even at the same
+        // magnitude; the lexical gate must not conservatively reject all
+        // binary64 floats in the ambiguous precision band.
+        parse(
+            "$schema: https://json-schema.org/draft/2020-12/schema\ntype: object\nproperties:\n  value: { type: integer, const: 4503599627370496.0 }",
+        );
+
+        // Immediately below 2^52, binary64 still retains the half and the same
+        // authored-fraction rule must remain in force at the boundary.
+        let below = numeric_reject("type: integer\nconst: 4503599627370495.5");
+        assert!(below.contains("incompatible"), "{below}");
+    }
+
+    #[test]
     fn integer_domain_cap_participates_in_load_satisfiability() {
         for schema in [
             "type: integer\nminimum: 9007199254740992",
@@ -10013,6 +10103,17 @@ properties:
     #[test]
     fn rejects_high_magnitude_singleton_that_is_not_a_multiple() {
         let error = numeric_reject("type: number\nminimum: 1e23\nmaximum: 1e23\nmultipleOf: 5");
+        assert!(error.contains("no multiple of 5"), "{error}");
+    }
+
+    /// These bounds are adjacent binary64 values. The old quotient/product
+    /// witness rounded onto the lower endpoint and called it a multiple even
+    /// though the runtime remainders of the two possible values are 2 and 3.
+    #[test]
+    fn rejects_adjacent_high_magnitude_range_without_runtime_multiple() {
+        let error = numeric_reject(
+            "type: number\nminimum: 1e23\nmaximum: 1.0000000000000001e23\nmultipleOf: 5",
+        );
         assert!(error.contains("no multiple of 5"), "{error}");
     }
 
@@ -12146,6 +12247,41 @@ $defs:
 "##,
         );
         assert!(error.contains("allOf` merge cycle"), "{error}");
+    }
+
+    /// Branch targets are active only while their own ref path is expanded.
+    /// `Node` inherits `Base` (which inherits `Trait`) and independently uses a
+    /// constrained `Trait` child; that child edge is acyclic and must not see
+    /// the outer merge's complete target set as artificial ancestry.
+    #[test]
+    fn accepts_acyclic_child_ref_to_an_inherited_trait() {
+        parse(
+            r##"
+$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  node: { $ref: "#/$defs/Node" }
+$defs:
+  Trait:
+    type: object
+    properties:
+      traitValue: { type: string }
+  Base:
+    allOf:
+      - { $ref: "#/$defs/Trait" }
+      - type: object
+        properties:
+          baseValue: { type: string }
+  Node:
+    allOf:
+      - { $ref: "#/$defs/Base" }
+      - type: object
+        properties:
+          trait:
+            $ref: "#/$defs/Trait"
+            minProperties: 1
+"##,
+        );
     }
 
     #[test]

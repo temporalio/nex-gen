@@ -68,6 +68,27 @@ pub const SUPPORTED_FORMATS: [&str; 11] = [
 /// `specs/json-schema/features/format.md` (Materialization) and `TemporalKind`.
 pub const TEMPORAL_FORMATS: [&str; 4] = ["date-time", "date", "time", "duration"];
 
+/// Whether every string accepted by `narrower` is also accepted by `wider`.
+///
+/// This is the format component's ownership table for intersections used by
+/// `allOf`. Keep it beside the asserted format definitions: adding or changing
+/// a format's accepted set must update this relation and its tests together,
+/// rather than teaching the generic schema merger format semantics.
+pub(crate) fn accepted_set_is_contained_by(narrower: &str, wider: &str) -> bool {
+    matches!(
+        (narrower, wider),
+        ("uri", "uri-reference")
+            | ("hostname", "uri-reference")
+            | ("uuid", "hostname")
+            | ("ipv4", "hostname")
+            | ("date", "hostname")
+            | ("duration", "uri-reference")
+            | ("uuid", "uri-reference")
+            | ("ipv4", "uri-reference")
+            | ("date", "uri-reference")
+    )
+}
+
 /// The four materialized temporal formats. Each carries a language-native typed
 /// field; the wire is produced by re-serializing it through a generator-owned
 /// serializer. The asserted grammar is the **narrowed** materialized grammar
@@ -531,6 +552,14 @@ pub fn is_valid(name: &str, value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn containment_table_is_directional() {
+        assert!(accepted_set_is_contained_by("uuid", "hostname"));
+        assert!(accepted_set_is_contained_by("uuid", "uri-reference"));
+        assert!(!accepted_set_is_contained_by("hostname", "uuid"));
+        assert!(!accepted_set_is_contained_by("email", "uri-reference"));
+    }
 
     #[test]
     fn pinned_patterns_pass_the_pattern_gate() {

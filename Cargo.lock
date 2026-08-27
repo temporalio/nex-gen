@@ -293,6 +293,7 @@ dependencies = [
  "serde_yaml",
  "tempfile",
  "thiserror",
+ "unsafe-libyaml",
  "wit-parser 0.252.0",
 ]
 
