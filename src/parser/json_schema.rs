@@ -9437,31 +9437,46 @@ fn collect_java_constraint_fields(
         && let Ok(member) = serde_json::from_value::<Schema>(Value::Object(value.clone()))
     {
         collect_java_string_constraint_fields(
-            model_full_name,
             "additionalPropertiesValue",
             &member,
+            &format!("`{model_full_name}` additional-properties catch-all"),
             scope,
         )?;
     }
     if let Some(Value::Object(value)) = schema.extra.get("propertyNames")
         && let Ok(names) = serde_json::from_value::<Schema>(Value::Object(value.clone()))
     {
-        collect_java_string_constraint_fields(model_full_name, "propertyName", &names, scope)?;
+        collect_java_string_constraint_fields(
+            "propertyName",
+            &names,
+            &format!("`{model_full_name}` property-name constraint"),
+            scope,
+        )?;
     }
     for (json_name, property) in schema.properties.iter().flatten() {
         let shape = nullable_non_null_schema(property).unwrap_or(property);
         let position = member_identifier(Language::Java, json_name, property);
-        collect_java_string_constraint_fields(model_full_name, &position, shape, scope)?;
+        collect_java_string_constraint_fields(
+            &position,
+            shape,
+            &format!("member `{model_full_name}.{json_name}`"),
+            scope,
+        )?;
     }
     Ok(())
 }
 
 fn collect_java_string_constraint_fields(
-    model_full_name: &str,
     position: &str,
     schema: &Schema,
+    origin: &str,
     scope: &mut Namespace,
 ) -> Result<()> {
+    // The Java emitter looks through the nullability wrapper before deriving
+    // string constraints for every position, including a typed
+    // `additionalProperties` catch-all. Planning must inspect that same shape
+    // or it can miss the static field the emitter actually declares.
+    let schema = java_constraint_shape(schema);
     if schema
         .extra
         .get("pattern")
@@ -9471,7 +9486,7 @@ fn collect_java_string_constraint_fields(
         scope.insert(
             Language::Java,
             java::java_pattern_field_name(position),
-            format!("`{model_full_name}` `{position}` pattern field"),
+            format!("{origin} `{position}` pattern field"),
         )?;
     }
     if schema
@@ -9484,7 +9499,7 @@ fn collect_java_string_constraint_fields(
         scope.insert(
             Language::Java,
             java::java_format_field_name(position),
-            format!("`{model_full_name}` `{position}` format field"),
+            format!("{origin} `{position}` format field"),
         )?;
     }
     if let Some(Value::Object(value)) = schema.extra.get("contains")
@@ -9500,7 +9515,7 @@ fn collect_java_string_constraint_fields(
             scope.insert(
                 Language::Java,
                 java::java_contains_pattern_field_name(position),
-                format!("`{model_full_name}` `{position}` contains-pattern field"),
+                format!("{origin} `{position}` contains-pattern field"),
             )?;
         }
         if matcher
@@ -9513,11 +9528,28 @@ fn collect_java_string_constraint_fields(
             scope.insert(
                 Language::Java,
                 java::java_contains_format_field_name(position),
-                format!("`{model_full_name}` `{position}` contains-format field"),
+                format!("{origin} `{position}` contains-format field"),
             )?;
         }
     }
     Ok(())
+}
+
+/// The shape the Java emitter inspects when deriving compiled constraint-field
+/// names. Keep this predicate in lockstep with its
+/// `nullable_non_null_schema`: the loader rejects array-valued `type`, so the
+/// emitter's `schema_type_includes(branch, "null")` reduces to this string
+/// comparison here.
+fn java_constraint_shape(schema: &Schema) -> &Schema {
+    schema
+        .one_of
+        .as_ref()
+        .and_then(|branches| {
+            branches.iter().find(|branch| {
+                !schema_type_is_null(branch) && branch.extra.get("const") != Some(&Value::Null)
+            })
+        })
+        .unwrap_or(schema)
 }
 
 /// Every identifier the generated Java object deserializer binds in the same
@@ -15341,6 +15373,34 @@ properties:
             parse_for(language, input)
                 .unwrap_or_else(|error| panic!("{language:?} emits no colliding name: {error}"));
         }
+    }
+
+    #[test]
+    fn rejects_nullable_java_typed_map_constraint_field_collisions() {
+        let input = r#"
+$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  additionalPropertiesValue: { type: string, pattern: "^declared$" }
+additionalProperties:
+  oneOf:
+    - { type: string, pattern: "^catch-all$" }
+    - { type: "null" }
+"#;
+        let error = reject_for(Language::Java, input);
+        assert!(
+            error.contains("ADDITIONAL_PROPERTIES_VALUE_PATTERN")
+                && error.contains("collision")
+                && error.contains("x-java-name"),
+            "{error}"
+        );
+
+        let renamed = input.replace(
+            "additionalPropertiesValue: { type: string, pattern: \"^declared$\" }",
+            "additionalPropertiesValue: { type: string, pattern: \"^declared$\", x-java-name: declaredValue }",
+        );
+        parse_for(Language::Java, &renamed)
+            .expect("x-java-name moves the declared member's compiled Pattern field");
     }
 
     #[test]

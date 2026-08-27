@@ -115,10 +115,12 @@ All output lands at the package root (no per-input subdirectory, no
 | **Go** | one `<package>.go` (types and services) + the shared `definitions.go` |
 | **Java** | one `.java` per public class + the runtime classes and root `package-info.java`; nothing to aggregate |
 
-Go derives `<package>` from the `--output` directory basename. Because that
-model file shares the directory with `definitions.go`, a single-input output
-directory named `definitions` is rejected with both claimants and the remedy to
-choose a differently named output directory.
+Go derives `<package>` by converting the `--output` directory basename to a Go
+package identifier. Because that model file shares the directory with
+`definitions.go`, a single-input output whose **derived identifier** is
+`definitions` is rejected with both claimants and the remedy to choose an
+output deriving a different identifier. This includes basenames such as
+`Definitions` and `definitions-`, not only the literal `definitions`.
 
 For Java, in both layouts, the package root is the required `--package-name`.
 Its final dot-separated segment must match the output directory name. A
