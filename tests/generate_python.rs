@@ -1973,6 +1973,170 @@ fn write_cross_module_closure(dir: &Path) -> PathBuf {
     input_dir
 }
 
+fn generate_python_schema_tree(name: &str, files: &[(&str, &str)]) -> (PathBuf, PathBuf) {
+    let temp_dir = unique_output_path(name);
+    let input_dir = temp_dir.join("input");
+    fs::create_dir_all(&input_dir).unwrap();
+    for (relative, contents) in files {
+        let path = input_dir.join(relative);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).unwrap();
+        }
+        fs::write(path, contents).unwrap();
+    }
+    let output_path = temp_dir.join("output");
+    generate_to_file(&GenerateRequest {
+        language: nexgen::language::Language::Python,
+        input_paths: vec![input_dir],
+        support_paths: Vec::new(),
+        descriptor_paths: Vec::new(),
+        output_path: output_path.clone(),
+        format: false,
+        generate_native_api: false,
+        java_package_name: None,
+        ts_date_time_types: Default::default(),
+    })
+    .unwrap();
+    (temp_dir, output_path)
+}
+
+#[test]
+fn python_json_hoists_whole_cross_file_strong_component() {
+    let (temp_dir, output_path) = generate_python_schema_tree(
+        "py-json-whole-scc-hoist",
+        &[
+            (
+                "a.yaml",
+                r##"
+$schema: https://json-schema.org/draft/2020-12/schema
+$defs:
+  P: { type: object, additionalProperties: false, properties: { x: { $ref: "#/$defs/X" } } }
+  X: { type: object, additionalProperties: false, properties: { q: { $ref: "#/$defs/Q" } } }
+  Q: { type: object, additionalProperties: false, properties: { r: { $ref: "b.yaml#/$defs/R" } } }
+  Referrer: { type: object, additionalProperties: false, properties: { p: { $ref: "#/$defs/P" } } }
+"##,
+            ),
+            (
+                "b.yaml",
+                r##"
+$schema: https://json-schema.org/draft/2020-12/schema
+$defs:
+  R: { type: object, additionalProperties: false, properties: { p: { $ref: "a.yaml#/$defs/P" } } }
+"##,
+            ),
+        ],
+    );
+
+    let recursive = fs::read_to_string(output_path.join("_recursive.py")).unwrap();
+    for name in ["P", "X", "Q", "R"] {
+        assert!(
+            recursive.contains(&format!("class {name}:")),
+            "{name} was left outside its SCC\n{recursive}"
+        );
+    }
+    assert!(!recursive.contains("class Referrer:"), "{recursive}");
+    let a_models = fs::read_to_string(output_path.join("a/models.py")).unwrap();
+    assert!(
+        a_models.contains("from .._recursive import P"),
+        "a same-module reference must follow its target into the hoist\n{a_models}"
+    );
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+#[test]
+fn python_json_cycle_graph_preserves_already_decoded_ref_names() {
+    let (temp_dir, output_path) = generate_python_schema_tree(
+        "py-json-escaped-cycle",
+        &[
+            (
+                "a.yaml",
+                r##"
+$schema: https://json-schema.org/draft/2020-12/schema
+$defs:
+  "a~1b":
+    type: object
+    properties:
+      link: { $ref: "b.yaml#/$defs/Bee" }
+"##,
+            ),
+            (
+                "b.yaml",
+                r##"
+$schema: https://json-schema.org/draft/2020-12/schema
+$defs:
+  Bee:
+    type: object
+    properties:
+      back: { $ref: "a.yaml#/$defs/a~01b" }
+"##,
+            ),
+        ],
+    );
+
+    let recursive = fs::read_to_string(output_path.join("_recursive.py")).unwrap();
+    assert!(recursive.contains("class A1b:"), "{recursive}");
+    assert!(recursive.contains("class Bee:"), "{recursive}");
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+#[test]
+fn python_json_hoist_closes_leaf_dependency_import_cycles() {
+    let (temp_dir, output_path) = generate_python_schema_tree(
+        "py-json-hoist-dependency-cycle",
+        &[
+            (
+                "a.yaml",
+                r##"
+$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+additionalProperties: false
+properties:
+  b: { $ref: "b.yaml" }
+  leaf: { $ref: "c.yaml#/$defs/Leaf" }
+"##,
+            ),
+            (
+                "b.yaml",
+                r##"
+$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+additionalProperties: false
+properties:
+  a: { $ref: "a.yaml" }
+"##,
+            ),
+            (
+                "c.yaml",
+                r##"
+$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+additionalProperties: false
+properties:
+  a: { $ref: "a.yaml" }
+$defs:
+  Leaf: { type: object, additionalProperties: false, properties: { n: { type: string } } }
+"##,
+            ),
+        ],
+    );
+
+    let recursive = fs::read_to_string(output_path.join("_recursive.py")).unwrap();
+    assert!(recursive.contains("class A:"), "{recursive}");
+    assert!(recursive.contains("class B:"), "{recursive}");
+    assert!(recursive.contains("class Leaf:"), "{recursive}");
+    assert!(
+        !recursive.contains("from .c.models import Leaf"),
+        "{recursive}"
+    );
+
+    let c_models = fs::read_to_string(output_path.join("c/models.py")).unwrap();
+    assert!(
+        c_models.contains("from .._recursive import A"),
+        "{c_models}"
+    );
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
 /// An `x-py-name` override on a model in *another* input file moves every
 /// reference the consuming module emits: the operation's `Operation[...]`
 /// parameter, the relative model imports, and the annotation of a cross-module
