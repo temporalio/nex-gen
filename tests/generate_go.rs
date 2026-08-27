@@ -3793,13 +3793,26 @@ func TestMaterializedSerializeChecks(t *testing.T) {
     }
 
     subMinuteOffset := time.Date(2021, 6, 15, 12, 30, 45, 0, time.FixedZone("", 30))
+    outOfRangeOffset := time.Date(2021, 6, 15, 12, 30, 45, 0, time.FixedZone("", 24*60*60))
     overflowYear := time.Date(10000, 1, 1, 0, 0, 0, 0, time.UTC)
-    for name, value := range map[string]time.Time{"sub-minute offset": subMinuteOffset, "year 10000": overflowYear} {
+    for name, value := range map[string]time.Time{"sub-minute offset": subMinuteOffset, "offset +24:00": outOfRangeOffset, "year 10000": overflowYear} {
         model := base
         model.When = &value
         if _, err := json.Marshal(model); err == nil {
             t.Errorf("%s date-time serialized", name)
         }
+    }
+
+    maxOffset := time.Date(2021, 6, 15, 12, 30, 45, 0, time.FixedZone("", 23*60*60+59*60))
+    maxModel := base
+    maxModel.When = &maxOffset
+    maxWire, err := json.Marshal(maxModel)
+    if err != nil {
+        t.Fatalf("+23:59 rejected on serialize: %v", err)
+    }
+    var maxRoundTrip Mat
+    if err := json.Unmarshal(maxWire, &maxRoundTrip); err != nil {
+        t.Fatalf("+23:59 output rejected on parse: %v", err)
     }
 
     duplicate := time.Date(2021, 6, 15, 12, 30, 45, 0, time.UTC)

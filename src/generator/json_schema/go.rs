@@ -5395,12 +5395,14 @@ func checkTemporalYear(name string, v time.Time, path string, errs *[]Violation)
 	return false
 }
 
-// checkTemporalOffset asserts a UTC offset is a whole number of minutes, the
-// finest the wire form spells (a Go Location carries seconds, which the wire
-// form would silently lose).
+// checkTemporalOffset asserts the wire's whole-minute offset range. A Go
+// Location carries arbitrary seconds and magnitude, both wider than RFC 3339.
 func checkTemporalOffset(name string, v time.Time, path string, errs *[]Violation) {
-	if _, offset := v.Zone(); offset%60 != 0 {
+	_, offset := v.Zone()
+	if offset%60 != 0 {
 		*errs = append(*errs, Violation{path, fmt.Sprintf("must be a valid %s, got %v: the UTC offset %d seconds is not a whole number of minutes", name, v, offset)})
+	} else if offset < -(23*60+59)*60 || offset > (23*60+59)*60 {
+		*errs = append(*errs, Violation{path, fmt.Sprintf("must be a valid %s, got %v: the UTC offset is outside -23:59 through +23:59", name, v)})
 	}
 }
 
