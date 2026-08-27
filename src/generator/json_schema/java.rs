@@ -2003,10 +2003,22 @@ impl FieldPlan {
             if matches!(self.ty, JavaType::Bytes(_)) {
                 return "byte @Nullable []".to_string();
             }
-            format!("@Nullable {}", self.field_type())
+            nullable_type_use(self.field_type())
         } else {
             self.field_type()
         }
+    }
+}
+
+/// Writes a nullable TYPE_USE annotation on the actual carrier rather than on
+/// the qualifier of a nested class. Java rejects `@Nullable Outer.Inner` as an
+/// annotation of the scoping construct; the legal spelling is
+/// `Outer.@Nullable Inner`.
+fn nullable_type_use(declaration: String) -> String {
+    if let Some((qualifier, nested)) = declaration.rsplit_once('.') {
+        format!("{qualifier}.@Nullable {nested}")
+    } else {
+        format!("@Nullable {declaration}")
     }
 }
 
@@ -4825,7 +4837,7 @@ fn element_declaration(ty: &JavaType, nullable: bool) -> String {
     if matches!(ty, JavaType::Bytes(_)) {
         return "byte @Nullable []".to_string();
     }
-    format!("@Nullable {}", ty.boxed_name())
+    nullable_type_use(ty.boxed_name())
 }
 
 fn render_parse_element(

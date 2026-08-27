@@ -35,14 +35,14 @@ public final class Temporal {
     private final LocalDate birthday;
     private final String alarm;
     private final Duration timeout;
-    private final @Nullable TemporalSupport.DateTime updatedAt;
+    private final TemporalSupport.@Nullable DateTime updatedAt;
     private final @Nullable LocalDate expiresOn;
     private final @Nullable String reminder;
     private final @Nullable Duration retryDelay;
-    private final @Nullable TemporalSupport.DateTime deletedAt;
+    private final TemporalSupport.@Nullable DateTime deletedAt;
     private final @Nullable LocalDate archivedOn;
 
-    public Temporal(TemporalSupport.DateTime createdAt, LocalDate birthday, String alarm, Duration timeout, @Nullable TemporalSupport.DateTime updatedAt, @Nullable LocalDate expiresOn, @Nullable String reminder, @Nullable Duration retryDelay, @Nullable TemporalSupport.DateTime deletedAt, @Nullable LocalDate archivedOn) {
+    public Temporal(TemporalSupport.DateTime createdAt, LocalDate birthday, String alarm, Duration timeout, TemporalSupport.@Nullable DateTime updatedAt, @Nullable LocalDate expiresOn, @Nullable String reminder, @Nullable Duration retryDelay, TemporalSupport.@Nullable DateTime deletedAt, @Nullable LocalDate archivedOn) {
         this.createdAt = createdAt;
         this.birthday = birthday;
         this.alarm = alarm;
@@ -89,7 +89,7 @@ public final class Temporal {
     /**
      * Optional date-time.
      */
-    public @Nullable TemporalSupport.DateTime getUpdatedAt() {
+    public TemporalSupport.@Nullable DateTime getUpdatedAt() {
         return updatedAt;
     }
 
@@ -117,7 +117,7 @@ public final class Temporal {
     /**
      * Optional and nullable date-time (may be absent or explicitly null).
      */
-    public @Nullable TemporalSupport.DateTime getDeletedAt() {
+    public TemporalSupport.@Nullable DateTime getDeletedAt() {
         return deletedAt;
     }
 

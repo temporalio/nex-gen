@@ -733,6 +733,7 @@ $defs:
     properties:
       authored: { $ref: "#/$defs/DateTime" }
       timestamp: { type: string, format: date-time }
+      optionalTimestamp: { type: string, format: date-time }
 "##,
     )
     .unwrap();
@@ -753,6 +754,10 @@ $defs:
     let event = fs::read_to_string(output_path.join("Event.java")).unwrap();
     assert!(
         event.contains("TemporalSupport.DateTime timestamp"),
+        "{event}"
+    );
+    assert!(
+        event.contains("TemporalSupport.@Nullable DateTime optionalTimestamp"),
         "{event}"
     );
     assert!(event.contains("DateTime authored"), "{event}");
