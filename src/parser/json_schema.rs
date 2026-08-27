@@ -411,7 +411,16 @@ fn expand_json_schema_sources(input_paths: &[PathBuf]) -> Result<Vec<JsonSource>
             if source_inputs.contains_key(&target) {
                 continue;
             }
-            insert_json_schema_source(&target, &mut source_inputs)?;
+            insert_json_schema_source(&target, &mut source_inputs).map_err(|error| match error {
+                Error::ReadFile { source, .. } => Error::InvalidJsonSchema {
+                    path: path.clone(),
+                    reason: format!(
+                        "{context}: `$ref` `{reference}` resolves to `{}`, but that target file could not be read: {source}; add the file at that path or correct the relative `$ref`",
+                        target.display()
+                    ),
+                },
+                other => other,
+            })?;
             pending.push_back(target);
         }
     }
@@ -5341,24 +5350,34 @@ fn validate_one_of(
         }
         let shared = shared.unwrap_or_default();
         // Keep only names whose `const` values are pairwise-distinct across all
-        // object branches.
+        // object branches, retaining one concrete duplicate for the diagnostic
+        // when a shared tag exists but its values do not distinguish branches.
         let mut qualifying: Vec<&String> = Vec::new();
+        let mut duplicate_values: Vec<(&String, Value)> = Vec::new();
         for name in shared.keys() {
             let values: Vec<Value> = object_schemas
                 .iter()
                 .filter_map(|object| branch_discriminator_tags(object).get(name).cloned())
                 .collect();
-            let distinct = values.iter().enumerate().all(|(index, value)| {
-                !values[..index]
+            let duplicate = values.iter().enumerate().find_map(|(index, value)| {
+                values[..index]
                     .iter()
                     .any(|existing| json_values_equal(existing, value))
+                    .then(|| value.clone())
             });
-            if distinct {
+            if let Some(value) = duplicate {
+                duplicate_values.push((name, value));
+            } else {
                 qualifying.push(name);
             }
         }
         match qualifying.len() {
             0 => {
+                if let Some((name, value)) = duplicate_values.first() {
+                    return reject(format!(
+                        "{context}: the object `oneOf` branches all declare `{name}` as a required `const` discriminator, but two branches share the value {value}; give every branch a distinct `{name}` tag value"
+                    ));
+                }
                 return reject(format!(
                     "{context}: two or more object `oneOf` branches share no required `const` discriminator property with pairwise-distinct values; add a shared required `const`-tagged property (e.g. `kind`) to each branch"
                 ));
@@ -5371,7 +5390,7 @@ fn validate_one_of(
                     .collect::<Vec<_>>()
                     .join(", ");
                 return reject(format!(
-                    "{context}: the object `oneOf` branches have more than one qualifying `const` discriminator ({names}); the intended tag is ambiguous"
+                    "{context}: the object `oneOf` branches have more than one qualifying `const` discriminator ({names}); the intended tag is ambiguous — keep exactly one shared required `const` tag property"
                 ));
             }
         }
@@ -13530,7 +13549,12 @@ properties:
       - { $ref: "#/$defs/Second" }
 "##,
         );
-        assert!(error.contains("discriminator"), "{error}");
+        assert!(
+            error.contains("`kind`")
+                && error.contains("value \"same\"")
+                && error.contains("distinct `kind` tag value"),
+            "{error}"
+        );
     }
 
     #[test]
@@ -13659,7 +13683,13 @@ properties:
       - { $ref: "#/$defs/Second" }
 "##,
         );
-        assert!(error.contains("more than one qualifying"), "{error}");
+        assert!(
+            error.contains("more than one qualifying")
+                && error.contains("`kind`")
+                && error.contains("`variant`")
+                && error.contains("keep exactly one"),
+            "{error}"
+        );
     }
 
     #[test]
@@ -13687,7 +13717,9 @@ properties:
 "##,
         );
         assert!(
-            error.contains("discriminator") && error.contains("pairwise-distinct"),
+            error.contains("`kind`")
+                && error.contains("value 1.0")
+                && error.contains("distinct `kind` tag value"),
             "{error}"
         );
     }
@@ -16816,6 +16848,38 @@ $defs:
             &[invocation_root],
         )
         .expect("the public tree loader should load the complete ref closure");
+    }
+
+    #[test]
+    fn missing_ref_target_file_reports_the_referring_schema_breadcrumb_and_remedy() {
+        let temp = tempfile::tempdir().unwrap();
+        let entry = temp.path().join("entry.yaml");
+        fs::write(
+            &entry,
+            r##"
+$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  child: { $ref: "missing.yaml#/$defs/Child" }
+"##,
+        )
+        .unwrap();
+
+        let error = load_api_spec_from_json_schema_for_language_with_inputs(
+            Language::Python,
+            std::slice::from_ref(&entry),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("root schema.properties.child"), "{error}");
+        assert!(
+            error.contains("`$ref` `missing.yaml#/$defs/Child`") && error.contains("missing.yaml"),
+            "{error}"
+        );
+        assert!(
+            error.contains("add the file") && error.contains("correct the relative `$ref`"),
+            "{error}"
+        );
     }
 
     #[test]
