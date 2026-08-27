@@ -26,22 +26,25 @@ use unsafe_libyaml::{
 
 #[derive(Clone, Debug)]
 enum Node {
-    Scalar {
-        text: String,
-        plain: bool,
-        yaml_string: bool,
-    },
+    Scalar { text: String, kind: ScalarKind },
     Sequence(Vec<Node>),
     Mapping(Vec<(Node, Node)>),
     Alias(String),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ScalarKind {
+    String,
+    Number,
+    ExplicitInteger,
+    Other,
 }
 
 #[derive(Debug)]
 enum Event {
     Scalar {
         text: String,
-        plain: bool,
-        yaml_string: bool,
+        kind: ScalarKind,
         anchor: Option<String>,
     },
     Alias(String),
@@ -475,14 +478,8 @@ fn parse_events(input: &str) -> Option<Vec<Event>> {
                     let plain = scalar.style == YAML_PLAIN_SCALAR_STYLE;
                     let tag = c_string(scalar.tag);
                     Some(Event::Scalar {
-                        yaml_string: tag.as_deref() == Some("tag:yaml.org,2002:str")
-                            || !plain
-                            || matches!(
-                                serde_yaml::from_str::<serde_yaml::Value>(&text),
-                                Ok(serde_yaml::Value::String(_))
-                            ),
+                        kind: scalar_kind(&text, plain, tag.as_deref()),
                         text,
-                        plain,
                         anchor: c_string(scalar.anchor),
                     })
                 }
@@ -537,16 +534,10 @@ fn parse_node(
     let event = events.get(*index)?;
     *index += 1;
     match event {
-        Event::Scalar {
-            text,
-            plain,
-            yaml_string,
-            anchor,
-        } => {
+        Event::Scalar { text, kind, anchor } => {
             let node = Node::Scalar {
                 text: text.clone(),
-                plain: *plain,
-                yaml_string: *yaml_string,
+                kind: *kind,
             };
             remember_anchor(anchors, anchor, &node);
             Some(node)
@@ -587,12 +578,29 @@ fn remember_anchor(anchors: &mut BTreeMap<String, Node>, anchor: &Option<String>
     }
 }
 
+fn scalar_kind(text: &str, plain: bool, tag: Option<&str>) -> ScalarKind {
+    // An explicit core tag defines the YAML value kind even when the scalar's
+    // presentation style would ordinarily imply a string (for example
+    // `!!float '1.5'`). Style and implicit resolution apply only without a tag.
+    match tag {
+        Some("tag:yaml.org,2002:str") => ScalarKind::String,
+        Some("tag:yaml.org,2002:float") => ScalarKind::Number,
+        Some("tag:yaml.org,2002:int") => ScalarKind::ExplicitInteger,
+        Some(_) => ScalarKind::Other,
+        None if !plain => ScalarKind::String,
+        None => match serde_yaml::from_str::<serde_yaml::Value>(text) {
+            Ok(serde_yaml::Value::String(_)) => ScalarKind::String,
+            Ok(serde_yaml::Value::Number(_)) => ScalarKind::Number,
+            _ => ScalarKind::Other,
+        },
+    }
+}
+
 fn yaml_string_scalar(node: &Node) -> Option<&str> {
     match node {
         Node::Scalar {
             text,
-            yaml_string: true,
-            ..
+            kind: ScalarKind::String,
         } => Some(text),
         Node::Alias(anchor) => {
             let _ = anchor;
@@ -649,19 +657,15 @@ fn fractional_assertion_keyword(entries: &[(Node, Node)]) -> Option<String> {
 fn fractional_numeric_scalar(node: &Node) -> Option<String> {
     let Node::Scalar {
         text,
-        plain,
-        yaml_string,
+        kind: ScalarKind::Number,
     } = node
     else {
         return None;
     };
-    if !plain
-        || *yaml_string
-        || !matches!(
-            serde_yaml::from_str::<serde_yaml::Value>(text),
-            Ok(serde_yaml::Value::Number(_))
-        )
-        || written_number_is_integer(text)
+    if !matches!(
+        serde_yaml::from_str::<serde_yaml::Value>(text),
+        Ok(serde_yaml::Value::Number(_))
+    ) || written_number_is_integer(text)
     {
         return None;
     }
@@ -713,18 +717,30 @@ mod tests {
 
     #[test]
     fn finds_fraction_that_binary64_rounds_away() {
-        assert_eq!(
-            fractional_integer_literal("type: integer\nconst: 4503599627370496.5"),
-            Some("`const` value 4503599627370496.5".to_string())
-        );
-        assert_eq!(
-            fractional_integer_literal("type: integer\nconst: 4503599627370496.0"),
-            None
-        );
-        assert_eq!(
-            fractional_integer_literal("type: integer\nconst: !!str 4503599627370496.5"),
-            None
-        );
+        for literal in [
+            "4503599627370496.5",
+            "!!float '4503599627370496.5'",
+            "!<tag:yaml.org,2002:float> '4503599627370496.5'",
+        ] {
+            assert_eq!(
+                fractional_integer_literal(&format!("type: integer\nconst: {literal}")),
+                Some("`const` value 4503599627370496.5".to_string()),
+                "{literal}"
+            );
+        }
+        for literal in [
+            "4503599627370496.0",
+            "!!float '4503599627370496.0'",
+            "!!int '4503599627370496'",
+            "!!str '4503599627370496.5'",
+            "!!null 'null'",
+        ] {
+            assert_eq!(
+                fractional_integer_literal(&format!("type: integer\nconst: {literal}")),
+                None,
+                "{literal}"
+            );
+        }
     }
 
     #[test]
@@ -817,12 +833,19 @@ mod tests {
             "oneOf:\n  - { type: integer }\n  - { type: number }",
             "oneOf:\n  - { type: integer }\n  - { type: \"null\", description: not-exact }",
             "oneOf:\n  - { type: integer }\n  - { type: null }",
+            "oneOf:\n  - { type: integer }\n  - { type: !!null 'null' }",
         ] {
             assert_eq!(
                 fractional_integer_literal(&format!("{one_of}\ndefault: 4503599627370496.5")),
                 None
             );
         }
+        assert!(
+            fractional_integer_literal(
+                "oneOf:\n  - { type: integer }\n  - { type: !!str 'null' }\ndefault: 4503599627370496.5"
+            )
+            .is_some()
+        );
     }
 
     #[test]

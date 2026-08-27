@@ -10061,6 +10061,30 @@ properties:
     fn rejects_written_fraction_that_rounds_to_an_integral_binary64() {
         let error = numeric_reject("type: integer\nconst: 4503599627370496.5");
         assert!(error.contains("incompatible"), "{error}");
+        for tagged in [
+            "!!float '4503599627370496.5'",
+            "!<tag:yaml.org,2002:float> '4503599627370496.5'",
+        ] {
+            let error = numeric_reject(&format!("type: integer\nconst: {tagged}"));
+            assert!(
+                error.contains("written fractional part"),
+                "{tagged}: {error}"
+            );
+        }
+
+        // Explicit scalar tags determine the YAML value kind before style:
+        // quoted float stays numeric, while quoted string/null follow their
+        // ordinary type-compatibility diagnostics.
+        let string = numeric_reject("type: integer\nconst: !!str '4503599627370496.5'");
+        assert!(
+            string.contains("incompatible") && !string.contains("written fractional part"),
+            "{string}"
+        );
+        let null = numeric_reject("type: integer\nconst: !!null 'null'");
+        assert!(
+            null.contains("const: null") && !null.contains("written fractional part"),
+            "{null}"
+        );
 
         // The integer type and literal may arrive on different conjunction
         // branches; normalization must not erase the authored fraction before
@@ -10081,6 +10105,12 @@ properties:
         // binary64 floats in the ambiguous precision band.
         parse(
             "$schema: https://json-schema.org/draft/2020-12/schema\ntype: object\nproperties:\n  value: { type: integer, const: 4503599627370496.0 }",
+        );
+        parse(
+            "$schema: https://json-schema.org/draft/2020-12/schema\ntype: object\nproperties:\n  value:\n    type: integer\n    const: !!float '4503599627370496.0'",
+        );
+        parse(
+            "$schema: https://json-schema.org/draft/2020-12/schema\ntype: object\nproperties:\n  value:\n    type: integer\n    const: !!int '4503599627370496'",
         );
         parse(
             "$schema: https://json-schema.org/draft/2020-12/schema\ntype: object\nproperties:\n  value:\n    allOf:\n      - { type: integer }\n      - { const: 4503599627370496.0 }",
