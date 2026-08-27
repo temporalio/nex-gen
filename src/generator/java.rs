@@ -6,7 +6,7 @@ use heck::ToLowerCamelCase;
 use crate::error::{Error, Result};
 use crate::generator::json_schema::java as java_json;
 use crate::generator::json_schema::java::JavaContext;
-use crate::generator::{GeneratedFiles, GeneratedOutputLayout};
+use crate::generator::{GeneratedFiles, GeneratedOutputLayout, insert_generated_file_with_origin};
 use crate::planning::{PlannedFamily, PlannedJsonType};
 use crate::spec::{ApiSpecLeaf, ApiSpecNode};
 use crate::spec::{ExternalTypeSpec, ModulePath, ServiceSpec, TypeSpec};
@@ -72,6 +72,7 @@ pub(crate) fn generate(
     }
 
     let mut files = BTreeMap::new();
+    let mut origins = BTreeMap::new();
     let mut packages: BTreeSet<Vec<String>> = BTreeSet::new();
     packages.insert(Vec::new());
 
@@ -98,7 +99,17 @@ pub(crate) fn generate(
                 &all_models,
             )?;
             let path = module_dir.join(format!("{}.java", json_type.model_name));
-            insert_file(&mut files, path, contents)?;
+            insert_file(
+                &mut files,
+                &mut origins,
+                path,
+                contents,
+                PathBuf::from(format!(
+                    "{}#type/{}",
+                    leaf.source_path.display(),
+                    json_type.full_name
+                )),
+            )?;
         }
 
         for service in &leaf.spec.services {
@@ -108,28 +119,44 @@ pub(crate) fn generate(
                 .for_language(crate::language::Language::Java)
                 .unwrap_or(&service.name);
             let path = module_dir.join(format!("{service_ident}.java"));
-            insert_file(&mut files, path, contents)?;
+            insert_file(
+                &mut files,
+                &mut origins,
+                path,
+                contents,
+                PathBuf::from(format!(
+                    "{}#service/{}",
+                    leaf.source_path.display(),
+                    service.name
+                )),
+            )?;
         }
     }
 
     // Runtime classes live once at the package root.
     insert_file(
         &mut files,
+        &mut origins,
         PathBuf::from("Violation.java"),
         java_json::render_violation_file(root_package),
+        PathBuf::from("<generated Java runtime Violation>"),
     )?;
     insert_file(
         &mut files,
+        &mut origins,
         PathBuf::from("SpecNumbers.java"),
         java_json::render_spec_numbers_file(root_package),
+        PathBuf::from("<generated Java runtime SpecNumbers>"),
     )?;
     // The materialized-temporal runtime is emitted only when a model uses a
     // temporal `format`, so non-temporal packages stay lean.
     if all_models.values().any(java_json::model_uses_temporal) {
         insert_file(
             &mut files,
+            &mut origins,
             PathBuf::from("TemporalSupport.java"),
             java_json::render_temporal_support_file(root_package),
+            PathBuf::from("<generated Java temporal runtime>"),
         )?;
     }
     // The materialized-contentEncoding runtime is emitted only when a model uses
@@ -140,8 +167,10 @@ pub(crate) fn generate(
     {
         insert_file(
             &mut files,
+            &mut origins,
             PathBuf::from("Base64Support.java"),
             java_json::render_base64_support_file(root_package),
+            PathBuf::from("<generated Java contentEncoding runtime>"),
         )?;
     }
 
@@ -153,7 +182,13 @@ pub(crate) fn generate(
             path.push(segment);
         }
         path.push("package-info.java");
-        insert_file(&mut files, path, java_json::render_package_info(&package))?;
+        insert_file(
+            &mut files,
+            &mut origins,
+            path,
+            java_json::render_package_info(&package),
+            PathBuf::from(format!("<generated Java package metadata for {package}>")),
+        )?;
     }
 
     Ok(GeneratedFiles {
@@ -179,13 +214,19 @@ fn collect_leaves<'a>(
 
 fn insert_file(
     files: &mut BTreeMap<PathBuf, String>,
+    origins: &mut BTreeMap<PathBuf, PathBuf>,
     path: PathBuf,
     contents: String,
+    origin: PathBuf,
 ) -> Result<()> {
-    if files.insert(path.clone(), contents).is_some() {
-        return Err(Error::GeneratedFileConflict { path });
-    }
-    Ok(())
+    insert_generated_file_with_origin(
+        files,
+        origins,
+        path,
+        contents,
+        origin,
+        "rename the conflicting declaration with `x-java-name`, or rename its input module, so the generated Java paths differ",
+    )
 }
 
 fn render_service_file(

@@ -8,7 +8,9 @@ use crate::error::{Error, Result};
 use crate::generator::json_schema::python as python_json;
 use crate::generator::proto::python as python_proto;
 use crate::generator::render_request_plan;
-use crate::generator::{ExternalModelBackend, GeneratedFiles, GenerationMode};
+use crate::generator::{
+    ExternalModelBackend, GeneratedFiles, GenerationMode, insert_generated_file_with_origin,
+};
 use crate::language::Language;
 use crate::planning::{
     PlannedFamily, PlannedOperationResourceFieldBinding, PlannedOperationResourceReturn,
@@ -85,11 +87,23 @@ fn generate_tree(
 ) -> Result<GeneratedFiles> {
     let model_hoists = tree_model_hoists(branch)?;
     let mut files = BTreeMap::new();
+    let mut origins = BTreeMap::new();
     let mut warnings = Vec::new();
     let mut root_package_imports = RootPackageImports::new();
-    insert_files(&mut files, render_tree_support_files(branch))?;
+    insert_files(
+        &mut files,
+        &mut origins,
+        render_tree_support_files(branch),
+        PathBuf::from("<generated Python JSON runtime>"),
+    )?;
     for (path, contents) in model_hoists.files() {
-        insert_generated_file(&mut files, path.clone(), contents.clone())?;
+        insert_generated_file(
+            &mut files,
+            &mut origins,
+            path.clone(),
+            contents.clone(),
+            PathBuf::from("<generated Python recursive-model hoist>"),
+        )?;
     }
     let mut child_exports = BTreeMap::new();
     for (name, node) in &branch.children {
@@ -98,6 +112,7 @@ fn generate_tree(
             support,
             &model_hoists,
             &mut files,
+            &mut origins,
             &mut warnings,
             &mut root_package_imports,
         )?;
@@ -105,6 +120,7 @@ fn generate_tree(
     }
     insert_branch_index_file(
         &mut files,
+        &mut origins,
         branch,
         &model_hoists,
         &child_exports,
@@ -122,6 +138,7 @@ fn generate_tree_node(
     support: &crate::SupportFiles,
     model_hoists: &PythonModelHoists,
     files: &mut BTreeMap<PathBuf, String>,
+    origins: &mut BTreeMap<PathBuf, PathBuf>,
     warnings: &mut Vec<String>,
     root_package_imports: &mut RootPackageImports,
 ) -> Result<BTreeSet<String>> {
@@ -134,7 +151,13 @@ fn generate_tree_node(
             warnings.extend(generated.generated_files.warnings);
             let prefix = leaf.module_path.to_path_buf();
             for (path, contents) in generated.generated_files.files {
-                insert_generated_file(files, prefix.join(path), contents)?;
+                insert_generated_file(
+                    files,
+                    origins,
+                    prefix.join(path),
+                    contents,
+                    leaf.source_path.clone(),
+                )?;
             }
             Ok(generated.exported_names)
         }
@@ -146,6 +169,7 @@ fn generate_tree_node(
                     support,
                     model_hoists,
                     files,
+                    origins,
                     warnings,
                     root_package_imports,
                 )?;
@@ -153,6 +177,7 @@ fn generate_tree_node(
             }
             insert_branch_index_file(
                 files,
+                origins,
                 branch,
                 model_hoists,
                 &child_exports,
@@ -165,28 +190,37 @@ fn generate_tree_node(
 
 fn insert_files(
     files: &mut BTreeMap<PathBuf, String>,
+    origins: &mut BTreeMap<PathBuf, PathBuf>,
     generated: BTreeMap<PathBuf, String>,
+    origin: PathBuf,
 ) -> Result<()> {
     for (path, contents) in generated {
-        insert_generated_file(files, path, contents)?;
+        insert_generated_file(files, origins, path, contents, origin.clone())?;
     }
     Ok(())
 }
 
 fn insert_generated_file(
     files: &mut BTreeMap<PathBuf, String>,
+    origins: &mut BTreeMap<PathBuf, PathBuf>,
     path: impl Into<PathBuf>,
     contents: String,
+    origin: PathBuf,
 ) -> Result<()> {
     let path = path.into();
-    if files.insert(path.clone(), contents).is_some() {
-        return Err(Error::GeneratedFileConflict { path });
-    }
-    Ok(())
+    insert_generated_file_with_origin(
+        files,
+        origins,
+        path,
+        contents,
+        origin,
+        "rename one input file or directory, or rename the conflicting declaration with `x-py-name`, so the generated Python paths differ",
+    )
 }
 
 fn insert_branch_index_file(
     files: &mut BTreeMap<PathBuf, String>,
+    origins: &mut BTreeMap<PathBuf, PathBuf>,
     branch: &ApiSpecBranch<PlannedFamily>,
     model_hoists: &PythonModelHoists,
     child_exports: &BTreeMap<String, BTreeSet<String>>,
@@ -247,7 +281,16 @@ fn insert_branch_index_file(
         }
         contents.push_str("]\n");
     }
-    insert_generated_file(files, path, contents)
+    insert_generated_file(
+        files,
+        origins,
+        path,
+        contents,
+        PathBuf::from(format!(
+            "<generated Python barrel for module {}>",
+            branch.module_path.as_module_key()
+        )),
+    )
 }
 
 fn planned_module_export_model_names(plan: &PlannedSpec) -> BTreeSet<String> {
@@ -578,9 +621,16 @@ impl<'a> ApiPlanner<'a> {
     ) -> Result<(GeneratedFiles, BTreeSet<String>)> {
         let mode = crate::nexgen_config::current().mode;
         let mut files = BTreeMap::new();
-        render_support_package(&mut files, support_fragments)?;
+        let mut origins = BTreeMap::new();
+        render_support_package(&mut files, &mut origins, support_fragments)?;
         for (path, contents) in self.external_models.render_support_files()? {
-            insert_generated_file(&mut files, path, contents)?;
+            insert_generated_file(
+                &mut files,
+                &mut origins,
+                path,
+                contents,
+                PathBuf::from("<generated Python external-model runtime>"),
+            )?;
         }
         let variants = self
             .variants
@@ -678,7 +728,13 @@ impl<'a> ApiPlanner<'a> {
             },
             root_package_imports,
         );
-        insert_generated_file(&mut files, "__init__.py", render_init(root_package_imports))?;
+        insert_generated_file(
+            &mut files,
+            &mut origins,
+            "__init__.py",
+            render_init(root_package_imports),
+            PathBuf::from("<generated Python package barrel>"),
+        )?;
         // A module that declares nothing emits no models file. Emitting the file
         // anyway leaves a header and unused imports behind.
         if let Some(models_source) = render_models_module(
@@ -692,18 +748,27 @@ impl<'a> ApiPlanner<'a> {
             self.inline_model_rebuilds,
             self.model_hoists,
         )? {
-            insert_generated_file(&mut files, "models.py", models_source)?;
+            insert_generated_file(
+                &mut files,
+                &mut origins,
+                "models.py",
+                models_source,
+                PathBuf::from("<generated Python models module>"),
+            )?;
         }
         if !resource_names.is_empty() {
             insert_generated_file(
                 &mut files,
+                &mut origins,
                 "_resources/__init__.py",
                 render_resources_package_init(services),
+                PathBuf::from("<generated Python resources barrel>"),
             )?;
         }
         if !services.is_empty() {
             insert_generated_file(
                 &mut files,
+                &mut origins,
                 "services.py",
                 render_service_module(
                     services,
@@ -711,20 +776,25 @@ impl<'a> ApiPlanner<'a> {
                     self.model_hoists,
                     mode == GenerationMode::NativeApi,
                 ),
+                PathBuf::from("<generated Python services module>"),
             )?;
         }
         if has_standalone_operations {
             insert_generated_file(
                 &mut files,
+                &mut origins,
                 "operations/__init__.py",
                 render_operations_package_init(),
+                PathBuf::from("<generated Python operations barrel>"),
             )?;
         }
         if crate::nexgen_config::current().system_nexus && mode == GenerationMode::NativeApi {
             insert_generated_file(
                 &mut files,
+                &mut origins,
                 "_system_nexus_interceptor.py",
                 render_system_nexus_interceptor(services),
+                PathBuf::from("<generated Python system Nexus interceptor>"),
             )?;
         }
 
@@ -737,6 +807,7 @@ impl<'a> ApiPlanner<'a> {
                 };
                 insert_generated_file(
                     &mut files,
+                    &mut origins,
                     format!("_resources/{}.py", resource_module_name(resource)),
                     self.render_resource_module_file(
                         service,
@@ -746,6 +817,10 @@ impl<'a> ApiPlanner<'a> {
                         &resource_names,
                         &support_names,
                     ),
+                    PathBuf::from(format!(
+                        "<generated Python resource {}.{}>",
+                        service.name, resource.name
+                    )),
                 )?;
             }
             if mode == GenerationMode::NativeApi {
@@ -760,6 +835,7 @@ impl<'a> ApiPlanner<'a> {
                     }
                     insert_generated_file(
                         &mut files,
+                        &mut origins,
                         format!("operations/{}.py", operation.attr_name),
                         render_operation_module(
                             service,
@@ -771,6 +847,10 @@ impl<'a> ApiPlanner<'a> {
                             self.api_plan,
                             self.model_hoists,
                         ),
+                        PathBuf::from(format!(
+                            "<generated Python operation {}.{}>",
+                            service.name, operation.name
+                        )),
                     )?;
                 }
             }
@@ -3401,6 +3481,7 @@ fn resource_operation_owners(services: &[RenderedService<'_>]) -> BTreeMap<Strin
 
 fn render_support_package(
     files: &mut BTreeMap<std::path::PathBuf, String>,
+    origins: &mut BTreeMap<PathBuf, PathBuf>,
     support_fragments: &[SupportFragmentSpec],
 ) -> Result<Vec<String>> {
     let mut module_names = Vec::new();
@@ -3408,8 +3489,10 @@ fn render_support_package(
         let module_name = support_module_name(fragment)?;
         insert_generated_file(
             files,
+            origins,
             format!("_support/{module_name}.py"),
             fragment.contents.clone(),
+            PathBuf::from(&fragment.path),
         )?;
         module_names.push(module_name);
     }
@@ -3423,7 +3506,13 @@ fn render_support_package(
             output.push_str(module_name);
             output.push_str(" import *  # noqa: F401,F403\n");
         }
-        insert_generated_file(files, "_support/__init__.py", output)?;
+        insert_generated_file(
+            files,
+            origins,
+            "_support/__init__.py",
+            output,
+            PathBuf::from("<generated Python support barrel>"),
+        )?;
     }
 
     Ok(module_names)

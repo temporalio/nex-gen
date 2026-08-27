@@ -2,3 +2,5 @@
 
 export { showcaseServiceTs, ShowcaseServiceClient } from "./services";
 export type { GetShowcaseInput, Showcase } from "./models";
+export { payloadValidationError } from "./definitions";
+export type { Violation } from "./definitions";

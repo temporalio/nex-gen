@@ -19,10 +19,12 @@ flattened**. Inside each per-input directory:
 - `services.<lang>` — the Nexus service bindings declared in that file,
   emitted **only if it declares any** (see [[services]]).
 
-Schema-independent runtime — `Violation`, any target-owned payload-validation
-compatibility helper, the spec-number helpers, and the (de)serialize scaffolding — is defined **once**
-at the package root (the shared `definitions` file, below), never
-duplicated per module.
+Schema-independent runtime intended for cross-model reuse — `Violation`, any
+target-owned payload-validation compatibility helper, and each target's shared
+numeric or (de)serialization helpers — is defined **once** at the package root
+(the shared `definitions` file, below), never duplicated per module. A target
+may still inline a leaf check when it has no shared runtime primitive for it;
+TypeScript's safe-integer predicate is one such check.
 
 Nesting works because each of these languages maps an input directory onto
 its native module unit:
@@ -266,7 +268,11 @@ rename remedy:
   package surface with **no diagnostic at the barrel** — the silent
   incorrectness P7 forbids. `from .__init__ import …` self-resolves the same
   way;
-- within a **per-input directory**: `models` and `services`.
+
+`models` and `services` are not reserved module segments. Those generated files
+live *inside* a per-input leaf directory, and the file-vs-directory rule below
+means that leaf can never also contain a child module; a directory named
+`models` therefore does not contend with its own `models.py`.
 
 Module-name reservation is deliberately **target-independent**: every name above
 is reserved in every target — the union across languages — so an input named any

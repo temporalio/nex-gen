@@ -59,6 +59,31 @@ impl GeneratedFiles {
     }
 }
 
+/// Inserts one generated file while retaining enough provenance for P7.2's
+/// collision diagnostic. Origins are authored paths when a file comes from an
+/// input leaf/support fragment, or a descriptive virtual path for a fixed
+/// generator-owned artifact.
+pub(crate) fn insert_generated_file_with_origin(
+    files: &mut BTreeMap<PathBuf, String>,
+    origins: &mut BTreeMap<PathBuf, PathBuf>,
+    path: PathBuf,
+    contents: String,
+    origin: PathBuf,
+    remedy: &str,
+) -> Result<()> {
+    if let Some(first_origin) = origins.get(&path) {
+        return Err(Error::GeneratedFileOriginConflict {
+            path,
+            first_origin: first_origin.clone(),
+            second_origin: origin,
+            remedy: remedy.to_string(),
+        });
+    }
+    origins.insert(path.clone(), origin);
+    files.insert(path, contents);
+    Ok(())
+}
+
 pub(crate) trait ExternalModelBackend<ModelType = PlannedType> {
     type ModelFragments;
     type WireConversion;
@@ -274,8 +299,37 @@ mod tests {
 
     use super::{
         GenerateFilesOptions, GenerationMode, generate_files_for_tree_with_mode_and_options,
+        insert_generated_file_with_origin,
     };
     use crate::spec::ApiSpecTree;
+
+    #[test]
+    fn generated_file_conflict_names_both_origins_and_remedy() {
+        let mut files = std::collections::BTreeMap::new();
+        let mut origins = std::collections::BTreeMap::new();
+        insert_generated_file_with_origin(
+            &mut files,
+            &mut origins,
+            PathBuf::from("models.py"),
+            "first".to_string(),
+            PathBuf::from("one.yaml"),
+            "rename an input",
+        )
+        .unwrap();
+        let error = insert_generated_file_with_origin(
+            &mut files,
+            &mut origins,
+            PathBuf::from("models.py"),
+            "second".to_string(),
+            PathBuf::from("two.yaml"),
+            "rename an input",
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("one.yaml"), "{error}");
+        assert!(error.contains("two.yaml"), "{error}");
+        assert!(error.contains("rename an input"), "{error}");
+    }
 
     #[test]
     fn warns_when_resource_method_generates_as_stub() {

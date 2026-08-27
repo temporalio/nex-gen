@@ -823,7 +823,8 @@ export const addressTransferTypeConverter =
     }
 
     public toTransferType(value: Address): unknown {
-      if (!__nexgenDefinitions.isPlainObject(value)) {
+      const candidate: unknown = value;
+      if (!__nexgenDefinitions.isPlainObject(candidate)) {
         throw __nexgenDefinitions.payloadValidationError([
           { path: "", reason: "expected object" },
         ]);
@@ -918,7 +919,8 @@ export const addressBookTransferTypeConverter =
     }
 
     public toTransferType(value: AddressBook): unknown {
-      if (!__nexgenDefinitions.isPlainObject(value)) {
+      const candidate: unknown = value;
+      if (!__nexgenDefinitions.isPlainObject(candidate)) {
         throw __nexgenDefinitions.payloadValidationError([
           { path: "", reason: "expected object" },
         ]);
@@ -1007,7 +1009,8 @@ export const attributesTransferTypeConverter =
     }
 
     public toTransferType(value: Attributes): unknown {
-      if (!__nexgenDefinitions.isPlainObject(value)) {
+      const candidate: unknown = value;
+      if (!__nexgenDefinitions.isPlainObject(candidate)) {
         throw __nexgenDefinitions.payloadValidationError([
           { path: "", reason: "expected object" },
         ]);
@@ -1094,7 +1097,8 @@ export const blobIndexTransferTypeConverter =
     }
 
     public toTransferType(value: BlobIndex): unknown {
-      if (!__nexgenDefinitions.isPlainObject(value)) {
+      const candidate: unknown = value;
+      if (!__nexgenDefinitions.isPlainObject(candidate)) {
         throw __nexgenDefinitions.payloadValidationError([
           { path: "", reason: "expected object" },
         ]);
@@ -1160,7 +1164,8 @@ export const choicesTransferTypeConverter =
     }
 
     public toTransferType(value: Choices): unknown {
-      if (!__nexgenDefinitions.isPlainObject(value)) {
+      const candidate: unknown = value;
+      if (!__nexgenDefinitions.isPlainObject(candidate)) {
         throw __nexgenDefinitions.payloadValidationError([
           { path: "", reason: "expected object" },
         ]);
@@ -1308,7 +1313,8 @@ export const circleTransferTypeConverter =
     }
 
     public toTransferType(value: Circle): unknown {
-      if (!__nexgenDefinitions.isPlainObject(value)) {
+      const candidate: unknown = value;
+      if (!__nexgenDefinitions.isPlainObject(candidate)) {
         throw __nexgenDefinitions.payloadValidationError([
           { path: "", reason: "expected object" },
         ]);
@@ -1465,7 +1471,8 @@ export const contactTsTransferTypeConverter =
     }
 
     public toTransferType(value: ContactTs): unknown {
-      if (!__nexgenDefinitions.isPlainObject(value)) {
+      const candidate: unknown = value;
+      if (!__nexgenDefinitions.isPlainObject(candidate)) {
         throw __nexgenDefinitions.payloadValidationError([
           { path: "", reason: "expected object" },
         ]);
@@ -1589,7 +1596,8 @@ export const dateIndexTransferTypeConverter =
     }
 
     public toTransferType(value: DateIndex): unknown {
-      if (!__nexgenDefinitions.isPlainObject(value)) {
+      const candidate: unknown = value;
+      if (!__nexgenDefinitions.isPlainObject(candidate)) {
         throw __nexgenDefinitions.payloadValidationError([
           { path: "", reason: "expected object" },
         ]);
@@ -1650,7 +1658,8 @@ export const extrasTransferTypeConverter =
     }
 
     public toTransferType(value: Extras): unknown {
-      if (!__nexgenDefinitions.isPlainObject(value)) {
+      const candidate: unknown = value;
+      if (!__nexgenDefinitions.isPlainObject(candidate)) {
         throw __nexgenDefinitions.payloadValidationError([
           { path: "", reason: "expected object" },
         ]);
@@ -1721,7 +1730,8 @@ export const labelsTransferTypeConverter =
     }
 
     public toTransferType(value: Labels): unknown {
-      if (!__nexgenDefinitions.isPlainObject(value)) {
+      const candidate: unknown = value;
+      if (!__nexgenDefinitions.isPlainObject(candidate)) {
         throw __nexgenDefinitions.payloadValidationError([
           { path: "", reason: "expected object" },
         ]);
@@ -1820,7 +1830,8 @@ export const linkNoteTransferTypeConverter =
     }
 
     public toTransferType(value: LinkNote): unknown {
-      if (!__nexgenDefinitions.isPlainObject(value)) {
+      const candidate: unknown = value;
+      if (!__nexgenDefinitions.isPlainObject(candidate)) {
         throw __nexgenDefinitions.payloadValidationError([
           { path: "", reason: "expected object" },
         ]);
@@ -1917,7 +1928,8 @@ export const metricsTransferTypeConverter =
     }
 
     public toTransferType(value: Metrics): unknown {
-      if (!__nexgenDefinitions.isPlainObject(value)) {
+      const candidate: unknown = value;
+      if (!__nexgenDefinitions.isPlainObject(candidate)) {
         throw __nexgenDefinitions.payloadValidationError([
           { path: "", reason: "expected object" },
         ]);
@@ -1999,7 +2011,8 @@ export const nicknamesTransferTypeConverter =
     }
 
     public toTransferType(value: Nicknames): unknown {
-      if (!__nexgenDefinitions.isPlainObject(value)) {
+      const candidate: unknown = value;
+      if (!__nexgenDefinitions.isPlainObject(candidate)) {
         throw __nexgenDefinitions.payloadValidationError([
           { path: "", reason: "expected object" },
         ]);
@@ -2135,7 +2148,8 @@ export const quotasTransferTypeConverter =
     }
 
     public toTransferType(value: Quotas): unknown {
-      if (!__nexgenDefinitions.isPlainObject(value)) {
+      const candidate: unknown = value;
+      if (!__nexgenDefinitions.isPlainObject(candidate)) {
         throw __nexgenDefinitions.payloadValidationError([
           { path: "", reason: "expected object" },
         ]);
@@ -2242,7 +2256,8 @@ export const settingsTransferTypeConverter =
     }
 
     public toTransferType(value: Settings): unknown {
-      if (!__nexgenDefinitions.isPlainObject(value)) {
+      const candidate: unknown = value;
+      if (!__nexgenDefinitions.isPlainObject(candidate)) {
         throw __nexgenDefinitions.payloadValidationError([
           { path: "", reason: "expected object" },
         ]);
@@ -4692,7 +4707,8 @@ export const showcaseTransferTypeConverter =
     }
 
     public toTransferType(value: Showcase): unknown {
-      if (!__nexgenDefinitions.isPlainObject(value)) {
+      const candidate: unknown = value;
+      if (!__nexgenDefinitions.isPlainObject(candidate)) {
         throw __nexgenDefinitions.payloadValidationError([
           { path: "", reason: "expected object" },
         ]);
@@ -6530,7 +6546,8 @@ export const showcaseAuditTransferTypeConverter =
     }
 
     public toTransferType(value: ShowcaseAudit): unknown {
-      if (!__nexgenDefinitions.isPlainObject(value)) {
+      const candidate: unknown = value;
+      if (!__nexgenDefinitions.isPlainObject(candidate)) {
         throw __nexgenDefinitions.payloadValidationError([
           { path: "", reason: "expected object" },
         ]);
@@ -6639,7 +6656,8 @@ export const showcaseDetailObjectTransferTypeConverter =
     }
 
     public toTransferType(value: ShowcaseDetailObject): unknown {
-      if (!__nexgenDefinitions.isPlainObject(value)) {
+      const candidate: unknown = value;
+      if (!__nexgenDefinitions.isPlainObject(candidate)) {
         throw __nexgenDefinitions.payloadValidationError([
           { path: "", reason: "expected object" },
         ]);
@@ -6729,7 +6747,8 @@ export const showcaseLedgerTransferTypeConverter =
     }
 
     public toTransferType(value: ShowcaseLedger): unknown {
-      if (!__nexgenDefinitions.isPlainObject(value)) {
+      const candidate: unknown = value;
+      if (!__nexgenDefinitions.isPlainObject(candidate)) {
         throw __nexgenDefinitions.payloadValidationError([
           { path: "", reason: "expected object" },
         ]);
@@ -6814,7 +6833,8 @@ export const showcaseLedgerValueTransferTypeConverter =
     }
 
     public toTransferType(value: ShowcaseLedgerValue): unknown {
-      if (!__nexgenDefinitions.isPlainObject(value)) {
+      const candidate: unknown = value;
+      if (!__nexgenDefinitions.isPlainObject(candidate)) {
         throw __nexgenDefinitions.payloadValidationError([
           { path: "", reason: "expected object" },
         ]);
@@ -6929,7 +6949,8 @@ export const showcaseLocationTransferTypeConverter =
     }
 
     public toTransferType(value: ShowcaseLocation): unknown {
-      if (!__nexgenDefinitions.isPlainObject(value)) {
+      const candidate: unknown = value;
+      if (!__nexgenDefinitions.isPlainObject(candidate)) {
         throw __nexgenDefinitions.payloadValidationError([
           { path: "", reason: "expected object" },
         ]);
@@ -7063,7 +7084,8 @@ export const showcaseLocationGeoTransferTypeConverter =
     }
 
     public toTransferType(value: ShowcaseLocationGeo): unknown {
-      if (!__nexgenDefinitions.isPlainObject(value)) {
+      const candidate: unknown = value;
+      if (!__nexgenDefinitions.isPlainObject(candidate)) {
         throw __nexgenDefinitions.payloadValidationError([
           { path: "", reason: "expected object" },
         ]);
@@ -7155,7 +7177,8 @@ export const showcaseMetadataTransferTypeConverter =
     }
 
     public toTransferType(value: ShowcaseMetadata): unknown {
-      if (!__nexgenDefinitions.isPlainObject(value)) {
+      const candidate: unknown = value;
+      if (!__nexgenDefinitions.isPlainObject(candidate)) {
         throw __nexgenDefinitions.payloadValidationError([
           { path: "", reason: "expected object" },
         ]);
@@ -7236,7 +7259,8 @@ export const showcaseRowsItemTransferTypeConverter =
     }
 
     public toTransferType(value: ShowcaseRowsItem): unknown {
-      if (!__nexgenDefinitions.isPlainObject(value)) {
+      const candidate: unknown = value;
+      if (!__nexgenDefinitions.isPlainObject(candidate)) {
         throw __nexgenDefinitions.payloadValidationError([
           { path: "", reason: "expected object" },
         ]);
@@ -7415,7 +7439,8 @@ export const getShowcaseInputTransferTypeConverter =
     }
 
     public toTransferType(value: GetShowcaseInput): unknown {
-      if (!__nexgenDefinitions.isPlainObject(value)) {
+      const candidate: unknown = value;
+      if (!__nexgenDefinitions.isPlainObject(candidate)) {
         throw __nexgenDefinitions.payloadValidationError([
           { path: "", reason: "expected object" },
         ]);
@@ -7500,7 +7525,8 @@ export const squareTransferTypeConverter =
     }
 
     public toTransferType(value: Square): unknown {
-      if (!__nexgenDefinitions.isPlainObject(value)) {
+      const candidate: unknown = value;
+      if (!__nexgenDefinitions.isPlainObject(candidate)) {
         throw __nexgenDefinitions.payloadValidationError([
           { path: "", reason: "expected object" },
         ]);
@@ -7617,7 +7643,8 @@ export const textNoteTransferTypeConverter =
     }
 
     public toTransferType(value: TextNote): unknown {
-      if (!__nexgenDefinitions.isPlainObject(value)) {
+      const candidate: unknown = value;
+      if (!__nexgenDefinitions.isPlainObject(candidate)) {
         throw __nexgenDefinitions.payloadValidationError([
           { path: "", reason: "expected object" },
         ]);
@@ -7729,7 +7756,8 @@ export const tokensTransferTypeConverter =
     }
 
     public toTransferType(value: Tokens): unknown {
-      if (!__nexgenDefinitions.isPlainObject(value)) {
+      const candidate: unknown = value;
+      if (!__nexgenDefinitions.isPlainObject(candidate)) {
         throw __nexgenDefinitions.payloadValidationError([
           { path: "", reason: "expected object" },
         ]);
@@ -7871,7 +7899,8 @@ export const widgetTransferTypeConverter =
     }
 
     public toTransferType(value: Widget): unknown {
-      if (!__nexgenDefinitions.isPlainObject(value)) {
+      const candidate: unknown = value;
+      if (!__nexgenDefinitions.isPlainObject(candidate)) {
         throw __nexgenDefinitions.payloadValidationError([
           { path: "", reason: "expected object" },
         ]);
@@ -8012,7 +8041,8 @@ export const widgetBaseTransferTypeConverter =
     }
 
     public toTransferType(value: WidgetBase): unknown {
-      if (!__nexgenDefinitions.isPlainObject(value)) {
+      const candidate: unknown = value;
+      if (!__nexgenDefinitions.isPlainObject(candidate)) {
         throw __nexgenDefinitions.payloadValidationError([
           { path: "", reason: "expected object" },
         ]);

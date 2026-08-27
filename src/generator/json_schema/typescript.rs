@@ -3573,8 +3573,12 @@ fn render_model_serializer_body(
     // in-memory model and throw the aggregated payload-validation failure before emitting
     // the wire object — matching the parse path (both directions over one set of
     // check emitters).
+    // Guard through an `unknown` alias. Calling this type predicate directly on
+    // the typed model parameter narrows `value` to `Record<string, unknown>` in
+    // the remainder of the serializer, which erases the model member types.
+    output.push_str("  const candidate: unknown = value;\n");
     output.push_str(&format!(
-        "  if (!{DEFINITIONS_NAMESPACE}.isPlainObject(value)) {{\n    throw {DEFINITIONS_NAMESPACE}.payloadValidationError([{{ path: '', reason: 'expected object' }}]);\n  }}\n"
+        "  if (!{DEFINITIONS_NAMESPACE}.isPlainObject(candidate)) {{\n    throw {DEFINITIONS_NAMESPACE}.payloadValidationError([{{ path: '', reason: 'expected object' }}]);\n  }}\n"
     ));
     let needs_validation = model_needs_serialize_validation(&schema)?;
     if needs_validation {
