@@ -21,9 +21,12 @@ use crate::spec::{ApiSpecBranch, ApiSpecLeaf, ApiSpecNode, ApiSpecTree};
 
 #[derive(Debug, Clone, Deserialize, Default)]
 struct Document {
+    #[serde(default, deserialize_with = "deserialize_present_value")]
     nexusrpc: Option<Value>,
     #[serde(rename = "$schema")]
+    #[serde(default, deserialize_with = "deserialize_present_value")]
     schema: Option<Value>,
+    #[serde(default, deserialize_with = "deserialize_services")]
     services: Option<IndexMap<String, Service>>,
     #[serde(rename = "$defs")]
     defs: Option<IndexMap<String, Schema>>,
@@ -71,14 +74,37 @@ struct Schema {
         deserialize_with = "deserialize_present_value"
     )]
     ty: Option<Value>,
-    #[serde(default, deserialize_with = "deserialize_annotation")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_annotation"
+    )]
     title: Option<String>,
-    #[serde(default, deserialize_with = "deserialize_annotation")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_annotation"
+    )]
     description: Option<String>,
     properties: Option<IndexMap<String, Schema>>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_present_value"
+    )]
     required: Option<Value>,
-    #[serde(rename = "additionalProperties")]
+    #[serde(
+        rename = "additionalProperties",
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_present_value"
+    )]
     additional_properties: Option<Value>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_items"
+    )]
     items: Option<Box<Schema>>,
     #[serde(rename = "oneOf")]
     one_of: Option<Vec<Schema>>,
@@ -102,6 +128,50 @@ where
     Value::deserialize(deserializer).map(Some)
 }
 
+/// Deserializes the document-level `services` map without folding an explicit
+/// YAML `null` into absence. `services: null` is malformed, not an omitted
+/// envelope member.
+fn deserialize_services<'de, D>(
+    deserializer: D,
+) -> std::result::Result<Option<IndexMap<String, Service>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = Value::deserialize(deserializer)?;
+    if value.is_null() {
+        return Err(serde::de::Error::custom(
+            "`services` must be an object mapping service names to service definitions, not null",
+        ));
+    }
+    serde_json::from_value(value)
+        .map(Some)
+        .map_err(serde::de::Error::custom)
+}
+
+/// Gives boolean- and tuple-valued `items` the subset's actionable diagnostic
+/// instead of leaking serde's representation error before the schema validator
+/// can name the supported uniform-element form.
+fn deserialize_items<'de, D>(deserializer: D) -> std::result::Result<Option<Box<Schema>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = Value::deserialize(deserializer)?;
+    match value {
+        Value::Bool(_) => Err(serde::de::Error::custom(
+            "boolean `items` schemas are not supported; use one schema object describing the uniform element type",
+        )),
+        Value::Array(_) => Err(serde::de::Error::custom(
+            "tuple-valued `items` is not supported; use one schema object describing the uniform element type (or `prefixItems` in a tool that supports tuples)",
+        )),
+        Value::Object(_) => serde_json::from_value(value)
+            .map(|schema| Some(Box::new(schema)))
+            .map_err(serde::de::Error::custom),
+        other => Err(serde::de::Error::custom(format!(
+            "`items` must be a schema object describing the uniform element type, got {other}"
+        ))),
+    }
+}
+
 /// Deserializes a `title`/`description` annotation, rejecting a non-string
 /// value.
 ///
@@ -117,10 +187,9 @@ fn deserialize_annotation<'de, D>(deserializer: D) -> std::result::Result<Option
 where
     D: serde::Deserializer<'de>,
 {
-    match Option::<Value>::deserialize(deserializer)? {
-        None | Some(Value::Null) => Ok(None),
-        Some(Value::String(text)) => Ok(Some(text)),
-        Some(other) => Err(serde::de::Error::custom(format!(
+    match Value::deserialize(deserializer)? {
+        Value::String(text) => Ok(Some(text)),
+        other => Err(serde::de::Error::custom(format!(
             "must be a string, got {other}"
         ))),
     }
@@ -135,24 +204,21 @@ impl Schema {
             } == Schema::default()
     }
 
-    /// True when the schema is a `$ref` carrying nothing but `x-<lang>-name`
-    /// overrides. Those name the **member** the reference is bound to (the
-    /// [[properties]] Stage 4 escape hatch), not the referenced type: they assert
-    /// nothing about the value, so unlike a schema keyword they never merge with
-    /// the target and are legal alongside a `$ref`. Without this a member whose
-    /// type is a `$ref` could not be renamed at all — and a member named `class`
-    /// would be unfixable in Python and Java.
-    fn is_ref_with_name_overrides_only(&self) -> bool {
+    /// True when the schema is a `$ref` carrying only non-conjunct siblings:
+    /// member-name overrides or annotations that mark/document the member but
+    /// assert nothing about the referenced value. These stay a reference rather
+    /// than cloning the target through the implicit-`allOf` rewrite.
+    fn is_ref_with_non_conjunct_siblings_only(&self) -> bool {
         self.reference.is_some()
             && Schema {
                 reference: None,
                 extra: IndexMap::new(),
                 ..self.clone()
             } == Schema::default()
-            && self
-                .extra
-                .keys()
-                .all(|keyword| LANG_NAME_KEYWORDS.contains(&keyword.as_str()))
+            && self.extra.keys().all(|keyword| {
+                LANG_NAME_KEYWORDS.contains(&keyword.as_str())
+                    || matches!(keyword.as_str(), "$comment" | "examples" | "deprecated")
+            })
     }
 }
 
@@ -209,6 +275,7 @@ fn schema_extra_keyword_is_known(keyword: &str) -> bool {
             | "maxProperties"
             | "propertyNames"
             | "dependentRequired"
+            | "dependencies"
             | "const"
             | "enum"
             | "default"
@@ -281,6 +348,7 @@ fn expand_json_schema_sources(input_paths: &[PathBuf]) -> Result<Vec<JsonSource>
             reason: "at least one JSON schema input path is required".to_string(),
         });
     }
+    let invocation_root = json_schema_invocation_root(input_paths)?;
     let mut source_inputs = BTreeMap::<PathBuf, String>::new();
     for input_path in input_paths {
         if input_path.is_dir() {
@@ -312,13 +380,17 @@ fn expand_json_schema_sources(input_paths: &[PathBuf]) -> Result<Vec<JsonSource>
         // Diagnose malformed/unknown authored grammar before following refs it
         // may have placed in a position that is not a schema at all.
         validate_raw_document_grammar(&path, &document)?;
-        let raw = serde_yaml::from_str::<Value>(input).map_err(|error| Error::JsonSchemaParse {
-            path: path.clone(),
-            message: error.to_string(),
-        })?;
         let mut references = Vec::new();
-        collect_local_ref_file_parts(&raw, &mut references);
-        for file_part in references {
+        collect_local_ref_file_parts(&document, &mut references)?;
+        for (file_part, reference, context) in references {
+            if Path::new(&file_part).is_absolute() {
+                return Err(Error::InvalidJsonSchema {
+                    path: path.clone(),
+                    reason: format!(
+                        "{context}: absolute-path `$ref` `{reference}` is not supported; use a path relative to the referring schema"
+                    ),
+                });
+            }
             let target = normalize(
                 &path
                     .parent()
@@ -326,6 +398,16 @@ fn expand_json_schema_sources(input_paths: &[PathBuf]) -> Result<Vec<JsonSource>
                     .join(&file_part),
             );
             let target = canonical(&target);
+            if !target.starts_with(&invocation_root) {
+                return Err(Error::InvalidJsonSchema {
+                    path: path.clone(),
+                    reason: format!(
+                        "{context}: `$ref` `{reference}` escapes the invocation root `{}` to `{}`; widen the invocation to include that ancestor or pass the target as an additional input",
+                        invocation_root.display(),
+                        target.display(),
+                    ),
+                });
+            }
             if source_inputs.contains_key(&target) {
                 continue;
             }
@@ -368,6 +450,41 @@ fn expand_json_schema_sources(input_paths: &[PathBuf]) -> Result<Vec<JsonSource>
     Ok(sources)
 }
 
+/// The user-chosen boundary refs may not escape. For a directory input this is
+/// the directory itself; for file inputs it is their common containing
+/// directory. Computing it before closure expansion prevents a ref from making
+/// generated module paths depend on the checkout's absolute location.
+fn json_schema_invocation_root(input_paths: &[PathBuf]) -> Result<PathBuf> {
+    let mut roots = input_paths.iter().map(|path| {
+        let canonical_path = canonical(path);
+        if path.is_dir() {
+            canonical_path
+        } else {
+            canonical_path
+                .parent()
+                .unwrap_or_else(|| Path::new("."))
+                .to_path_buf()
+        }
+    });
+    let Some(mut root) = roots.next() else {
+        return Err(Error::InvalidJsonSchema {
+            path: PathBuf::from("<input>"),
+            reason: "at least one JSON schema input path is required".to_string(),
+        });
+    };
+    for path in roots {
+        while !path.starts_with(&root) {
+            if !root.pop() {
+                return Err(Error::InvalidJsonSchema {
+                    path: PathBuf::from("<input>"),
+                    reason: "could not determine the JSON schema invocation root".to_string(),
+                });
+            }
+        }
+    }
+    Ok(root)
+}
+
 fn insert_json_schema_source(path: &Path, sources: &mut BTreeMap<PathBuf, String>) -> Result<()> {
     let input = fs::read_to_string(path).map_err(|source| Error::ReadFile {
         path: path.to_path_buf(),
@@ -377,28 +494,141 @@ fn insert_json_schema_source(path: &Path, sources: &mut BTreeMap<PathBuf, String
     Ok(())
 }
 
-fn collect_local_ref_file_parts(value: &Value, out: &mut Vec<String>) {
-    match value {
-        Value::Object(entries) => {
-            if let Some(Value::String(reference)) = entries.get("$ref") {
-                let file_part = reference
-                    .split_once('#')
-                    .map_or(reference.as_str(), |(file, _)| file);
-                if !file_part.is_empty() && !ref_file_part_has_uri_scheme(file_part) {
-                    out.push(file_part.to_string());
+fn collect_local_ref_file_parts(
+    document: &Document,
+    out: &mut Vec<(String, String, String)>,
+) -> Result<()> {
+    if let Some(defs) = &document.defs {
+        for (name, schema) in defs {
+            collect_schema_local_ref_file_parts(schema, &format!("$defs.{name}"), out)?;
+        }
+    }
+    if root_is_schema_shaped(&document.root) {
+        collect_schema_local_ref_file_parts(&document.root, "root schema", out)?;
+    }
+    if let Some(services) = &document.services {
+        for (service_name, service) in services {
+            for (operation_name, operation) in &service.operations {
+                if let Some(input) = &operation.input {
+                    collect_schema_local_ref_file_parts(
+                        input,
+                        &format!("services.{service_name}.operations.{operation_name}.input"),
+                        out,
+                    )?;
+                }
+                if let Some(output) = &operation.output {
+                    collect_schema_local_ref_file_parts(
+                        output,
+                        &format!("services.{service_name}.operations.{operation_name}.output"),
+                        out,
+                    )?;
                 }
             }
-            for child in entries.values() {
-                collect_local_ref_file_parts(child, out);
-            }
         }
-        Value::Array(entries) => {
-            for child in entries {
-                collect_local_ref_file_parts(child, out);
-            }
-        }
-        _ => {}
     }
+    Ok(())
+}
+
+/// Walks schema-valued positions only. Values under `examples`, `default`,
+/// `const`, and `enum` are data even when they contain a `$ref`-shaped key.
+fn collect_schema_local_ref_file_parts(
+    schema: &Schema,
+    context: &str,
+    out: &mut Vec<(String, String, String)>,
+) -> Result<()> {
+    if let Some(reference) = &schema.reference {
+        let file_part = reference
+            .split_once('#')
+            .map_or(reference.as_str(), |(file, _)| file);
+        if !file_part.is_empty() && !ref_file_part_has_uri_scheme(file_part) {
+            out.push((
+                file_part.to_string(),
+                reference.clone(),
+                context.to_string(),
+            ));
+        }
+    }
+    if let Some(properties) = &schema.properties {
+        for (name, property) in properties {
+            collect_schema_local_ref_file_parts(
+                property,
+                &format!("{context}.properties.{name}"),
+                out,
+            )?;
+        }
+    }
+    if let Some(items) = &schema.items {
+        collect_schema_local_ref_file_parts(items, &format!("{context}.items"), out)?;
+    }
+    if let Some(branches) = &schema.one_of {
+        for (index, branch) in branches.iter().enumerate() {
+            collect_schema_local_ref_file_parts(branch, &format!("{context}.oneOf[{index}]"), out)?;
+        }
+    }
+    if let Some(Value::Object(_)) = &schema.additional_properties {
+        let child: Schema = serde_json::from_value(
+            schema
+                .additional_properties
+                .clone()
+                .expect("additionalProperties is present"),
+        )
+        .map_err(|error| Error::InvalidJsonSchema {
+            path: PathBuf::from("<json-schema>"),
+            reason: format!("{context}.additionalProperties is invalid: {error}"),
+        })?;
+        collect_schema_local_ref_file_parts(
+            &child,
+            &format!("{context}.additionalProperties"),
+            out,
+        )?;
+    }
+    if let Some(Value::Array(branches)) = schema.extra.get("allOf") {
+        for (index, branch) in branches.iter().enumerate() {
+            if branch.is_object() {
+                let child: Schema = serde_json::from_value(branch.clone()).map_err(|error| {
+                    Error::InvalidJsonSchema {
+                        path: PathBuf::from("<json-schema>"),
+                        reason: format!("{context}.allOf[{index}] is invalid: {error}"),
+                    }
+                })?;
+                collect_schema_local_ref_file_parts(
+                    &child,
+                    &format!("{context}.allOf[{index}]"),
+                    out,
+                )?;
+            }
+        }
+    }
+    for keyword in ["contains", "propertyNames"] {
+        if let Some(value @ Value::Object(_)) = schema.extra.get(keyword) {
+            let child: Schema = serde_json::from_value(value.clone()).map_err(|error| {
+                Error::InvalidJsonSchema {
+                    path: PathBuf::from("<json-schema>"),
+                    reason: format!("{context}.{keyword} is invalid: {error}"),
+                }
+            })?;
+            collect_schema_local_ref_file_parts(&child, &format!("{context}.{keyword}"), out)?;
+        }
+    }
+    if let Some(Value::Object(defs)) = schema.extra.get("$defs") {
+        for (name, definition) in defs {
+            if definition.is_object() {
+                let child: Schema =
+                    serde_json::from_value(definition.clone()).map_err(|error| {
+                        Error::InvalidJsonSchema {
+                            path: PathBuf::from("<json-schema>"),
+                            reason: format!("{context}.$defs.{name} is invalid: {error}"),
+                        }
+                    })?;
+                collect_schema_local_ref_file_parts(
+                    &child,
+                    &format!("{context}.$defs.{name}"),
+                    out,
+                )?;
+            }
+        }
+    }
+    Ok(())
 }
 
 fn ref_file_part_has_uri_scheme(file_part: &str) -> bool {
@@ -1072,6 +1302,7 @@ fn validate_raw_document_grammar(path: &Path, doc: &Document) -> Result<()> {
         })
     };
 
+    validate_document_markers(path, doc)?;
     let has_nexus_envelope = doc.nexusrpc.is_some();
     if has_nexus_envelope {
         // `description` is the only Schema field belonging to the envelope.
@@ -1086,6 +1317,10 @@ fn validate_raw_document_grammar(path: &Path, doc: &Document) -> Result<()> {
             return reject(format!("unknown Nexus envelope keyword `{keyword}`"));
         }
         if root_is_schema_shaped(&doc.root) {
+            // Give rejected reference/dialect keywords their owning diagnostic
+            // rather than the generic envelope-root remedy, which would tell
+            // the author to move an equally-illegal keyword into `$defs`.
+            validate_schema_common(path, &doc.root, "Nexus document")?;
             return reject(
                 "a Nexus JSON schema document root is an envelope, not a model; move the model into `$defs`"
                     .to_string(),
@@ -1101,7 +1336,7 @@ fn validate_raw_document_grammar(path: &Path, doc: &Document) -> Result<()> {
 
     if let Some(defs) = &doc.defs {
         for (name, schema) in defs {
-            validate_raw_schema_grammar(path, schema, &format!("$defs.{name}"))?;
+            validate_raw_model_schema_grammar(path, schema, &format!("$defs.{name}"))?;
         }
     }
 
@@ -1182,6 +1417,44 @@ fn validate_raw_document_grammar(path: &Path, doc: &Document) -> Result<()> {
     Ok(())
 }
 
+fn validate_document_markers(path: &Path, doc: &Document) -> Result<()> {
+    let has_nexus_envelope = doc.nexusrpc.is_some();
+    if let Some(marker) = &doc.nexusrpc
+        && marker.as_str() != Some("1.0.0")
+    {
+        return Err(Error::InvalidJsonSchema {
+            path: path.to_path_buf(),
+            reason: format!(
+                "`nexusrpc` must be exactly the string \"1.0.0\"; document declares {marker}"
+            ),
+        });
+    }
+    if let Some(schema) = &doc.schema
+        && schema.as_str() != Some("https://json-schema.org/draft/2020-12/schema")
+    {
+        return Err(Error::InvalidJsonSchema {
+            path: path.to_path_buf(),
+            reason: format!(
+                "`$schema` must be the string `https://json-schema.org/draft/2020-12/schema`; document declares {schema}"
+            ),
+        });
+    }
+    if !has_nexus_envelope && doc.services.is_some() {
+        return Err(Error::InvalidJsonSchema {
+            path: path.to_path_buf(),
+            reason: "`services` require a Nexus JSON schema document; add `nexusrpc: \"1.0.0\"` to enable Nexus service generation"
+                .to_string(),
+        });
+    }
+    if !has_nexus_envelope && !root_is_schema_shaped(&doc.root) && doc.defs.is_none() {
+        return Err(Error::InvalidJsonSchema {
+            path: path.to_path_buf(),
+            reason: "plain JSON schema files must define a root schema or `$defs`".to_string(),
+        });
+    }
+    Ok(())
+}
+
 fn validate_schema_keyword_allowlist(path: &Path, schema: &Schema, context: &str) -> Result<()> {
     for keyword in schema.extra.keys() {
         if keyword == "discriminator" {
@@ -1200,6 +1473,34 @@ fn validate_schema_keyword_allowlist(path: &Path, schema: &Schema, context: &str
         }
     }
     Ok(())
+}
+
+fn validate_legacy_dependencies(path: &Path, schema: &Schema, context: &str) -> Result<()> {
+    let Some(value) = schema.extra.get("dependencies") else {
+        return Ok(());
+    };
+    let Some(entries) = value.as_object() else {
+        return Err(Error::InvalidJsonSchema {
+            path: path.to_path_buf(),
+            reason: format!(
+                "{context}: legacy draft-4..7 `dependencies` must be an object; use `dependentRequired` for property-name arrays or replace schema dependencies with explicit types"
+            ),
+        });
+    };
+    if entries.values().all(Value::is_array) {
+        return Err(Error::InvalidJsonSchema {
+            path: path.to_path_buf(),
+            reason: format!(
+                "{context}: legacy draft-4..7 `dependencies` array form is not a 2020-12 keyword; rename `dependencies` to `dependentRequired` (for example `dependencies: {{a: [b]}}` becomes `dependentRequired: {{a: [b]}}`)"
+            ),
+        });
+    }
+    Err(Error::InvalidJsonSchema {
+        path: path.to_path_buf(),
+        reason: format!(
+            "{context}: legacy draft-4..7 schema-form `dependencies` is not supported; it corresponds to `dependentSchemas`, whose conditional subschema has no static lowering — split the variants into explicit types"
+        ),
+    })
 }
 
 /// Parses and recursively validates a raw schema-valued keyword. Boolean
@@ -1346,14 +1647,34 @@ fn property_names_unsupported_keyword_reason(context: &str, keyword: &str) -> St
 }
 
 fn validate_raw_schema_grammar(path: &Path, schema: &Schema, context: &str) -> Result<()> {
-    validate_schema_keyword_allowlist(path, schema, context)?;
+    validate_raw_schema_grammar_at(path, schema, context, false)
+}
+
+fn validate_raw_model_schema_grammar(path: &Path, schema: &Schema, context: &str) -> Result<()> {
+    validate_raw_schema_grammar_at(path, schema, context, true)
+}
+
+fn validate_raw_schema_grammar_at(
+    path: &Path,
+    schema: &Schema,
+    context: &str,
+    defs_allowed: bool,
+) -> Result<()> {
+    // Validate a `not` subschema's own authored grammar before reporting that
+    // this subset rejects `not` itself. Otherwise a typo inside it is hidden by
+    // a broader fix-it and resurfaces if the author follows that advice.
+    if let Some(negated) = schema.extra.get("not") {
+        validate_raw_subschema_value(path, negated, context, "not")?;
+    }
+    // Run the owning rejected-keyword diagnostics before normalization can
+    // replace them with a merge error or discard a later conjunct entirely.
+    validate_schema_common(path, schema, context)?;
     validate_annotations(path, schema, context)?;
     validate_required_grammar(path, schema, context)?;
     validate_dependent_required_grammar(path, schema, context)?;
     validate_raw_property_count_grammar(path, schema, context)?;
     validate_redundant_same_axis_bounds(path, schema, context)?;
     validate_default(path, schema, context)?;
-    validate_const_enum(path, schema, context)?;
 
     if let Some(value) = schema.extra.get("uniqueItems")
         && !value.is_boolean()
@@ -1497,6 +1818,14 @@ fn validate_raw_schema_grammar(path: &Path, schema: &Schema, context: &str) -> R
     }
     for keyword in ["$defs", "patternProperties", "dependentSchemas"] {
         if let Some(value) = schema.extra.get(keyword) {
+            if keyword == "$defs" && !defs_allowed {
+                return Err(Error::InvalidJsonSchema {
+                    path: path.to_path_buf(),
+                    reason: format!(
+                        "{context}: `$defs` is only allowed at a document root or inside a named `$defs` entry; move this definition to the document's `$defs`"
+                    ),
+                });
+            }
             let Some(entries) = value.as_object() else {
                 return Err(Error::InvalidJsonSchema {
                     path: path.to_path_buf(),
@@ -1504,12 +1833,29 @@ fn validate_raw_schema_grammar(path: &Path, schema: &Schema, context: &str) -> R
                 });
             };
             for (name, value) in entries {
-                validate_raw_subschema_value(
-                    path,
-                    value,
-                    &format!("{context}.{keyword}.{name}"),
-                    "schema",
-                )?;
+                if keyword == "$defs" && value.is_object() {
+                    let definition: Schema = serde_json::from_value(value.clone()).map_err(
+                        |error| Error::InvalidJsonSchema {
+                            path: path.to_path_buf(),
+                            reason: format!(
+                                "{context}.$defs.{name}: `schema` is not a valid schema: {error}"
+                            ),
+                        },
+                    )?;
+                    validate_raw_schema_grammar_at(
+                        path,
+                        &definition,
+                        &format!("{context}.$defs.{name}"),
+                        true,
+                    )?;
+                } else {
+                    validate_raw_subschema_value(
+                        path,
+                        value,
+                        &format!("{context}.{keyword}.{name}"),
+                        "schema",
+                    )?;
+                }
             }
         }
     }
@@ -1517,32 +1863,12 @@ fn validate_raw_schema_grammar(path: &Path, schema: &Schema, context: &str) -> R
 }
 
 fn validate_document(path: &Path, doc: &Document) -> Result<()> {
+    validate_document_markers(path, doc)?;
     let has_nexus_envelope = doc.nexusrpc.is_some();
-    if has_nexus_envelope && doc.nexusrpc.as_ref().and_then(Value::as_str) != Some("1.0.0") {
-        return Err(Error::InvalidJsonSchema {
-            path: path.to_path_buf(),
-            reason: "`nexusrpc` must be exactly \"1.0.0\"".to_string(),
-        });
-    }
-    if let Some(schema) = &doc.schema
-        && schema.as_str() != Some("https://json-schema.org/draft/2020-12/schema")
-    {
-        return Err(Error::InvalidJsonSchema {
-            path: path.to_path_buf(),
-            reason: "`$schema` must be `https://json-schema.org/draft/2020-12/schema`".to_string(),
-        });
-    }
     if has_nexus_envelope && root_is_schema_shaped(&doc.root) {
         return Err(Error::InvalidJsonSchema {
             path: path.to_path_buf(),
             reason: "a Nexus JSON schema document root is an envelope, not a model; move the model into `$defs`"
-                .to_string(),
-        });
-    }
-    if !has_nexus_envelope && doc.services.is_some() {
-        return Err(Error::InvalidJsonSchema {
-            path: path.to_path_buf(),
-            reason: "`services` require a Nexus JSON schema document with `nexusrpc: \"1.0.0\"`"
                 .to_string(),
         });
     }
@@ -1551,13 +1877,6 @@ fn validate_document(path: &Path, doc: &Document) -> Result<()> {
     // no file-root type and contributes its `$defs` alone. See
     // `specs/json-schema/input-files.md` (Definitions-only exception). We reject only
     // a plain file that carries neither a root schema nor any `$defs`.
-    let has_defs = doc.defs.as_ref().is_some_and(|defs| !defs.is_empty());
-    if !has_nexus_envelope && !root_is_schema_shaped(&doc.root) && !has_defs {
-        return Err(Error::InvalidJsonSchema {
-            path: path.to_path_buf(),
-            reason: "plain JSON schema files must define a root schema or `$defs`".to_string(),
-        });
-    }
     Ok(())
 }
 
@@ -1593,6 +1912,38 @@ fn validate_schema_node(
     is_union_branch: bool,
 ) -> Result<()> {
     validate_schema_common(path, schema, context)?;
+    if schema.one_of.is_some() {
+        let sibling = schema
+            .ty
+            .as_ref()
+            .map(|_| "type")
+            .or_else(|| schema.properties.as_ref().map(|_| "properties"))
+            .or_else(|| schema.required.as_ref().map(|_| "required"))
+            .or_else(|| {
+                schema
+                    .additional_properties
+                    .as_ref()
+                    .map(|_| "additionalProperties")
+            })
+            .or_else(|| schema.items.as_ref().map(|_| "items"))
+            .or_else(|| {
+                schema.extra.keys().find_map(|keyword| {
+                    (!matches!(
+                        keyword.as_str(),
+                        "$comment" | "examples" | "deprecated" | "default"
+                    ) && !LANG_NAME_KEYWORDS.contains(&keyword.as_str()))
+                    .then_some(keyword.as_str())
+                })
+            });
+        if let Some(sibling) = sibling {
+            return Err(Error::InvalidJsonSchema {
+                path: path.to_path_buf(),
+                reason: format!(
+                    "{context}: `{sibling}` cannot be a sibling of `oneOf`; move it into the branch whose values it constrains"
+                ),
+            });
+        }
+    }
     // A `type: "null"` is legal only as a nullability `oneOf` branch; the array
     // `type` form is never legal. Skip the standalone-null reject for branches.
     if !is_union_branch {
@@ -1733,8 +2084,11 @@ fn unsupported_keyword_reason(keyword: &str) -> &'static str {
         "nullable" => {
             "OAS 3.0 `nullable` is not supported; model a nullable field with `oneOf: [{type: T}, {type: \"null\"}]`"
         }
-        "$anchor" | "$dynamicRef" | "$dynamicAnchor" => {
-            "`$anchor`/`$dynamicRef`/`$dynamicAnchor` are not supported; use a plain `$ref`"
+        "$anchor" => {
+            "`$anchor` is not supported; put the target in `$defs` and reference it with a static `#/$defs/<Name>` `$ref`"
+        }
+        "$dynamicRef" | "$dynamicAnchor" => {
+            "`$dynamicRef`/`$dynamicAnchor` are not supported because their target varies with dynamic validation scope; use a static `#/$defs/<Name>` `$ref` resolved once at generation time"
         }
         "$vocabulary" => {
             "`$vocabulary` is not supported; it is a meta-schema keyword with no place in a type schema (the dialect is pinned to 2020-12)"
@@ -1745,6 +2099,7 @@ fn unsupported_keyword_reason(keyword: &str) -> &'static str {
 
 fn validate_schema_common(path: &Path, schema: &Schema, context: &str) -> Result<()> {
     validate_schema_keyword_allowlist(path, schema, context)?;
+    validate_legacy_dependencies(path, schema, context)?;
     // A malformed `type` is its own defect, not an absent one. It used to be
     // reported as "a leaf schema requires an explicit `type`" — and on a node
     // that also carries `$ref` or `oneOf` it was never reported at all, because
@@ -1765,14 +2120,8 @@ fn validate_schema_common(path: &Path, schema: &Schema, context: &str) -> Result
     if schema.id.is_some() {
         return Err(Error::InvalidJsonSchema {
             path: path.to_path_buf(),
-            reason: format!("{context}: `$id` is not supported"),
-        });
-    }
-    if schema.reference.is_some() && !schema.is_ref_with_name_overrides_only() {
-        return Err(Error::InvalidJsonSchema {
-            path: path.to_path_buf(),
             reason: format!(
-                "{context}: a `$ref` must not carry sibling keywords (an `x-<lang>-name` member override is the one exception)"
+                "{context}: `$id` is not supported; remove `$id` because refs resolve by local file path plus a `$defs` JSON pointer"
             ),
         });
     }
@@ -1918,6 +2267,9 @@ fn validate_type_shape(path: &Path, schema: &Schema, context: &str) -> Result<()
     };
     match name {
         "object" => {
+            if schema.items.is_some() {
+                return reject(format!("{context}: `items` requires `type: array`"));
+            }
             if schema.properties.is_none() && schema.additional_properties.is_none() {
                 return reject(format!(
                     "{context}: `type: object` needs an explicit shape; add `properties: {{...}}` (typed struct), `additionalProperties: true` (open map), or `additionalProperties: false` (closed empty object)"
@@ -1925,6 +2277,11 @@ fn validate_type_shape(path: &Path, schema: &Schema, context: &str) -> Result<()
             }
         }
         "array" => {
+            if schema.properties.is_some() || schema.additional_properties.is_some() {
+                return reject(format!(
+                    "{context}: `properties`/`additionalProperties` require `type: object`"
+                ));
+            }
             if schema.items.is_none() {
                 return reject(format!(
                     "{context}: `type: array` needs an explicit element type; add `items: {{...}}`"
@@ -2129,14 +2486,20 @@ fn validate_numeric_constraints(path: &Path, schema: &Schema, context: &str) -> 
 
     // `multipleOf` must be a positive integer (fractional divisors deferred).
     if let Some(divisor) = multiple_of {
+        let authored = &schema.extra["multipleOf"];
         if divisor <= 0.0 {
             return reject(format!(
-                "{context}: `multipleOf` must be greater than 0 (got {divisor})"
+                "{context}: `multipleOf` must be greater than 0 (got {authored})"
             ));
         }
         if divisor.fract() != 0.0 {
             return reject(format!(
-                "{context}: `multipleOf: {divisor}` is not yet supported; fractional divisors are deferred, use a positive integer divisor"
+                "{context}: `multipleOf: {authored}` is not yet supported; fractional divisors are deferred, use a positive integer divisor"
+            ));
+        }
+        if is_integer && divisor > 9_007_199_254_740_991.0 {
+            return reject(format!(
+                "{context}: `multipleOf: {authored}` exceeds the portable integer-divisor ceiling 9007199254740991; use a smaller positive integer divisor"
             ));
         }
     }
@@ -2160,6 +2523,20 @@ fn validate_numeric_constraints(path: &Path, schema: &Schema, context: &str) -> 
     let upper = maximum
         .map(|value| (value, false))
         .or(exclusive_maximum.map(|value| (value, true)));
+    if is_integer {
+        const INTEGER_CAP: f64 = 9_007_199_254_740_991.0;
+        let below_floor = upper.is_some_and(|(value, exclusive)| {
+            value < -INTEGER_CAP || (value == -INTEGER_CAP && exclusive)
+        });
+        let above_ceiling = lower.is_some_and(|(value, exclusive)| {
+            value > INTEGER_CAP || (value == INTEGER_CAP && exclusive)
+        });
+        if below_floor || above_ceiling {
+            return reject(format!(
+                "{context}: the numeric bounds describe an empty range outside the portable ±9007199254740991 integer cap"
+            ));
+        }
+    }
     if let (Some((lo, lo_exclusive)), Some((hi, hi_exclusive))) = (lower, upper) {
         let empty = if is_integer {
             let smallest = if lo_exclusive { lo + 1.0 } else { lo };
@@ -2184,6 +2561,12 @@ fn validate_numeric_constraints(path: &Path, schema: &Schema, context: &str) -> 
         && divisor > 0.0
         && let (Some((lo, lo_exclusive)), Some((hi, hi_exclusive))) = (lower, upper)
     {
+        let authored_divisor = &schema.extra["multipleOf"];
+        if lo == hi && !lo_exclusive && !hi_exclusive && lo % divisor != 0.0 {
+            return reject(format!(
+                "{context}: no multiple of {authored_divisor} lies within the accepted range"
+            ));
+        }
         // The smallest multiple of `divisor` that satisfies the lower bound.
         let mut smallest = (lo / divisor).ceil() * divisor;
         if lo_exclusive && smallest <= lo {
@@ -2196,7 +2579,7 @@ fn validate_numeric_constraints(path: &Path, schema: &Schema, context: &str) -> 
         };
         if !satisfies_upper {
             return reject(format!(
-                "{context}: no multiple of {divisor} lies within the accepted range"
+                "{context}: no multiple of {authored_divisor} lies within the accepted range"
             ));
         }
     }
@@ -2291,21 +2674,31 @@ fn validate_string_constraints(path: &Path, schema: &Schema, context: &str) -> R
 
     // Each bound must be a non-negative integer. A `.0`-valued float is accepted
     // as its integer value (honoring the `1.0`-as-integer rule from `type`).
+    const MAX_SAFE_INTEGER: f64 = 9_007_199_254_740_991.0;
     let bound = |key: &str| -> Result<Option<u64>> {
         match schema.extra.get(key) {
             None => Ok(None),
             Some(Value::Number(number)) => match number.as_f64() {
-                Some(value) if value.is_finite() && value >= 0.0 && value.fract() == 0.0 => {
+                Some(value)
+                    if value.is_finite()
+                        && value >= 0.0
+                        && value <= MAX_SAFE_INTEGER
+                        && value.fract() == 0.0 =>
+                {
                     Ok(Some(value as u64))
                 }
                 _ => Err(Error::InvalidJsonSchema {
                     path: path.to_path_buf(),
-                    reason: format!("{context}: `{key}` must be a non-negative integer"),
+                    reason: format!(
+                        "{context}: `{key}` must be a non-negative integer no greater than 9007199254740991"
+                    ),
                 }),
             },
             Some(_) => Err(Error::InvalidJsonSchema {
                 path: path.to_path_buf(),
-                reason: format!("{context}: `{key}` must be a non-negative integer"),
+                reason: format!(
+                    "{context}: `{key}` must be a non-negative integer no greater than 9007199254740991"
+                ),
             }),
         }
     };
@@ -2571,14 +2964,20 @@ fn scalar_value_kind(value: &Value) -> Option<&'static str> {
     }
 }
 
-/// True when the two scalar kinds can name the same element (string/string,
-/// boolean/boolean, or any numeric pair — an integer-valued number normalizes
-/// to an integer per `type`).
-fn scalar_kinds_compatible(a: &str, b: &str) -> bool {
+/// True when two scalar schemas have any overlap. This relation is symmetric
+/// and is used for matcher-vs-element compatibility.
+fn scalar_kinds_overlap(a: &str, b: &str) -> bool {
     if a == b {
         return true;
     }
     matches!((a, b), ("integer", "number") | ("number", "integer"))
+}
+
+/// Whether a scalar literal kind can inhabit the declared schema kind. Unlike
+/// overlap this is directional: an integer literal inhabits `number`, while a
+/// fractional number never inhabits `integer`.
+fn scalar_value_assignable(declared: &str, value: &str) -> bool {
+    declared == value || (declared == "number" && value == "integer")
 }
 
 /// Load-time validation of the `default` annotation's own shape. `default` is a
@@ -2618,7 +3017,7 @@ fn validate_default(path: &Path, schema: &Schema, context: &str) -> Result<()> {
     // scalar default is accepted there.
     let ty = schema.ty.as_ref().and_then(Value::as_str);
     match scalar_type(ty) {
-        Some(declared) if !scalar_kinds_compatible(declared, value_kind) => reject(format!(
+        Some(declared) if !scalar_value_assignable(declared, value_kind) => reject(format!(
             "{context}: `default` value {default} (of kind `{value_kind}`) is incompatible with `type: {}`",
             ty.unwrap_or("")
         )),
@@ -2972,7 +3371,7 @@ fn validate_array_constraints(path: &Path, schema: &Schema, context: &str) -> Re
                 }
             });
         if let (Some(element), Some(matcher_kind)) = (items_kind, matcher_kind)
-            && !scalar_kinds_compatible(element, matcher_kind)
+            && !scalar_kinds_overlap(element, matcher_kind)
         {
             return reject(format!(
                 "{context}: the `contains` matcher type (`{matcher_kind}`) is incompatible with the element type (`{element}`); no element can ever match"
@@ -3350,7 +3749,7 @@ fn validate_const_enum(path: &Path, schema: &Schema, context: &str) -> Result<()
         // Type compatibility (P7.1): the value must be assignable to the
         // declared type. A non-scalar declared type can never hold a scalar.
         match declared_scalar {
-            Some(declared) if !scalar_kinds_compatible(declared, value_kind) => {
+            Some(declared) if !scalar_value_assignable(declared, value_kind) => {
                 return reject(format!(
                     "{context}: `{source}` value {value} (of kind `{value_kind}`) is incompatible with `type: {}`",
                     ty.unwrap_or("")
@@ -3363,6 +3762,16 @@ fn validate_const_enum(path: &Path, schema: &Schema, context: &str) -> Result<()
                 ));
             }
             _ => {}
+        }
+        if declared_scalar == Some("integer")
+            && let Value::Number(number) = value
+            && number
+                .as_f64()
+                .is_some_and(|number| number.abs() > 9_007_199_254_740_991.0)
+        {
+            return reject(format!(
+                "{context}: `{source}` integer value {value} exceeds the portable ±9007199254740991 integer cap"
+            ));
         }
         // String values are restricted to ASCII without whitespace (keeps the
         // identifier front-end to the Stage 1 word-splitter).
@@ -4301,14 +4710,25 @@ fn hoist_property_shape(
 ) -> Result<()> {
     if is_sum_type_union(property) {
         let branches = property.one_of.as_mut().expect("a union has branches");
-        return hoist_union_object_branches(
+        hoist_union_object_branches(
             language,
             path,
             &format!("{property_name}Object"),
             context,
             branches,
             hoisted,
-        );
+        )?;
+        for branch in branches {
+            hoist_subschema_shapes(
+                language,
+                path,
+                &format!("{property_name}Array"),
+                &format!("{context}.oneOf"),
+                branch,
+                hoisted,
+            )?;
+        }
+        return Ok(());
     }
     if hoist_nullable_object_branch(language, property_name, context, property, hoisted)? {
         return Ok(());
@@ -4718,10 +5138,11 @@ fn validate_one_of(
                 .iter()
                 .filter_map(|object| branch_discriminator_tags(object).get(name).cloned())
                 .collect();
-            let distinct = values
-                .iter()
-                .enumerate()
-                .all(|(index, value)| !values[..index].iter().any(|existing| existing == value));
+            let distinct = values.iter().enumerate().all(|(index, value)| {
+                !values[..index]
+                    .iter()
+                    .any(|existing| json_values_equal(existing, value))
+            });
             if distinct {
                 qualifying.push(name);
             }
@@ -5429,7 +5850,8 @@ fn normalize_schema(
     // An `x-<lang>-name` beside a `$ref` names the *member* and asserts nothing
     // about the value, so it is not a conjunct: folding it would clone the
     // referenced target into the use site instead of referencing it.
-    let ref_with_siblings = schema.reference.is_some() && !schema.is_ref_with_name_overrides_only();
+    let ref_with_siblings =
+        schema.reference.is_some() && !schema.is_ref_with_non_conjunct_siblings_only();
 
     if has_all_of || ref_with_siblings {
         if has_all_of {
@@ -5465,10 +5887,63 @@ fn normalize_schema(
             ));
         }
         let merged = merge_branch_list(path, branches, context)?;
-        return normalize_children(path, canonical_path, merged, ctx, cycle, context);
+        // Keep every model flattened by this merge on the stack while walking
+        // the merged node's children. Otherwise a back-edge under
+        // `properties`/`items`/`additionalProperties` sees an empty stack and
+        // recursively expands until process stack overflow.
+        let stack_len = cycle.len();
+        for key in merge_target_keys(path, canonical_path, schema, ctx)? {
+            if !cycle.contains(&key) {
+                cycle.push(key);
+            }
+        }
+        let normalized = normalize_children(path, canonical_path, merged, ctx, cycle, context);
+        cycle.truncate(stack_len);
+        return normalized;
     }
 
     normalize_children(path, canonical_path, schema.clone(), ctx, cycle, context)
+}
+
+fn merge_target_keys(
+    path: &Path,
+    canonical_path: &Path,
+    schema: &Schema,
+    ctx: &MergeCtx,
+) -> Result<Vec<TypeKey>> {
+    fn collect(
+        path: &Path,
+        canonical_path: &Path,
+        schema: &Schema,
+        ctx: &MergeCtx,
+        keys: &mut Vec<TypeKey>,
+    ) -> Result<()> {
+        if let Some(reference) = &schema.reference {
+            let key = resolve_ref_key(path, canonical_path, reference, ctx.doc_paths)?;
+            if !keys.contains(&key) {
+                keys.push(key.clone());
+                if let Some(target) = ctx.raw_models.get(&key) {
+                    let target_path = type_key_path(&key);
+                    collect(target_path, target_path, target, ctx, keys)?;
+                }
+            }
+        }
+        if let Some(Value::Array(branches)) = schema.extra.get("allOf") {
+            for branch in branches {
+                if branch.is_object() {
+                    let branch: Schema =
+                        serde_json::from_value(branch.clone()).map_err(|error| {
+                            merge_reject(path, format!("invalid `allOf` branch: {error}"))
+                        })?;
+                    collect(path, canonical_path, &branch, ctx, keys)?;
+                }
+            }
+        }
+        Ok(())
+    }
+    let mut keys = Vec::new();
+    collect(path, canonical_path, schema, ctx, &mut keys)?;
+    Ok(keys)
 }
 
 /// Recursively normalizes a schema's child schemas (leaving its own keywords
@@ -6207,7 +6682,7 @@ fn merge_extra_value(
     branch: &Value,
     context: &str,
 ) -> Result<Value> {
-    if acc == branch {
+    if acc == branch || (key == "const" && json_values_equal(acc, branch)) {
         return Ok(acc.clone());
     }
     match key {
@@ -6226,12 +6701,7 @@ fn merge_extra_value(
                 "{context}: `allOf` branches declare conflicting `const` values ({acc} vs {branch})"
             ),
         )),
-        "format" => Err(merge_reject(
-            path,
-            format!(
-                "{context}: `allOf` branches declare different `format`s ({acc} vs {branch}); no single value is two formats"
-            ),
-        )),
+        "format" => merge_formats(path, acc, branch, context),
         "pattern" => Err(merge_reject(
             path,
             format!(
@@ -6286,6 +6756,50 @@ fn merge_extra_value(
                 "{context}: cannot merge differing `{key}` values ({acc} vs {branch}) across `allOf` branches"
             ),
         )),
+    }
+}
+
+/// Narrows two asserted formats when the owning format spec establishes a
+/// containment relation. The result is the narrower accepted set; overlap
+/// without containment remains unmergeable.
+fn merge_formats(path: &Path, acc: &Value, branch: &Value, context: &str) -> Result<Value> {
+    let Some(a) = acc.as_str() else {
+        return Err(merge_reject(
+            path,
+            format!("{context}: `format` must be a string"),
+        ));
+    };
+    let Some(b) = branch.as_str() else {
+        return Err(merge_reject(
+            path,
+            format!("{context}: `format` must be a string"),
+        ));
+    };
+    let contained_by = |narrower: &str, wider: &str| {
+        matches!(
+            (narrower, wider),
+            ("uri", "uri-reference")
+                | ("hostname", "uri-reference")
+                | ("uuid", "hostname")
+                | ("ipv4", "hostname")
+                | ("date", "hostname")
+                | ("duration", "uri-reference")
+                | ("uuid", "uri-reference")
+                | ("ipv4", "uri-reference")
+                | ("date", "uri-reference")
+        )
+    };
+    if contained_by(a, b) {
+        Ok(acc.clone())
+    } else if contained_by(b, a) {
+        Ok(branch.clone())
+    } else {
+        Err(merge_reject(
+            path,
+            format!(
+                "{context}: `allOf` branches declare unrelated `format`s ({acc} vs {branch}); neither accepted set contains the other"
+            ),
+        ))
     }
 }
 
@@ -6425,9 +6939,11 @@ fn finalize_merged(path: &Path, schema: &mut Schema, context: &str) -> Result<()
 
     if schema.extra.contains_key("const") && schema.extra.contains_key("enum") {
         let const_value = schema.extra["const"].clone();
-        let in_enum = schema.extra["enum"]
-            .as_array()
-            .is_some_and(|members| members.contains(&const_value));
+        let in_enum = schema.extra["enum"].as_array().is_some_and(|members| {
+            members
+                .iter()
+                .any(|member| json_values_equal(member, &const_value))
+        });
         if !in_enum {
             return Err(merge_reject(
                 path,
@@ -6470,6 +6986,14 @@ fn resolve_ref_key(
     let target_path = if file_part.is_empty() {
         canonical_path.to_path_buf()
     } else {
+        if Path::new(file_part).is_absolute() {
+            return Err(Error::InvalidJsonSchema {
+                path: path.to_path_buf(),
+                reason: format!(
+                    "absolute-path `$ref` `{reference}` is not supported; use a path relative to the referring schema"
+                ),
+            });
+        }
         let base = path.parent().unwrap_or_else(|| Path::new("."));
         let target = canonical(&base.join(file_part));
         if !doc_paths.contains(&target) {
@@ -9044,6 +9568,32 @@ $defs:
         assert!(input.schema["$ref"].is_null());
     }
 
+    #[test]
+    fn ref_with_only_member_annotations_remains_a_reference() {
+        let schema = model_schema(
+            r##"
+$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  value:
+    $ref: "#/$defs/Value"
+    deprecated: true
+    $comment: use-site note
+    examples: [{ text: example }]
+$defs:
+  Value:
+    type: object
+    properties:
+      text: { type: string }
+"##,
+            "Api",
+        );
+        assert_eq!(schema["properties"]["value"]["$ref"], "#/$defs/Value");
+        assert_eq!(schema["properties"]["value"]["deprecated"], true);
+        assert!(schema["properties"]["value"].get("$comment").is_none());
+        assert!(schema["properties"]["value"].get("examples").is_none());
+    }
+
     fn doc_reject(input: &str) -> String {
         parse_api_spec_from_json_schema_for_language(
             Language::Python,
@@ -9084,6 +9634,22 @@ services:
     }
 
     #[test]
+    fn rejects_explicit_null_document_markers_and_services() {
+        let nexus = doc_reject("nexusrpc: null\nservices: {}");
+        assert!(nexus.contains("`nexusrpc` must be exactly"), "{nexus}");
+
+        let dialect =
+            doc_reject("$schema: null\ntype: object\nproperties: { value: { type: string } }");
+        assert!(dialect.contains("`$schema` must be"), "{dialect}");
+
+        let services = doc_reject("nexusrpc: 1.0.0\nservices: null");
+        assert!(
+            services.contains("`services` must be an object") && services.contains("not null"),
+            "{services}"
+        );
+    }
+
+    #[test]
     fn rejects_wrong_schema_dialect() {
         let error = doc_reject(
             r##"
@@ -9095,6 +9661,11 @@ properties:
         );
         assert!(error.contains("`$schema` must be"), "{error}");
         assert!(error.contains("2020-12"), "{error}");
+    }
+
+    #[test]
+    fn accepts_present_but_empty_document_defs() {
+        parse("$schema: https://json-schema.org/draft/2020-12/schema\n$defs: {}");
     }
 
     #[test]
@@ -9174,6 +9745,60 @@ services:
             discriminator.contains("OpenAPI `discriminator` is not supported"),
             "{discriminator}"
         );
+    }
+
+    #[test]
+    fn diagnoses_legacy_dependencies_by_value_form() {
+        let arrays = numeric_reject(
+            "type: object\nproperties: { a: { type: string }, b: { type: string } }\ndependencies: { a: [b] }",
+        );
+        assert!(
+            arrays.contains("rename `dependencies` to `dependentRequired`"),
+            "{arrays}"
+        );
+
+        let schemas = numeric_reject(
+            "type: object\nproperties: { a: { type: string } }\ndependencies: { a: { required: [a] } }",
+        );
+        assert!(
+            schemas.contains("schema-form") && schemas.contains("dependentSchemas"),
+            "{schemas}"
+        );
+    }
+
+    #[test]
+    fn rejects_foreign_structural_shapes_before_lowering() {
+        let object_items = numeric_reject("type: object\nproperties: {}\nitems: { type: string }");
+        assert!(
+            object_items.contains("`items` requires `type: array`"),
+            "{object_items}"
+        );
+
+        let array_properties = numeric_reject(
+            "type: array\nitems: { type: string }\nproperties: { value: { type: string } }",
+        );
+        assert!(
+            array_properties.contains("`properties`/`additionalProperties` require `type: object`"),
+            "{array_properties}"
+        );
+
+        let union_sibling =
+            numeric_reject("type: string\noneOf:\n  - { type: string }\n  - { type: integer }");
+        assert!(
+            union_sibling.contains("cannot be a sibling of `oneOf`")
+                && union_sibling.contains("move it into the branch"),
+            "{union_sibling}"
+        );
+        for sibling in ["minLength: 3", "const: x", "enum: [x, y]", "required: [x]"] {
+            let error = numeric_reject(&format!(
+                "oneOf:\n  - {{ type: string }}\n  - {{ type: integer }}\n{sibling}"
+            ));
+            assert!(
+                error.contains("cannot be a sibling of `oneOf`")
+                    && error.contains("move it into the branch"),
+                "{sibling}: {error}"
+            );
+        }
     }
 
     #[test]
@@ -9329,6 +9954,69 @@ properties:
     }
 
     #[test]
+    fn scalar_literal_assignment_is_directional() {
+        parse(
+            r#"
+$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  defaulted: { type: number, default: 1 }
+  constant: { type: number, const: 2 }
+  choices: { type: number, enum: [3, 4.5] }
+"#,
+        );
+        for keyword in ["default: 1.5", "const: 1.5", "enum: [1, 1.5]"] {
+            let error = numeric_reject(&format!("type: integer\n{keyword}"));
+            assert!(error.contains("incompatible"), "{keyword}: {error}");
+        }
+    }
+
+    #[test]
+    fn integer_domain_cap_participates_in_load_satisfiability() {
+        for schema in [
+            "type: integer\nminimum: 9007199254740992",
+            "type: integer\nexclusiveMinimum: 9007199254740991",
+            "type: integer\nmaximum: -9007199254740992",
+            "type: integer\nexclusiveMaximum: -9007199254740991",
+        ] {
+            let error = numeric_reject(schema);
+            assert!(
+                error.contains("portable") && error.contains("cap"),
+                "{schema}: {error}"
+            );
+        }
+
+        // Bounds outside the domain in the non-empty direction are redundant,
+        // not unsatisfiable.
+        parse(
+            r#"
+$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  value: { type: integer, maximum: 9007199254740992 }
+"#,
+        );
+    }
+
+    #[test]
+    fn rejects_unsafe_integer_literals_and_string_counts() {
+        for keyword in ["const: 9007199254740992", "enum: [0, -9007199254740992]"] {
+            let error = numeric_reject(&format!("type: integer\n{keyword}"));
+            assert!(error.contains("integer cap"), "{keyword}: {error}");
+        }
+        for keyword in ["minLength", "maxLength"] {
+            let error = numeric_reject(&format!("type: string\n{keyword}: 9007199254740992"));
+            assert!(error.contains("9007199254740991"), "{keyword}: {error}");
+        }
+    }
+
+    #[test]
+    fn rejects_high_magnitude_singleton_that_is_not_a_multiple() {
+        let error = numeric_reject("type: number\nminimum: 1e23\nmaximum: 1e23\nmultipleOf: 5");
+        assert!(error.contains("no multiple of 5"), "{error}");
+    }
+
+    #[test]
     fn rejects_boolean_exclusive_maximum_form() {
         let error = numeric_reject("type: integer\nmaximum: 5\nexclusiveMaximum: true");
         assert!(error.contains("boolean form"), "{error}");
@@ -9344,6 +10032,31 @@ properties:
     fn rejects_fractional_multiple_of() {
         let error = numeric_reject("type: number\nmultipleOf: 0.1");
         assert!(error.contains("not yet supported"), "{error}");
+
+        let tiny = numeric_reject("type: number\nmultipleOf: 1e-300");
+        assert!(tiny.contains("multipleOf: 1e-300"), "{tiny}");
+        assert!(tiny.len() < 500, "diagnostic expanded the exponent: {tiny}");
+    }
+
+    #[test]
+    fn rejects_integer_divisor_above_the_portable_cap() {
+        for (divisor, displayed) in [
+            ("9007199254740992", "9007199254740992"),
+            ("1e300", "1e+300"),
+        ] {
+            let error = numeric_reject(&format!("type: integer\nmultipleOf: {divisor}"));
+            assert!(
+                error.contains(displayed)
+                    && error.contains("integer-divisor ceiling 9007199254740991"),
+                "{divisor}: {error}"
+            );
+        }
+
+        // Number divisibility deliberately uses shared binary64 `fmod`
+        // semantics and does not inherit the safe-integer operand ceiling.
+        parse(
+            "$schema: https://json-schema.org/draft/2020-12/schema\ntype: object\nproperties:\n  value: { type: number, multipleOf: 1e300 }",
+        );
     }
 
     #[test]
@@ -11385,7 +12098,7 @@ properties:
     #[test]
     fn rejects_all_of_combinator_branch_not() {
         let error = numeric_reject("allOf:\n  - { type: object }\n  - { not: { type: integer } }");
-        assert!(error.contains("cannot be `not`"), "{error}");
+        assert!(error.contains("`not` is not supported"), "{error}");
     }
 
     #[test]
@@ -11393,7 +12106,46 @@ properties:
         let error = numeric_reject(
             "allOf:\n  - { type: string, format: email }\n  - { type: string, format: uri }",
         );
-        assert!(error.contains("different `format`s"), "{error}");
+        assert!(error.contains("unrelated `format`s"), "{error}");
+    }
+
+    #[test]
+    fn all_of_keeps_the_narrower_contained_format() {
+        for (broad, narrow) in [
+            ("uri-reference", "uri"),
+            ("uri-reference", "uuid"),
+            ("uri-reference", "ipv4"),
+            ("uri-reference", "date"),
+            ("hostname", "uuid"),
+        ] {
+            let schema = model_schema(
+                &format!(
+                    "$schema: https://json-schema.org/draft/2020-12/schema\ntype: object\nproperties:\n  value:\n    allOf:\n      - {{ type: string, format: {broad} }}\n      - {{ type: string, format: {narrow} }}\n"
+                ),
+                "Api",
+            );
+            assert_eq!(schema["properties"]["value"]["format"], narrow);
+        }
+    }
+
+    #[test]
+    fn rejects_all_of_merge_cycle_through_child_position() {
+        let error = doc_reject(
+            r##"
+$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  node: { $ref: "#/$defs/Node" }
+$defs:
+  Node:
+    type: object
+    properties:
+      child:
+        $ref: "#/$defs/Node"
+        minProperties: 1
+"##,
+        );
+        assert!(error.contains("allOf` merge cycle"), "{error}");
     }
 
     #[test]
@@ -11413,6 +12165,23 @@ properties:
             error.contains("not a member of the merged `enum`"),
             "{error}"
         );
+    }
+
+    #[test]
+    fn all_of_uses_mathematical_numeric_equality_for_closed_values() {
+        for branches in [
+            "      - { type: number, const: 5 }\n      - { type: number, const: 5.0 }",
+            "      - { type: number, const: 5 }\n      - { type: number, enum: [5.0, 6] }",
+        ] {
+            let schema = model_schema(
+                &format!(
+                    "$schema: https://json-schema.org/draft/2020-12/schema\ntype: object\nproperties:\n  value:\n    allOf:\n{branches}\n"
+                ),
+                "Api",
+            );
+            assert_eq!(schema["properties"]["value"]["const"], 5);
+            assert!(schema["properties"]["value"].get("enum").is_none());
+        }
     }
 
     #[test]
@@ -12330,6 +13099,62 @@ properties:
 "##,
         );
         assert!(error.contains("more than one qualifying"), "{error}");
+    }
+
+    #[test]
+    fn rejects_numeric_discriminator_values_equal_as_json_numbers() {
+        let error = union_reject(
+            r##"
+$schema: https://json-schema.org/draft/2020-12/schema
+$defs:
+  First:
+    type: object
+    required: [kind]
+    properties:
+      kind: { type: number, const: 1 }
+  Second:
+    type: object
+    required: [kind]
+    properties:
+      kind: { type: number, const: 1.0 }
+type: object
+properties:
+  value:
+    oneOf:
+      - { $ref: "#/$defs/First" }
+      - { $ref: "#/$defs/Second" }
+"##,
+        );
+        assert!(
+            error.contains("discriminator") && error.contains("pairwise-distinct"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn hoists_object_items_inside_a_property_union_array_branch() {
+        let spec = parse(
+            r#"
+$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  value:
+    oneOf:
+      - type: array
+        items:
+          type: object
+          properties:
+            id: { type: string }
+      - { type: string }
+"#,
+        );
+        let binding = spec
+            .external_type_binding("ApiValueArrayItem")
+            .expect("array element object in property-level oneOf should be hoisted");
+        assert_eq!(
+            binding.json_model().unwrap().schema["properties"]["id"]["type"],
+            "string"
+        );
     }
 
     #[test]
@@ -14188,9 +15013,12 @@ $defs:
 
     #[test]
     fn rejects_required_not_array() {
-        let error =
-            numeric_reject("type: object\nproperties:\n  a: { type: string }\nrequired: id");
-        assert!(error.contains("must be an array"), "{error}");
+        for value in ["id", "null"] {
+            let error = numeric_reject(&format!(
+                "type: object\nproperties:\n  a: {{ type: string }}\nrequired: {value}"
+            ));
+            assert!(error.contains("must be an array"), "{value}: {error}");
+        }
     }
 
     #[test]
@@ -14331,28 +15159,47 @@ properties:
 
     #[test]
     fn rejects_tuple_items() {
-        // A tuple-form `items` (an array of schemas) does not deserialize into the
-        // single-schema `items` slot, so it fails at parse time.
         let error = numeric_reject("type: array\nitems: [ { type: string } ]");
-        assert!(error.contains("failed to parse JSON schema"), "{error}");
+        assert!(
+            error.contains("tuple-valued `items`") && error.contains("uniform element type"),
+            "{error}"
+        );
     }
 
     #[test]
     fn rejects_non_schema_items() {
         let error = numeric_reject("type: array\nitems: 5");
-        assert!(error.contains("failed to parse JSON schema"), "{error}");
+        assert!(
+            error.contains("`items` must be a schema object")
+                && error.contains("uniform element type"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn rejects_boolean_items_with_uniform_element_fix() {
+        let error = numeric_reject("type: array\nitems: true");
+        assert!(
+            error.contains("boolean `items` schemas are not supported")
+                && error.contains("uniform element type"),
+            "{error}"
+        );
     }
 
     #[test]
     fn rejects_non_string_title() {
-        let error = numeric_reject("type: string\ntitle: 42");
-        assert!(error.contains("failed to parse JSON schema"), "{error}");
+        for value in ["42", "null"] {
+            let error = numeric_reject(&format!("type: string\ntitle: {value}"));
+            assert!(error.contains("must be a string"), "{value}: {error}");
+        }
     }
 
     #[test]
     fn rejects_non_string_description() {
-        let error = numeric_reject("type: string\ndescription: 42");
-        assert!(error.contains("failed to parse JSON schema"), "{error}");
+        for value in ["42", "null"] {
+            let error = numeric_reject(&format!("type: string\ndescription: {value}"));
+            assert!(error.contains("must be a string"), "{value}: {error}");
+        }
     }
 
     #[test]
@@ -14443,11 +15290,13 @@ properties:
 
     #[test]
     fn rejects_non_schema_additional_properties() {
-        let error = numeric_reject("type: object\nadditionalProperties: \"yes\"");
-        assert!(
-            error.contains("must be `true`, `false`, or a schema object"),
-            "{error}"
-        );
+        for value in ["\"yes\"", "null"] {
+            let error = numeric_reject(&format!("type: object\nadditionalProperties: {value}"));
+            assert!(
+                error.contains("must be `true`, `false`, or a schema object"),
+                "{value}: {error}"
+            );
+        }
     }
 
     #[test]
@@ -14845,13 +15694,13 @@ services:
             let error = numeric_reject(&format!("type: number\nenum: {members}"));
             assert!(error.contains("more than once"), "{members}: {error}");
         }
-        // Two integers that a `f64` round-trip would fold stay distinct.
+        // Two exactly-represented JSON integers stay distinct for `number`.
         parse(
             r#"
 $schema: https://json-schema.org/draft/2020-12/schema
 type: object
 properties:
-  value: { type: integer, enum: [9007199254740993, 9007199254740992] }
+  value: { type: number, enum: [9007199254740993, 9007199254740992] }
 "#,
         );
     }
@@ -15266,7 +16115,8 @@ $defs:
         )
         .unwrap();
 
-        let sources = expand_json_schema_sources(std::slice::from_ref(&entry_dir)).unwrap();
+        let invocation_root = temp.path().to_path_buf();
+        let sources = expand_json_schema_sources(std::slice::from_ref(&invocation_root)).unwrap();
         assert_eq!(
             sources
                 .iter()
@@ -15287,7 +16137,7 @@ $defs:
 
         let flat = load_api_spec_from_json_schema_for_language_with_inputs(
             Language::Python,
-            std::slice::from_ref(&entry),
+            std::slice::from_ref(&invocation_root),
         )
         .expect("the flat public loader should load the complete ref closure");
         assert!(flat.external_type_binding("Middle").is_some());
@@ -15295,7 +16145,7 @@ $defs:
 
         load_api_spec_tree_from_json_schema_for_language_with_inputs(
             Language::Python,
-            &[entry_dir],
+            &[invocation_root],
         )
         .expect("the public tree loader should load the complete ref closure");
     }
@@ -15400,6 +16250,92 @@ $defs:
         );
         assert!(error.contains("InvalidScalar"), "{error}");
         assert!(error.contains("must be `type: object`"), "{error}");
+    }
+
+    #[test]
+    fn rejects_defs_outside_a_model_declaration_position() {
+        for schema in [
+            "type: object\nproperties:\n  value:\n    type: string\n    $defs: { Hidden: { type: object, properties: {} } }",
+            "type: array\nitems:\n  type: string\n  $defs: { Hidden: { type: object, properties: {} } }",
+        ] {
+            let error = numeric_reject(schema);
+            assert!(
+                error.contains("`$defs` is only allowed at a document root")
+                    && error.contains("move this definition to the document's `$defs`"),
+                "{schema}: {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn raw_all_of_reports_the_owning_rejected_keyword_before_merge() {
+        for (keyword, expected) in [
+            ("$id: urn:branch", "remove `$id`"),
+            ("$vocabulary: {}", "meta-schema keyword"),
+            ("dependentSchemas: {}", "conditional subschema"),
+        ] {
+            let error = numeric_reject(&format!(
+                "allOf:\n  - {{ type: string, {keyword} }}\n  - {{ type: integer }}"
+            ));
+            assert!(error.contains(expected), "{keyword}: {error}");
+            assert!(!error.contains("disjoint `type`s"), "{keyword}: {error}");
+        }
+    }
+
+    #[test]
+    fn ignores_ref_shaped_data_when_discovering_source_closure() {
+        let temp = tempfile::tempdir().unwrap();
+        let entry = temp.path().join("entry.yaml");
+        fs::write(
+            &entry,
+            r#"
+$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  value:
+    type: string
+    examples: [{ $ref: missing.yaml#/$defs/NotASchemaRef }]
+"#,
+        )
+        .unwrap();
+        let sources = expand_json_schema_sources(std::slice::from_ref(&entry)).unwrap();
+        assert_eq!(sources.len(), 1);
+    }
+
+    #[test]
+    fn rejects_absolute_and_out_of_invocation_ref_paths() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("root");
+        fs::create_dir_all(&root).unwrap();
+        let absolute = root.join("absolute.yaml");
+        fs::write(
+            &absolute,
+            format!(
+                "$schema: https://json-schema.org/draft/2020-12/schema\ntype: object\nproperties:\n  value: {{ $ref: {:?} }}\n",
+                temp.path().join("target.yaml#/$defs/Thing").display().to_string()
+            ),
+        )
+        .unwrap();
+        let error = expand_json_schema_sources(std::slice::from_ref(&absolute))
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("absolute-path `$ref`"), "{error}");
+
+        let escape_root = temp.path().join("escape-root");
+        fs::create_dir_all(&escape_root).unwrap();
+        let upward = escape_root.join("upward.yaml");
+        fs::write(
+            &upward,
+            "$schema: https://json-schema.org/draft/2020-12/schema\ntype: object\nproperties:\n  value: { $ref: ../target.yaml#/$defs/Thing }\n",
+        )
+        .unwrap();
+        let error = expand_json_schema_sources(std::slice::from_ref(&escape_root))
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("escapes the invocation root") && error.contains("widen the invocation"),
+            "{error}"
+        );
     }
 
     #[test]
