@@ -18,7 +18,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import json_schema.definitions.temporal.TemporalSupport.DateTime;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -32,18 +31,18 @@ import org.jspecify.annotations.Nullable;
 @JsonSerialize(using = Temporal.Serializer.class)
 @JsonDeserialize(using = Temporal.Deserializer.class)
 public final class Temporal {
-    private final DateTime createdAt;
+    private final TemporalSupport.DateTime createdAt;
     private final LocalDate birthday;
     private final String alarm;
     private final Duration timeout;
-    private final @Nullable DateTime updatedAt;
+    private final @Nullable TemporalSupport.DateTime updatedAt;
     private final @Nullable LocalDate expiresOn;
     private final @Nullable String reminder;
     private final @Nullable Duration retryDelay;
-    private final @Nullable DateTime deletedAt;
+    private final @Nullable TemporalSupport.DateTime deletedAt;
     private final @Nullable LocalDate archivedOn;
 
-    public Temporal(DateTime createdAt, LocalDate birthday, String alarm, Duration timeout, @Nullable DateTime updatedAt, @Nullable LocalDate expiresOn, @Nullable String reminder, @Nullable Duration retryDelay, @Nullable DateTime deletedAt, @Nullable LocalDate archivedOn) {
+    public Temporal(TemporalSupport.DateTime createdAt, LocalDate birthday, String alarm, Duration timeout, @Nullable TemporalSupport.DateTime updatedAt, @Nullable LocalDate expiresOn, @Nullable String reminder, @Nullable Duration retryDelay, @Nullable TemporalSupport.DateTime deletedAt, @Nullable LocalDate archivedOn) {
         this.createdAt = createdAt;
         this.birthday = birthday;
         this.alarm = alarm;
@@ -60,7 +59,7 @@ public final class Temporal {
      * Required event timestamp; materialized date-time (offset required, sub-second
      * precision &amp; offset preserved on round-trip).
      */
-    public DateTime getCreatedAt() {
+    public TemporalSupport.DateTime getCreatedAt() {
         return createdAt;
     }
 
@@ -90,7 +89,7 @@ public final class Temporal {
     /**
      * Optional date-time.
      */
-    public @Nullable DateTime getUpdatedAt() {
+    public @Nullable TemporalSupport.DateTime getUpdatedAt() {
         return updatedAt;
     }
 
@@ -118,7 +117,7 @@ public final class Temporal {
     /**
      * Optional and nullable date-time (may be absent or explicitly null).
      */
-    public @Nullable DateTime getDeletedAt() {
+    public @Nullable TemporalSupport.DateTime getDeletedAt() {
         return deletedAt;
     }
 
@@ -286,7 +285,7 @@ public final class Temporal {
                         violations.add(new Violation(path, "unknown field"));
                 }
             }
-            DateTime createdAt = null;
+            TemporalSupport.DateTime createdAt = null;
             {
                 JsonNode field = node.get("createdAt");
                 if (field == null) {
@@ -346,7 +345,7 @@ public final class Temporal {
                     }
                 }
             }
-            DateTime updatedAt = null;
+            TemporalSupport.DateTime updatedAt = null;
             {
                 JsonNode field = node.get("updatedAt");
                 if (field == null) {
@@ -402,7 +401,7 @@ public final class Temporal {
                     }
                 }
             }
-            DateTime deletedAt = null;
+            TemporalSupport.DateTime deletedAt = null;
             {
                 JsonNode field = node.get("deletedAt");
                 if (field == null) {
