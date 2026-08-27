@@ -161,6 +161,44 @@ properties:
         broken: &[],
     },
     MatrixProbe {
+        id: "encoded_string_format",
+        model: "EncodedStringFormat",
+        intent: "A string-shaped format constrains the encoded wire string before contentEncoding materializes supported bytes.",
+        schema: "\
+$schema: https://json-schema.org/draft/2020-12/schema
+title: EncodedStringFormat
+type: object
+additionalProperties: false
+properties:
+  payload:
+    type: string
+    format: uri-reference
+    contentEncoding: base64
+",
+        load_rejected: None,
+        scoped_load: &[],
+        broken: &[],
+    },
+    MatrixProbe {
+        id: "encoded_temporal_format",
+        model: "EncodedTemporalFormat",
+        intent: "Temporal format and contentEncoding cannot both materialize the same string slot into incompatible native types.",
+        schema: "\
+$schema: https://json-schema.org/draft/2020-12/schema
+title: EncodedTemporalFormat
+type: object
+additionalProperties: false
+properties:
+  payload:
+    type: string
+    format: date-time
+    contentEncoding: base64
+",
+        load_rejected: Some("cannot be combined with `contentEncoding`"),
+        scoped_load: &[],
+        broken: &[],
+    },
+    MatrixProbe {
         id: "unique_materialized",
         model: "UniqueMaterialized",
         intent: "uniqueItems over materialized elements: the duplicate key cannot be the schema's `string`, and []byte is not comparable at all.",

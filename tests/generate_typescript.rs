@@ -777,8 +777,8 @@ fn typescript_json_examples_render_expected_language_features() {
             // `x-ts-name` override (Stage 4): the interface member + (de)serialize
             // use the override while the wire key stays `legacyId`.
             assert!(all.contains("legacyIdTs?: string;"));
-            assert!(all.contains("legacyIdTs = raw.legacyId;"));
-            assert!(all.contains("out.legacyId = value.legacyIdTs;"));
+            assert!(all.contains("legacyIdTs = raw[\"legacyId\"];"));
+            assert!(all.contains("out[\"legacyId\"] = value.legacyIdTs;"));
             // A free-form object stays an anonymous `Record` — narrowed on the
             // object token as a union branch, and the sole member of the named
             // `Extras` interface.
@@ -1160,7 +1160,9 @@ fn typescript_json_names_inline_object_union_branch() {
     ));
     // Parse and serialize both route the object token through the branch converter.
     assert!(
-        rendered.contains("detailPayloadObjectTransferTypeConverter.fromTransferType(raw.payload)")
+        rendered.contains(
+            "detailPayloadObjectTransferTypeConverter.fromTransferType(raw[\"payload\"])"
+        )
     );
     assert!(rendered.contains(
         "function serializeDetailPayload(value: DetailPayloadObject | string): unknown {"
@@ -1207,7 +1209,7 @@ fn typescript_json_validates_non_object_union_branch_constraints() {
     assert!(rendered.contains("if (codePoints < 3) {"));
     assert!(rendered.contains("if (!PATTERN_C182F89FDB221836.test((value as string))) {"));
     assert!(rendered.contains("if ((value as number) < 1) {"));
-    assert!(rendered.contains("if (raw.listOrName.length < 1) {"));
+    assert!(rendered.contains("if (raw[\"listOrName\"].length < 1) {"));
     assert!(rendered.contains("duplicate items: element at index ${index}"));
     assert!(rendered.contains(
         "if ((listOrName as \"auto\" | \"manual\") !== \"auto\" && (listOrName as \"auto\" | \"manual\") !== \"manual\") {"
@@ -1303,7 +1305,7 @@ fn typescript_json_rejects_non_finite_numbers_at_every_position() {
     let rendered = fs::read_to_string(output_path.join("models.ts")).unwrap();
 
     for expected in [
-        "Number.isFinite(raw.scalar)",
+        "Number.isFinite(raw[\"scalar\"])",
         "Number.isFinite((choice as number))",
         "Number.isFinite(element1)",
         "`nested[${index}][${index1}]`",
@@ -1606,7 +1608,7 @@ fn typescript_json_cross_module_ts_name_override_moves_every_reference() {
         "import { renamedPageTransferTypeConverter } from '../content/page/models';",
         "import type { RenamedPage } from '../content/page/models';",
         "  page?: RenamedPage;",
-        "page = renamedPageTransferTypeConverter.fromTransferType(raw.page);",
+        "page = renamedPageTransferTypeConverter.fromTransferType(raw[\"page\"]);",
     ] {
         assert!(models.contains(expected), "{expected}\n{models}");
     }
@@ -2027,7 +2029,7 @@ fn typescript_json_materializes_closed_values_and_nullable_defaults() {
         "export const DEFAULT_FALLBACK_BLOB = __nexgenDefinitions.base64ToBytes(\"aGk=\", '', [])!;",
         "must equal \"aGk=\"",
         "must be one of [\"2024-01-01\", \"2024-01-02\"]",
-        "base64ToBytes(raw.fixedBlob",
+        "base64ToBytes(raw[\"fixedBlob\"]",
         "bytesToBase64(value.fixedBlob)",
         "serializeTemporalDate(value.businessDay)",
     ] {
@@ -2137,9 +2139,9 @@ test("presence, closed scalars, and numeric boundaries agree both ways", () => {
   expect(value.mixed.additionalProperties.schedule?.[0]).toBeInstanceOf(Temporal.PlainDate);
 
   expect(violations(() => auditTransferTypeConverter.fromTransferType({ ...base, requiredPlain: undefined })))
-    .toEqual(expect.arrayContaining([{ path: "requiredPlain", reason: "required" }]));
+    .toEqual(expect.arrayContaining([{ path: "requiredPlain", reason: "expected string" }]));
   expect(violations(() => auditTransferTypeConverter.fromTransferType({ ...base, requiredNullable: undefined })))
-    .toEqual(expect.arrayContaining([{ path: "requiredNullable", reason: "required" }]));
+    .toEqual(expect.arrayContaining([{ path: "requiredNullable", reason: "expected string" }]));
   expect(violations(() => auditTransferTypeConverter.fromTransferType({ ...base, optionalPlain: null }))[0]?.reason)
     .toBe("explicit null not allowed");
   expect(violations(() => auditTransferTypeConverter.fromTransferType({ ...base, optionalDefault: null }))[0]?.reason)

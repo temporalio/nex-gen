@@ -17,9 +17,8 @@ still match differently, and constructs the gate's own engine compiles still
 fail to compile in a target. The gate therefore carries an explicit rule per
 construct — some rejecting it, some **normalizing** the emitted pattern
 (**Conformance-verified gate rules**, below). Every corpus pair agrees
-value-for-value under those rules; **two gaps in the gate are open** (rules 7
-and 8), and corpus agreement is not by itself evidence that the gate is
-complete.
+value-for-value under those rules, but corpus agreement is not by itself
+evidence that the gate is complete.
 
 ## Spec summary
 
@@ -77,7 +76,7 @@ Rationale (citing [[PRINCIPLES.md]]):
      is a *superset* of ECMA-262-with-`u`, Python `re`, and `java.util.regex`
      in several directions — a quantifier stacked on a quantifier (`a{2}*`) and
      a leading `]` inside a class are two — so each such direction needs its
-     own rule below, and the two that have none are the open gaps named there.
+     own rule below.
   2. **Anchoring.** The spec says regexes are *not* implicitly anchored,
      so we use each engine's **unanchored search**: Go `MatchString`, JS
      `RegExp.test`, Python `re.search`, Java `Matcher.find`. The footgun
@@ -165,26 +164,29 @@ divergence a `(pattern, instance)` pair can express — so the gate applies:
    and `\-` outside a class; `\a`/`\v`; octal/`\0`; `\uFFFF`;
    `\UFFFFFFFF`; `\x{…}`; and Unicode property escapes `\p{…}` are rejected.
    The portable spellings are the bare character, or `\xHH` for a control code.
-6. **Non-portable assertions and captures → reject.** `\A`, `\z`,
-   `\b{start}`/`\b{end}`, `\<`/`\>`, and both named-capture syntaxes are
-   outside the shared grammar. `\b` / `\B` are portable and pass through
-   (`pattern` never reads a capture, so `(?:…)` is the portable group).
+6. **Non-portable assertions and captures → reject.** `\A`, `\z`, every
+   word-boundary spelling (`\b`, `\B`, `\b{start}`/`\b{end}`, `\<`/`\>`),
+   and both named-capture syntaxes are outside the shared grammar. Plain
+   `\b` / `\B` compile everywhere but are still rejected: Java treats a
+   non-ASCII letter adjacent to the boundary as a word character while the
+   other targets and the pinned ASCII `\w` set do not. Authors must spell the
+   intended ASCII delimiter structure explicitly (`pattern` never reads a
+   capture, so `(?:…)` remains the portable group spelling).
 7. **Ambiguous punctuation/classes → reject.** A lone `{`, `}`, or `]`
    **outside a character class**; POSIX classes; nested classes; and class set
    operations (`&&`, `--`, `~~`) are rejected rather than interpreted
-   differently per engine. The `outside a class` scoping is load-bearing and is
-   **a known hole, not a design choice**: `[]]`, `[]a]`, `[^]]` and `[]-a]` pass
-   the gate today, and Node in `u` mode throws `Invalid regular expression:
-   /[]]/u: Lone quantifier brackets` at import. Closing it is a gate fix.
+   differently per engine. The `outside a class` scoping is load-bearing;
+   leading-`]` spellings such as `[]]`, `[]a]`, `[^]]` and `[]-a]` are also
+   rejected because Node in `u` mode refuses them.
 8. **Ambiguous unbounded repetition → reject (D7).** Nested/unbounded
-   quantifier shapes such as `^([a-z]+)+$` are rejected. **This rule is not a
-   soundness guarantee**, and must not be read as one: it fires only when the
-   *outer* quantifier is unbounded, so `a{2}*` reaches `regexp.MustCompile` and
-   panics at Go package init, and `^(a|b)*$` reaches Java's matcher and throws
-   `StackOverflowError` on inputs of a few kilobytes — an `Error`, which no
-   generated `catch` intercepts. Both are open defects. The rule reduces
-   target-specific backtracking failures; it does not eliminate them, and
-   nothing here licenses either escape.
+   quantifier shapes such as `^([a-z]+)+$`, stacked repetitions such as
+   `a{2}*`, and repeated alternations with equal positive fixed-width branches
+   such as `^(a|b)*$` and `^(ab|cd)*$` are rejected. The last family is a
+   measured Java `StackOverflowError` hazard on inputs of a few kilobytes — an
+   `Error`, which no generated `catch` intercepts. **This rule remains a
+   structural guard, not a general regex-complexity proof**: it deliberately
+   retains unequal-width structured alternatives used by the pinned URI
+   grammar. New admitted shapes still require cross-engine corpus evidence.
 
 All of these compile under the gate's own engine, so the gate additionally
 walks the pattern's `regex-syntax` **AST**: it applies every reject above
@@ -318,12 +320,8 @@ pattern *is* the idiom in all four); the load-time gate is what lets the
 emitted `MustCompile`/`Pattern.compile` be unguarded — its job is to
 turn any runtime compile failure into a load-time reject. An admitted pattern
 that a target's engine then refuses is therefore a **gate defect**, never a
-licensed exception. Two such patterns are open (gate rules 7 and 8): a leading
-`]` inside a class, which a JS `RegExp` refuses at module load, and a
-quantifier stacked on an exact-count quantifier, which Go's `MustCompile`
-refuses at package init. The corpus
-(`json-schema/corpora/pattern_conformance/`) is the regression guard, and it
-reaches neither.
+licensed exception. Leading-`]` classes and quantifiers stacked on an
+exact-count quantifier are gate-rejected and pinned in the corpus.
 
 ### Serialize-side (P12)
 
@@ -461,16 +459,14 @@ The cross-engine divergences enumerated in the gate rules are handled: the
 compile gate + `regex-syntax` AST checks **reject** the non-portable
 constructs and **normalize** `\s`/`\S` (→ explicit ASCII class), `.`
 (→ `[^\n]`) and `$` (→ per-target end-anchor), which is what makes the four
-runtimes agree value-for-value on every corpus pair. Rules 7 and 8 name the
-divergences that are **not** handled. Beyond those, the open edges are
+runtimes agree value-for-value on every corpus pair. Beyond those rules, the open edges are
 **lone-surrogate wire strings** and any divergence that appears only past the
-corpus's length ceiling — **no corpus instance exceeds 31 characters**, so an
-input-length-dependent difference such as a backtracking blow-up on a
-quantified alternation is structurally invisible to it. `\b` and the
-`.`-newline corner are *not* among them; both are covered. Every accepted row
-the corpus contains is executed in all four current runtimes; every rejected
-row is rechecked by the loader gate. New acceptance edges belong in that
-corpus before the gate is widened.
+corpus's length ceiling — short runtime examples alone cannot prove a repeated
+pattern safe. Word-boundary patterns are therefore gate-rejected, including
+the Unicode-adjacent witness; the `.`-newline corner is normalized and
+runtime-covered. Every accepted row the corpus contains is executed in all
+four current runtimes; every rejected row is rechecked by the loader gate. New
+acceptance edges belong in that corpus before the gate is widened.
 
 ### Prospective targets (.NET, Ruby)
 
@@ -482,11 +478,11 @@ findings (record them here so the recipe survives to implementation time):
 | Target | Engine | Runtime config + transforms to match the pinned semantics |
 |---|---|---|
 | **.NET** | `System.Text.RegularExpressions` | `Regex.IsMatch(v, p, RegexOptions.ECMAScript)` — `IsMatch` is unanchored; **`ECMAScript`** makes `\d\w\s` ASCII (Unicode by default otherwise). `$`→**`\z`** (its `\Z` is the *lenient* one, reverse of Java). **Astral `.` is a divergence:** .NET `.` matches one UTF-16 unit and there is **no `u`-flag equivalent**, so `^a.b$` misses `"a😀b"` — the emitter must rewrite each `.`→`(?:[\uD800-\uDBFF][\uDC00-\uDFFF]|.)` (verified 70/72 → 72/72 with the rewrite). This is the same problem JS has, solved by an explicit rewrite instead of a flag. |
-| **Ruby** | Onigmo (`Regexp`) | `re.match?(v)` — unanchored. `\d`/`\w`/`\s` are ASCII by default (good), and `.` is a code point (good). But `^`/`$` are **always line anchors** (no non-multiline mode), so normalize **`^`→`\A`, `$`→`\z`** (never `\Z` — that is the lenient one). And `\b` is **Unicode** even though `\w` is ASCII (an Onigmo quirk), so **inject a leading `(?a)`** ASCII-mode flag into the emitted pattern to force ASCII `\b` (verified 0 divergences with both transforms). `\s`/`\S` normalization and the `$`/`\S`-class rules carry over unchanged. |
+| **Ruby** | Onigmo (`Regexp`) | `re.match?(v)` — unanchored. `\d`/`\w`/`\s` are ASCII by default (good), and `.` is a code point (good). But `^`/`$` are **always line anchors** (no non-multiline mode), so normalize **`^`→`\A`, `$`→`\z`** (never `\Z` — that is the lenient one). Word boundaries are already outside the accepted subset. `\s`/`\S` normalization and the `$`/`\S`-class rules carry over unchanged. |
 
 Neither needs a new *gate* rule — the existing rejects already cover them, and
-both accept the normalized output. The `.NET` astral rewrite and the
-Ruby `(?a)`-inject + `^`/`$`→`\A`/`\z` are additions to those targets'
+both accept the normalized output. The `.NET` astral rewrite and the Ruby
+`^`/`$`→`\A`/`\z` rewrite are additions to those targets'
 *emitters*, mirroring how each current target already applies its own
 per-engine flag/anchor treatment. Note the astral rewrite must target the
 **negated class** the gate emits, not `.`: no `.` survives normalization, so a
@@ -507,10 +503,6 @@ recipe written against `.` would never fire.
    Revisit on demand (mirrors [[multipleOf]]'s fractional-divisor and
    [[patternProperties]]' single-pattern carve-outs). `\s`/`\S`, `.` and `$`
    were on this list and are now **resolved** by normalization.
-2. **Close the two open gate rules.** A leading `]` inside a character class
-   and a quantifier stacked on an exact-count quantifier are both admitted and
-   both break a target (rules 7 and 8). Neither is a subset-widening question:
-   the accept set the gate is meant to have already excludes them.
 
 ## See also
 
