@@ -18,7 +18,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Breaking Changes
 
+- JSON Schema TypeScript generation now rejects two default-bearing members
+  that would both export the same stable `DEFAULT_<FIELD>` constant, including
+  declarations in different input files. The generator no longer changes an
+  existing constant to `DEFAULT_<MODEL>_<FIELD>` when another model is added;
+  use `x-ts-name` on one declaring member to disambiguate without changing its
+  JSON wire key.
+
 ### Fixed
+
+- Python JSON Schema packages now derive imports of models moved into
+  `_recursive.py` from planned reference edges. Generated imports no longer
+  depend on a type name appearing in rendered source text or documentation.
+- JSON Schema service-file SDK import collisions now consider only services and
+  operation I/O types that actually enter that file. Unrelated models named
+  `Operation` or `Service` remain valid, while using them as Python or Java
+  operation I/O reports a load-time collision.
 
 ### Security
 

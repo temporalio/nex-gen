@@ -2014,6 +2014,11 @@ $defs:
   X: { type: object, additionalProperties: false, properties: { q: { $ref: "#/$defs/Q" } } }
   Q: { type: object, additionalProperties: false, properties: { r: { $ref: "b.yaml#/$defs/R" } } }
   Referrer: { type: object, additionalProperties: false, properties: { p: { $ref: "#/$defs/P" } } }
+  Witness:
+    description: "X is mentioned here, but prose is not a reference edge."
+    type: object
+    additionalProperties: false
+    properties: { note: { type: string } }
 "##,
             ),
             (
@@ -2039,6 +2044,15 @@ $defs:
     assert!(
         a_models.contains("from .._recursive import P"),
         "a same-module reference must follow its target into the hoist\n{a_models}"
+    );
+    assert!(
+        !a_models.contains("from .._recursive import P, X")
+            && !a_models.contains("from .._recursive import X"),
+        "a docstring mention must not invent an import edge\n{a_models}"
+    );
+    assert_python_script_succeeds(
+        "import importlib, sys; sys.path.insert(0, sys.argv[1]); importlib.import_module('output.a.models')",
+        &[temp_dir.to_str().unwrap()],
     );
     fs::remove_dir_all(temp_dir).unwrap();
 }

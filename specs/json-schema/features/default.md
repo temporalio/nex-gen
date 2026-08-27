@@ -177,11 +177,13 @@ The read-side surfacing synthesizes **one new identifier in four targets**
 | Python | `_<field>` backing slot | class/member | a declared member overridden to that private identifier; another backing slot after member mapping |
 | Java | `get<Field>OrDefault()` method | POJO method namespace | the plain getter of a sibling member named `<field>OrDefault`; another default accessor after member mapping |
 
-The TypeScript constant is named `DEFAULT_<FIELD>`, or
-**`DEFAULT_<MODEL>_<FIELD>`** when that member identifier is not unique across
-the models in scope — which, per **P15**, is every model in the run, not just
-those in the same emitted file. Python emits no `DEFAULT_*` binding: its private
-backing slot is exactly the emitted member identifier prefixed with `_`.
+The TypeScript constant is always named **`DEFAULT_<FIELD>`**. Its spelling is a
+function of the declaring member alone: adding an unrelated model with the same
+default-bearing member must not rename an already-published constant to
+`DEFAULT_<MODEL>_<FIELD>` (**P13**). A second claimant therefore **rejects at
+load** under **P15**; `x-ts-name` on either declaring member moves that member's
+constant and is the escape hatch. Python emits no `DEFAULT_*` binding: its
+private backing slot is exactly the emitted member identifier prefixed with `_`.
 
 Per **P15** these participate in the single per-scope collision pass and
 **reject at load** on any coincidence — never auto-mangled (a

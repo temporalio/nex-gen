@@ -401,6 +401,7 @@ impl ModelBackend {
 struct JsonModelHoistPlan {
     hoisted: BTreeMap<ModulePath, BTreeSet<String>>,
     hoisted_models: Vec<PlannedJsonType>,
+    runtime_imports: BTreeMap<ModulePath, BTreeSet<String>>,
     dependency_imports: BTreeMap<ModulePath, BTreeSet<String>>,
 }
 
@@ -501,9 +502,36 @@ impl JsonModelHoistPlan {
             }
         }
 
+        // References emitted by models that remain in their authored module
+        // must follow a moved target into `_recursive`. Preserve those edges as
+        // IR-derived import metadata rather than rediscovering them by scanning
+        // rendered Python (where comments and docstrings are false witnesses).
+        let mut runtime_imports = BTreeMap::<ModulePath, BTreeSet<String>>::new();
+        for (source_name, targets) in &graph {
+            if hoisted_full_names.contains(source_name) {
+                continue;
+            }
+            let Some((source_module, _)) = models.get(source_name) else {
+                continue;
+            };
+            for target_name in targets {
+                if !hoisted_full_names.contains(target_name) {
+                    continue;
+                }
+                let Some((_, target)) = models.get(target_name) else {
+                    continue;
+                };
+                runtime_imports
+                    .entry(source_module.clone())
+                    .or_default()
+                    .insert(target.model_name.clone());
+            }
+        }
+
         Self {
             hoisted,
             hoisted_models,
+            runtime_imports,
             dependency_imports,
         }
     }
@@ -523,6 +551,9 @@ pub(in crate::generator) fn tree_model_hoists(
     }
     for (module_path, names) in &plan.hoisted {
         hoists.add_module_hoists(module_path.clone(), names.clone());
+    }
+    for (module_path, names) in &plan.runtime_imports {
+        hoists.add_runtime_imports(module_path.clone(), names.clone());
     }
     hoists.add_file(
         PathBuf::from("_recursive.py"),

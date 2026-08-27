@@ -7406,6 +7406,10 @@ pub(crate) struct ManifestService {
     /// The module the declaring file emits into — the scope this service's
     /// identifier occupies. Empty for the single-input root.
     pub(crate) module_key: String,
+    /// Full model identities referenced by this service's operation I/O. Only
+    /// these model names enter the generated service file and can shadow an SDK
+    /// import there; unrelated `$defs` remain in their model files.
+    pub(crate) io_type_refs: BTreeSet<String>,
 }
 
 impl ManifestService {
@@ -7572,17 +7576,6 @@ pub(crate) fn build_name_manifest(
                 )?;
             }
         }
-        if !matches!(language, Language::TypeScript | Language::Python)
-            && services.iter().any(|service| in_scope(&service.module_key))
-        {
-            for ident in service_import_idents(language) {
-                top.insert(
-                    language,
-                    (*ident).to_string(),
-                    format!("generated service-file import `{ident}`"),
-                )?;
-            }
-        }
         // TypeScript `DEFAULT_<FIELD>` constants share the module scope; make
         // them participate rather than silently coexist (P15). Python surfaces
         // defaults through properties and emits no module-level constant.
@@ -7638,13 +7631,6 @@ pub(crate) fn build_name_manifest(
                     service.code_ident(language),
                     service.origin_label(),
                 )?;
-                for ident in service_import_idents(language) {
-                    module.insert(
-                        language,
-                        (*ident).to_string(),
-                        format!("generated service-file import `{ident}`"),
-                    )?;
-                }
             }
             if language == Language::TypeScript {
                 collect_default_constants(language, group.iter().copied(), &mut module)?;
@@ -7656,7 +7642,70 @@ pub(crate) fn build_name_manifest(
         }
     }
 
+    validate_service_file_scopes(language, services, &manifest)?;
+
     Ok(manifest)
+}
+
+/// Validate the identifiers that actually coexist in a generated service file.
+/// SDK imports do not occupy a model file merely because the same input module
+/// declares a service. They collide only with the service declarations and the
+/// operation I/O model names that the service file itself references.
+fn validate_service_file_scopes(
+    language: Language,
+    services: &[ManifestService],
+    manifest: &NameManifest,
+) -> Result<()> {
+    let validate = |group: &[&ManifestService]| -> Result<()> {
+        let mut scope = Namespace::default();
+        for ident in service_import_idents(language) {
+            scope.insert(
+                language,
+                (*ident).to_string(),
+                format!("generated service-file import `{ident}`"),
+            )?;
+        }
+        for service in group {
+            scope.insert(
+                language,
+                service.code_ident(language),
+                service.origin_label(),
+            )?;
+            for reference in &service.io_type_refs {
+                let Some(type_ident) = manifest.type_name(reference) else {
+                    continue;
+                };
+                scope.insert(
+                    language,
+                    type_ident.to_string(),
+                    format!("operation I/O type `{reference}`"),
+                )?;
+            }
+        }
+        Ok(())
+    };
+
+    if language == Language::Java {
+        // Java emits one compilation unit per service interface.
+        for service in services {
+            validate(&[service])?;
+        }
+    } else {
+        // Go, TypeScript, and Python group a module's service declarations in a
+        // single generated file.
+        let module_keys = services
+            .iter()
+            .map(|service| service.module_key.as_str())
+            .collect::<BTreeSet<_>>();
+        for module_key in module_keys {
+            let group = services
+                .iter()
+                .filter(|service| service.module_key == module_key)
+                .collect::<Vec<_>>();
+            validate(&group)?;
+        }
+    }
+    Ok(())
 }
 
 /// The fixed (schema-independent) top-level identifiers a target's JSON runtime
@@ -7764,6 +7813,14 @@ fn manifest_inputs_from_spec(
             name: service.name.clone(),
             code_name: service.code_name.for_language(language).map(str::to_string),
             module_key: spec.module_path.as_module_key(),
+            io_type_refs: service
+                .operations
+                .iter()
+                .flat_map(|operation| [operation.input.as_ref(), operation.output.as_ref()])
+                .flatten()
+                .filter_map(TypeSpec::reference)
+                .map(|reference| reference.trim_start_matches('.').to_string())
+                .collect(),
         })
         .collect();
     (models, services)
@@ -13162,6 +13219,42 @@ services:
             let error = reject_for(language, &input);
             assert!(
                 error.contains(imported) && error.contains("service-file import"),
+                "{language:?}: {error}"
+            );
+        }
+
+        // A model named like an SDK import is harmless until an operation's I/O
+        // makes that model enter the service file. It may still be used by
+        // another model in the models file without shadowing the service import.
+        let unused_in_service = r##"
+$schema: https://json-schema.org/draft/2020-12/schema
+nexusrpc: "1.0.0"
+services:
+  Alpha:
+    operations:
+      ping:
+        input: { type: object, properties: {} }
+$defs:
+  Operation: { type: object, properties: { value: { type: string } } }
+  Witness:
+    type: object
+    properties:
+      operation: { $ref: "#/$defs/Operation" }
+"##;
+        for language in [Language::Python, Language::Java] {
+            parse_for(language, unused_in_service).unwrap_or_else(|error| {
+                panic!("{language:?} must allow an SDK-like model absent from service I/O: {error}")
+            });
+        }
+
+        let used_in_service = unused_in_service.replace(
+            "input: { type: object, properties: {} }",
+            "input: { $ref: \"#/$defs/Operation\" }",
+        );
+        for language in [Language::Python, Language::Java] {
+            let error = reject_for(language, &used_in_service);
+            assert!(
+                error.contains("Operation") && error.contains("service-file import"),
                 "{language:?}: {error}"
             );
         }

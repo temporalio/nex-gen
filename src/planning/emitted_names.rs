@@ -267,6 +267,18 @@ fn manifest_services(language: Language, api_plan: &PlannedSpec) -> Vec<Manifest
             name: service.name.clone(),
             code_name: service.code_name.for_language(language).map(str::to_string),
             module_key: api_plan.module_path.as_module_key(),
+            io_type_refs: service
+                .operations
+                .iter()
+                .flat_map(|operation| [operation.input.as_ref(), operation.output.as_ref()])
+                .flatten()
+                .filter_map(|ty| match ty {
+                    crate::spec::TypeSpec::External(crate::spec::ExternalTypeSpec::Json(json)) => {
+                        Some(json.full_name.clone())
+                    }
+                    _ => None,
+                })
+                .collect(),
         })
         .collect()
 }
