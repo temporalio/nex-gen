@@ -2275,8 +2275,28 @@ enum PyCheckSide {
 
 fn py_serialize_type_check(schema: &Schema, value_expr: &str) -> Option<(String, &'static str)> {
     let schema = nullable_member_schema(schema).unwrap_or(schema);
-    if temporal_kind_direct(schema).is_some() || content_encoding_direct(schema).is_some() {
-        return None;
+    if let Some(kind) = temporal_kind_direct(schema) {
+        use crate::json_schema::format::TemporalKind;
+        let predicate = match kind {
+            TemporalKind::DateTime => format!("isinstance({value_expr}, datetime.datetime)"),
+            TemporalKind::Date => format!(
+                "isinstance({value_expr}, datetime.date) and not isinstance({value_expr}, datetime.datetime)"
+            ),
+            TemporalKind::Time => format!("isinstance({value_expr}, datetime.time)"),
+            TemporalKind::Duration => format!("isinstance({value_expr}, datetime.timedelta)"),
+        };
+        return Some((
+            predicate,
+            match kind {
+                TemporalKind::DateTime => "expected date-time",
+                TemporalKind::Date => "expected date",
+                TemporalKind::Time => "expected time",
+                TemporalKind::Duration => "expected duration",
+            },
+        ));
+    }
+    if content_encoding_direct(schema).is_some() {
+        return Some((format!("isinstance({value_expr}, bytes)"), "expected bytes"));
     }
     match schema.ty.as_ref().and_then(Value::as_str) {
         Some("string") => Some((format!("isinstance({value_expr}, str)"), "expected string")),
@@ -3999,21 +4019,34 @@ fn render_model_serializer_body(
     output.push_str("out: dict[str, typing.Any] = {}\n");
 
     if let Some(shape) = py_map_shape(schema)? {
+        output.push_str("if not isinstance(value.additional_properties, dict):\n");
+        output.push_str(
+            "    raise temporalio.converter.create_payload_validation_error([Violation(path=\"\", reason=\"expected object\")])\n",
+        );
         output.push_str("for key, entry in value.additional_properties.items():\n");
         if let Some(value_schema) = &shape.value_schema {
+            if serialize_expr(value_schema, "entry", 0) != "entry" {
+                output.push_str("    member_violation_count = len(violations)\n");
+            }
             output.push_str("    path = _member_path(key)\n");
             render_py_member_check(output, value_schema, models, "entry", "path", "    ")?;
         }
         match &shape.value_schema {
-            Some(value_schema) => render_py_serialize_value(
-                output,
-                value_schema,
-                PySerializeSink::Assign("out[key]"),
-                "entry",
-                "path",
-                "    ",
-                "entry",
-            )?,
+            Some(value_schema) => {
+                let gates_conversion = serialize_expr(value_schema, "entry", 0) != "entry";
+                if gates_conversion {
+                    output.push_str("    if len(violations) == member_violation_count:\n");
+                }
+                render_py_serialize_value(
+                    output,
+                    value_schema,
+                    PySerializeSink::Assign("out[key]"),
+                    "entry",
+                    "path",
+                    if gates_conversion { "        " } else { "    " },
+                    "entry",
+                )?;
+            }
             // Free-form members carry no declared shape to convert through.
             None => output.push_str("    out[key] = entry\n"),
         }
@@ -4084,9 +4117,23 @@ fn render_model_serializer_body(
             } else {
                 ""
             };
+            let gates_conversion =
+                inline_union.is_some() || serialize_expr(emitted, &value_expr, 0) != value_expr;
+            let violation_count = format!("{field_name}_violation_count");
+            if gates_conversion {
+                output.push_str(indent);
+                output.push_str(&format!("{violation_count} = len(violations)\n"));
+            }
             render_py_serialize_property_check(
                 output, json_name, property, models, guarded, indent,
             )?;
+            let conversion_indent = if gates_conversion {
+                output.push_str(indent);
+                output.push_str(&format!("if len(violations) == {violation_count}:\n"));
+                format!("{indent}    ")
+            } else {
+                indent.to_string()
+            };
             match inline_union {
                 // Every union serializer validates before dispatching, so the
                 // call always needs its violations re-pathed under this member.
@@ -4095,7 +4142,7 @@ fn render_model_serializer_body(
                     PySerializeSink::Assign(&target),
                     &call,
                     &path_expr,
-                    indent,
+                    &conversion_indent,
                 ),
                 None => render_py_serialize_value(
                     output,
@@ -4103,7 +4150,7 @@ fn render_model_serializer_body(
                     PySerializeSink::Assign(&target),
                     &value_expr,
                     &path_expr,
-                    indent,
+                    &conversion_indent,
                     &field_name,
                 )?,
             }
@@ -4122,14 +4169,25 @@ fn render_model_serializer_body(
         output.push_str("    else:\n");
         match typed_additional_properties_schema(schema)? {
             Some(value_schema) => {
+                let gates_conversion = serialize_expr(&value_schema, "entry", 0) != "entry";
+                if gates_conversion {
+                    output.push_str("        member_violation_count = len(violations)\n");
+                }
                 render_py_member_check(output, &value_schema, models, "entry", "path", "        ")?;
+                if gates_conversion {
+                    output.push_str("        if len(violations) == member_violation_count:\n");
+                }
                 render_py_serialize_value(
                     output,
                     &value_schema,
                     PySerializeSink::Assign("out[key]"),
                     "entry",
                     "path",
-                    "        ",
+                    if gates_conversion {
+                        "            "
+                    } else {
+                        "        "
+                    },
                     "entry",
                 )?;
             }

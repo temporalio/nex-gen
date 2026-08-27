@@ -1060,6 +1060,7 @@ describe("json-schema showcase generated definitions", () => {
       [{ active: 1 }, /active: expected boolean/],
       [{ nickname: [] }, /nickname: expected string/],
       [{ tags: "ab" }, /tags: expected array/],
+      [{ shapes: 7 }, /shapes: expected array/],
       [{ name: null }, /name: required/],
     ] as const) {
       expect(() =>
@@ -1077,6 +1078,11 @@ describe("json-schema showcase generated definitions", () => {
         additionalProperties: { host: [] },
       } as never),
     ).toThrow(/host: expected string/);
+    expect(() =>
+      attributesTransferTypeConverter.toTransferType({
+        additionalProperties: null,
+      } as never),
+    ).toThrow(/expected object/);
 
     // allOf-merged bound: an in-memory `size` past the tightened maximum fails.
     const widget = widgetTransferTypeConverter.fromTransferType(

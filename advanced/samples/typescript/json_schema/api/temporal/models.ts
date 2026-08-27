@@ -351,48 +351,68 @@ export const temporalTransferTypeConverter =
       if (value.createdAt === undefined || value.createdAt === null) {
         violations.push({ path: "createdAt", reason: "required" });
       } else {
-        __nexgenDefinitions.validateTemporalDateTime(
-          value.createdAt,
-          "createdAt",
-          violations,
-        );
+        if (!(typeof value.createdAt === "string")) {
+          violations.push({ path: "createdAt", reason: "expected date-time" });
+        } else {
+          __nexgenDefinitions.validateTemporalDateTime(
+            value.createdAt,
+            "createdAt",
+            violations,
+          );
+        }
         out["createdAt"] = value.createdAt;
       }
       if (value.birthday === undefined || value.birthday === null) {
         violations.push({ path: "birthday", reason: "required" });
       } else {
-        __nexgenDefinitions.validateTemporalDate(
-          value.birthday,
-          "birthday",
-          violations,
-        );
+        if (!(typeof value.birthday === "string")) {
+          violations.push({ path: "birthday", reason: "expected date" });
+        } else {
+          __nexgenDefinitions.validateTemporalDate(
+            value.birthday,
+            "birthday",
+            violations,
+          );
+        }
         out["birthday"] = value.birthday;
       }
       if (value.alarm === undefined || value.alarm === null) {
         violations.push({ path: "alarm", reason: "required" });
       } else {
-        __nexgenDefinitions.validateTemporalTime(value.alarm, "alarm", violations);
+        if (!(typeof value.alarm === "string")) {
+          violations.push({ path: "alarm", reason: "expected time" });
+        } else {
+          __nexgenDefinitions.validateTemporalTime(value.alarm, "alarm", violations);
+        }
         out["alarm"] = value.alarm;
       }
       if (value.timeout === undefined || value.timeout === null) {
         violations.push({ path: "timeout", reason: "required" });
       } else {
-        __nexgenDefinitions.validateTemporalDuration(
-          value.timeout,
-          "timeout",
-          violations,
-        );
+        if (!(typeof value.timeout === "string")) {
+          violations.push({ path: "timeout", reason: "expected duration" });
+        } else {
+          __nexgenDefinitions.validateTemporalDuration(
+            value.timeout,
+            "timeout",
+            violations,
+          );
+        }
         out["timeout"] = value.timeout;
       }
       if (value.updatedAt !== undefined) {
         if (value.updatedAt === null) {
           violations.push({ path: "updatedAt", reason: "explicit null not allowed" });
         } else {
-          __nexgenDefinitions.validateTemporalDateTime(
-            value.updatedAt,
-            "updatedAt",
-            violations,
-          );
+          if (!(typeof value.updatedAt === "string")) {
+            violations.push({ path: "updatedAt", reason: "expected date-time" });
+          } else {
+            __nexgenDefinitions.validateTemporalDateTime(
+              value.updatedAt,
+              "updatedAt",
+              violations,
+            );
+          }
           out["updatedAt"] = value.updatedAt;
         }
       }
@@ -400,11 +420,15 @@ export const temporalTransferTypeConverter =
         if (value.expiresOn === null) {
           violations.push({ path: "expiresOn", reason: "explicit null not allowed" });
         } else {
-          __nexgenDefinitions.validateTemporalDate(
-            value.expiresOn,
-            "expiresOn",
-            violations,
-          );
+          if (!(typeof value.expiresOn === "string")) {
+            violations.push({ path: "expiresOn", reason: "expected date" });
+          } else {
+            __nexgenDefinitions.validateTemporalDate(
+              value.expiresOn,
+              "expiresOn",
+              violations,
+            );
+          }
           out["expiresOn"] = value.expiresOn;
         }
       }
@@ -412,11 +436,15 @@ export const temporalTransferTypeConverter =
         if (value.reminder === null) {
           violations.push({ path: "reminder", reason: "explicit null not allowed" });
         } else {
-          __nexgenDefinitions.validateTemporalTime(
-            value.reminder,
-            "reminder",
-            violations,
-          );
+          if (!(typeof value.reminder === "string")) {
+            violations.push({ path: "reminder", reason: "expected time" });
+          } else {
+            __nexgenDefinitions.validateTemporalTime(
+              value.reminder,
+              "reminder",
+              violations,
+            );
+          }
           out["reminder"] = value.reminder;
         }
       }
@@ -424,33 +452,51 @@ export const temporalTransferTypeConverter =
         if (value.retryDelay === null) {
           violations.push({ path: "retryDelay", reason: "explicit null not allowed" });
         } else {
-          __nexgenDefinitions.validateTemporalDuration(
-            value.retryDelay,
-            "retryDelay",
-            violations,
-          );
+          if (!(typeof value.retryDelay === "string")) {
+            violations.push({ path: "retryDelay", reason: "expected duration" });
+          } else {
+            __nexgenDefinitions.validateTemporalDuration(
+              value.retryDelay,
+              "retryDelay",
+              violations,
+            );
+          }
           out["retryDelay"] = value.retryDelay;
         }
       }
       if (value.deletedAt !== undefined) {
+        const deletedAtViolationCount = violations.length;
         if (value.deletedAt !== null) {
-          __nexgenDefinitions.validateTemporalDateTime(
-            value.deletedAt,
-            "deletedAt",
-            violations,
-          );
+          if (!(typeof value.deletedAt === "string")) {
+            violations.push({ path: "deletedAt", reason: "expected date-time" });
+          } else {
+            __nexgenDefinitions.validateTemporalDateTime(
+              value.deletedAt,
+              "deletedAt",
+              violations,
+            );
+          }
         }
-        out["deletedAt"] = value.deletedAt === null ? null : value.deletedAt;
+        if (violations.length === deletedAtViolationCount) {
+          out["deletedAt"] = value.deletedAt === null ? null : value.deletedAt;
+        }
       }
       if (value.archivedOn !== undefined) {
+        const archivedOnViolationCount = violations.length;
         if (value.archivedOn !== null) {
-          __nexgenDefinitions.validateTemporalDate(
-            value.archivedOn,
-            "archivedOn",
-            violations,
-          );
+          if (!(typeof value.archivedOn === "string")) {
+            violations.push({ path: "archivedOn", reason: "expected date" });
+          } else {
+            __nexgenDefinitions.validateTemporalDate(
+              value.archivedOn,
+              "archivedOn",
+              violations,
+            );
+          }
         }
-        out["archivedOn"] = value.archivedOn === null ? null : value.archivedOn;
+        if (violations.length === archivedOnViolationCount) {
+          out["archivedOn"] = value.archivedOn === null ? null : value.archivedOn;
+        }
       }
       if (violations.length) {
         throw __nexgenDefinitions.payloadValidationError(violations);

@@ -136,21 +136,24 @@ export const categoryTransferTypeConverter =
         if (value.children === null) {
           violations.push({ path: "children", reason: "explicit null not allowed" });
         } else {
+          const childrenViolationCount = violations.length;
           if (!Array.isArray(value.children)) {
             violations.push({ path: "children", reason: "expected array" });
           } else {
             value.children.forEach((element, index) => {});
           }
-          out["children"] = value.children.map((element, index) =>
-            (() => {
-              try {
-                return categoryTransferTypeConverter.toTransferType(element);
-              } catch (error) {
-                __nexgenDefinitions.collect(violations, `children[${index}]`, error);
-                return undefined;
-              }
-            })(),
-          );
+          if (violations.length === childrenViolationCount) {
+            out["children"] = value.children.map((element, index) =>
+              (() => {
+                try {
+                  return categoryTransferTypeConverter.toTransferType(element);
+                } catch (error) {
+                  __nexgenDefinitions.collect(violations, `children[${index}]`, error);
+                  return undefined;
+                }
+              })(),
+            );
+          }
         }
       }
       if (violations.length) {

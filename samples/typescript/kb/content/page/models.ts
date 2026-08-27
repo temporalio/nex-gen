@@ -155,34 +155,40 @@ export const pageTransferTypeConverter =
       if (value.meta === undefined || value.meta === null) {
         violations.push({ path: "meta", reason: "required" });
       } else {
-        out["meta"] = (() => {
-          try {
-            return pageMetaTransferTypeConverter.toTransferType(value.meta);
-          } catch (error) {
-            __nexgenDefinitions.collect(violations, "meta", error);
-            return undefined;
-          }
-        })();
+        const metaViolationCount = violations.length;
+        if (violations.length === metaViolationCount) {
+          out["meta"] = (() => {
+            try {
+              return pageMetaTransferTypeConverter.toTransferType(value.meta);
+            } catch (error) {
+              __nexgenDefinitions.collect(violations, "meta", error);
+              return undefined;
+            }
+          })();
+        }
       }
       if (value.blocks !== undefined) {
         if (value.blocks === null) {
           violations.push({ path: "blocks", reason: "explicit null not allowed" });
         } else {
+          const blocksViolationCount = violations.length;
           if (!Array.isArray(value.blocks)) {
             violations.push({ path: "blocks", reason: "expected array" });
           } else {
             value.blocks.forEach((element, index) => {});
           }
-          out["blocks"] = value.blocks.map((element, index) =>
-            (() => {
-              try {
-                return blockTransferTypeConverter.toTransferType(element);
-              } catch (error) {
-                __nexgenDefinitions.collect(violations, `blocks[${index}]`, error);
-                return undefined;
-              }
-            })(),
-          );
+          if (violations.length === blocksViolationCount) {
+            out["blocks"] = value.blocks.map((element, index) =>
+              (() => {
+                try {
+                  return blockTransferTypeConverter.toTransferType(element);
+                } catch (error) {
+                  __nexgenDefinitions.collect(violations, `blocks[${index}]`, error);
+                  return undefined;
+                }
+              })(),
+            );
+          }
         }
       }
       if (violations.length) {

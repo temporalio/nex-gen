@@ -267,12 +267,18 @@ class _AddressBookTransferTypeConverter(
             )
         violations: list[Violation] = []
         out: dict[str, typing.Any] = {}
+        if not isinstance(value.additional_properties, dict):
+            raise temporalio.converter.create_payload_validation_error(
+                [Violation(path="", reason="expected object")]
+            )
         for key, entry in value.additional_properties.items():
+            member_violation_count = len(violations)
             path = _member_path(key)
-            try:
-                out[key] = _AddressTransferTypeConverter().to_transfer_type(entry)
-            except temporalio.exceptions.ApplicationError as error:
-                _collect(violations, path, error)
+            if len(violations) == member_violation_count:
+                try:
+                    out[key] = _AddressTransferTypeConverter().to_transfer_type(entry)
+                except temporalio.exceptions.ApplicationError as error:
+                    _collect(violations, path, error)
         if violations:
             raise temporalio.converter.create_payload_validation_error(violations)
         return out
@@ -341,6 +347,10 @@ class _AttributesTransferTypeConverter(
             )
         violations: list[Violation] = []
         out: dict[str, typing.Any] = {}
+        if not isinstance(value.additional_properties, dict):
+            raise temporalio.converter.create_payload_validation_error(
+                [Violation(path="", reason="expected object")]
+            )
         for key, entry in value.additional_properties.items():
             path = _member_path(key)
             if not (isinstance(entry, str)):
@@ -419,9 +429,17 @@ class _BlobIndexTransferTypeConverter(
             )
         violations: list[Violation] = []
         out: dict[str, typing.Any] = {}
+        if not isinstance(value.additional_properties, dict):
+            raise temporalio.converter.create_payload_validation_error(
+                [Violation(path="", reason="expected object")]
+            )
         for key, entry in value.additional_properties.items():
+            member_violation_count = len(violations)
             path = _member_path(key)
-            out[key] = _format_base64(entry)
+            if not (isinstance(entry, bytes)):
+                violations.append(Violation(path=path, reason="expected bytes"))
+            if len(violations) == member_violation_count:
+                out[key] = _format_base64(entry)
         if violations:
             raise temporalio.converter.create_payload_validation_error(violations)
         return out
@@ -471,12 +489,18 @@ class _ChoicesTransferTypeConverter(
             )
         violations: list[Violation] = []
         out: dict[str, typing.Any] = {}
+        if not isinstance(value.additional_properties, dict):
+            raise temporalio.converter.create_payload_validation_error(
+                [Violation(path="", reason="expected object")]
+            )
         for key, entry in value.additional_properties.items():
+            member_violation_count = len(violations)
             path = _member_path(key)
-            try:
-                out[key] = _choices_value_to_transfer_type(entry)
-            except temporalio.exceptions.ApplicationError as error:
-                _collect(violations, path, error)
+            if len(violations) == member_violation_count:
+                try:
+                    out[key] = _choices_value_to_transfer_type(entry)
+                except temporalio.exceptions.ApplicationError as error:
+                    _collect(violations, path, error)
         if violations:
             raise temporalio.converter.create_payload_validation_error(violations)
         return out
@@ -580,6 +604,7 @@ class _CircleTransferTypeConverter(
         if value.radius is None:
             violations.append(Violation(path="radius", reason="required"))
         else:
+            radius_violation_count = len(violations)
             if not (
                 not isinstance(value.radius, bool)
                 and isinstance(value.radius, (int, float))
@@ -595,7 +620,8 @@ class _CircleTransferTypeConverter(
                             reason=f"must be a finite number, got {value.radius}",
                         )
                     )
-            out["radius"] = _binary64(value.radius)
+            if len(violations) == radius_violation_count:
+                out["radius"] = _binary64(value.radius)
         for key, entry in value.additional_properties.items():
             path = _member_path(key)
             if key in _CIRCLE_DECLARED:
@@ -836,9 +862,20 @@ class _DateIndexTransferTypeConverter(
             )
         violations: list[Violation] = []
         out: dict[str, typing.Any] = {}
+        if not isinstance(value.additional_properties, dict):
+            raise temporalio.converter.create_payload_validation_error(
+                [Violation(path="", reason="expected object")]
+            )
         for key, entry in value.additional_properties.items():
+            member_violation_count = len(violations)
             path = _member_path(key)
-            out[key] = _format_date(entry)
+            if not (
+                isinstance(entry, datetime.date)
+                and not isinstance(entry, datetime.datetime)
+            ):
+                violations.append(Violation(path=path, reason="expected date"))
+            if len(violations) == member_violation_count:
+                out[key] = _format_date(entry)
         if violations:
             raise temporalio.converter.create_payload_validation_error(violations)
         return out
@@ -888,6 +925,10 @@ class _ExtrasTransferTypeConverter(
             )
         violations: list[Violation] = []
         out: dict[str, typing.Any] = {}
+        if not isinstance(value.additional_properties, dict):
+            raise temporalio.converter.create_payload_validation_error(
+                [Violation(path="", reason="expected object")]
+            )
         for key, entry in value.additional_properties.items():
             out[key] = entry
         if len(out) > 4:
@@ -955,6 +996,10 @@ class _LabelsTransferTypeConverter(
             )
         violations: list[Violation] = []
         out: dict[str, typing.Any] = {}
+        if not isinstance(value.additional_properties, dict):
+            raise temporalio.converter.create_payload_validation_error(
+                [Violation(path="", reason="expected object")]
+            )
         for key, entry in value.additional_properties.items():
             path = _member_path(key)
             if not (isinstance(entry, str)):
@@ -1144,7 +1189,12 @@ class _MetricsTransferTypeConverter(
             )
         violations: list[Violation] = []
         out: dict[str, typing.Any] = {}
+        if not isinstance(value.additional_properties, dict):
+            raise temporalio.converter.create_payload_validation_error(
+                [Violation(path="", reason="expected object")]
+            )
         for key, entry in value.additional_properties.items():
+            member_violation_count = len(violations)
             path = _member_path(key)
             if not (not isinstance(entry, bool) and isinstance(entry, (int, float))):
                 violations.append(Violation(path=path, reason="expected number"))
@@ -1155,7 +1205,8 @@ class _MetricsTransferTypeConverter(
                             path=path, reason=f"must be a finite number, got {entry}"
                         )
                     )
-            out[key] = _binary64(entry)
+            if len(violations) == member_violation_count:
+                out[key] = _binary64(entry)
         if violations:
             raise temporalio.converter.create_payload_validation_error(violations)
         return out
@@ -1214,6 +1265,10 @@ class _NicknamesTransferTypeConverter(
             )
         violations: list[Violation] = []
         out: dict[str, typing.Any] = {}
+        if not isinstance(value.additional_properties, dict):
+            raise temporalio.converter.create_payload_validation_error(
+                [Violation(path="", reason="expected object")]
+            )
         for key, entry in value.additional_properties.items():
             path = _member_path(key)
             if entry is not None:
@@ -1294,6 +1349,10 @@ class _QuotasTransferTypeConverter(
             )
         violations: list[Violation] = []
         out: dict[str, typing.Any] = {}
+        if not isinstance(value.additional_properties, dict):
+            raise temporalio.converter.create_payload_validation_error(
+                [Violation(path="", reason="expected object")]
+            )
         for key, entry in value.additional_properties.items():
             path = _member_path(key)
             if not (
@@ -3629,6 +3688,7 @@ class _ShowcaseTransferTypeConverter(
         if value.scale is None:
             violations.append(Violation(path="scale", reason="required"))
         else:
+            scale_violation_count = len(violations)
             if not (
                 not isinstance(value.scale, bool)
                 and isinstance(value.scale, (int, float))
@@ -3642,7 +3702,8 @@ class _ShowcaseTransferTypeConverter(
                             reason=f"must be one of [1.5, 2.5], got {_quote(value.scale)}",
                         )
                     )
-            out["scale"] = _binary64(value.scale)
+            if len(violations) == scale_violation_count:
+                out["scale"] = _binary64(value.scale)
         if value.name is None:
             violations.append(Violation(path="name", reason="required"))
         else:
@@ -3811,9 +3872,17 @@ class _ShowcaseTransferTypeConverter(
                     )
             out["gateway"] = value.gateway
         if value.blob is not None:
-            out["blob"] = _format_base64(value.blob)
+            blob_violation_count = len(violations)
+            if not (isinstance(value.blob, bytes)):
+                violations.append(Violation(path="blob", reason="expected bytes"))
+            if len(violations) == blob_violation_count:
+                out["blob"] = _format_base64(value.blob)
         if value.url_blob is not None:
-            out["urlBlob"] = _format_base64url(value.url_blob)
+            url_blob_violation_count = len(violations)
+            if not (isinstance(value.url_blob, bytes)):
+                violations.append(Violation(path="urlBlob", reason="expected bytes"))
+            if len(violations) == url_blob_violation_count:
+                out["urlBlob"] = _format_base64url(value.url_blob)
         if value._retries is not None:
             if not (
                 not isinstance(value.retries, bool)
@@ -3913,6 +3982,7 @@ class _ShowcaseTransferTypeConverter(
                     )
             out["level"] = value.level
         if value.ratio is not None:
+            ratio_violation_count = len(violations)
             if not (
                 not isinstance(value.ratio, bool)
                 and isinstance(value.ratio, (int, float))
@@ -3942,8 +4012,10 @@ class _ShowcaseTransferTypeConverter(
                                 reason=f"must be a multiple of 5, got {value.ratio}",
                             )
                         )
-            out["ratio"] = _binary64(value.ratio)
+            if len(violations) == ratio_violation_count:
+                out["ratio"] = _binary64(value.ratio)
         if value.score is not None:
+            score_violation_count = len(violations)
             if not (
                 not isinstance(value.score, bool)
                 and isinstance(value.score, (int, float))
@@ -3959,7 +4031,8 @@ class _ShowcaseTransferTypeConverter(
                             reason=f"must be a finite number, got {value.score}",
                         )
                     )
-            out["score"] = _binary64(value.score)
+            if len(violations) == score_violation_count:
+                out["score"] = _binary64(value.score)
         if value.step is not None:
             if not (
                 not isinstance(value.step, bool)
@@ -4157,17 +4230,21 @@ class _ShowcaseTransferTypeConverter(
                 )
             out["payload"] = value.payload
         if value.detail is not None:
-            try:
-                out["detail"] = _showcase_detail_to_transfer_type(value.detail)
-            except temporalio.exceptions.ApplicationError as error:
-                _collect(violations, "detail", error)
+            detail_violation_count = len(violations)
+            if len(violations) == detail_violation_count:
+                try:
+                    out["detail"] = _showcase_detail_to_transfer_type(value.detail)
+                except temporalio.exceptions.ApplicationError as error:
+                    _collect(violations, "detail", error)
         if value.shape_or_name is not None:
-            try:
-                out["shapeOrName"] = _showcase_shape_or_name_to_transfer_type(
-                    value.shape_or_name
-                )
-            except temporalio.exceptions.ApplicationError as error:
-                _collect(violations, "shapeOrName", error)
+            shape_or_name_violation_count = len(violations)
+            if len(violations) == shape_or_name_violation_count:
+                try:
+                    out["shapeOrName"] = _showcase_shape_or_name_to_transfer_type(
+                        value.shape_or_name
+                    )
+                except temporalio.exceptions.ApplicationError as error:
+                    _collect(violations, "shapeOrName", error)
         if value.measurements is not None:
             if isinstance(value.measurements, list):
                 if not (isinstance(value.measurements, list)):
@@ -4229,27 +4306,31 @@ class _ShowcaseTransferTypeConverter(
                 )
             out["measurements"] = value.measurements
         if value.shapes is not None:
+            shapes_violation_count = len(violations)
             if not (isinstance(value.shapes, list)):
                 violations.append(Violation(path="shapes", reason="expected array"))
-            shapes_out: list[typing.Any] = []
-            for shapes_index, shapes_element in enumerate(value.shapes):
-                try:
-                    shapes_out.append(_shape_to_transfer_type(shapes_element))
-                except temporalio.exceptions.ApplicationError as error:
-                    _collect(violations, f"shapes[{shapes_index}]", error)
-            out["shapes"] = shapes_out
+            if len(violations) == shapes_violation_count:
+                shapes_out: list[typing.Any] = []
+                for shapes_index, shapes_element in enumerate(value.shapes):
+                    try:
+                        shapes_out.append(_shape_to_transfer_type(shapes_element))
+                    except temporalio.exceptions.ApplicationError as error:
+                        _collect(violations, f"shapes[{shapes_index}]", error)
+                out["shapes"] = shapes_out
         if value.segments is not None:
+            segments_violation_count = len(violations)
             if not (isinstance(value.segments, list)):
                 violations.append(Violation(path="segments", reason="expected array"))
-            segments_out: list[typing.Any] = []
-            for segments_index, segments_element in enumerate(value.segments):
-                try:
-                    segments_out.append(
-                        _showcase_segments_item_to_transfer_type(segments_element)
-                    )
-                except temporalio.exceptions.ApplicationError as error:
-                    _collect(violations, f"segments[{segments_index}]", error)
-            out["segments"] = segments_out
+            if len(violations) == segments_violation_count:
+                segments_out: list[typing.Any] = []
+                for segments_index, segments_element in enumerate(value.segments):
+                    try:
+                        segments_out.append(
+                            _showcase_segments_item_to_transfer_type(segments_element)
+                        )
+                    except temporalio.exceptions.ApplicationError as error:
+                        _collect(violations, f"segments[{segments_index}]", error)
+                out["segments"] = segments_out
         if value.slots is not None:
             if not (isinstance(value.slots, list)):
                 violations.append(Violation(path="slots", reason="expected array"))
@@ -4313,6 +4394,7 @@ class _ShowcaseTransferTypeConverter(
                                     )
             out["grid"] = value.grid
         if value.number_grid is not None:
+            number_grid_violation_count = len(violations)
             if not (isinstance(value.number_grid, list)):
                 violations.append(Violation(path="numberGrid", reason="expected array"))
             else:
@@ -4350,10 +4432,11 @@ class _ShowcaseTransferTypeConverter(
                                             reason=f"must be a finite number, got {item_element_16}",
                                         )
                                     )
-            out["numberGrid"] = [
-                [_binary64(element1) for element1 in element]
-                for element in value.number_grid
-            ]
+            if len(violations) == number_grid_violation_count:
+                out["numberGrid"] = [
+                    [_binary64(element1) for element1 in element]
+                    for element in value.number_grid
+                ]
         if value.links is not None:
             if not (isinstance(value.links, list)):
                 violations.append(Violation(path="links", reason="expected array"))
@@ -4375,57 +4458,94 @@ class _ShowcaseTransferTypeConverter(
                             )
             out["links"] = value.links
         if value.addresses is not None:
+            addresses_violation_count = len(violations)
             if not (isinstance(value.addresses, list)):
                 violations.append(Violation(path="addresses", reason="expected array"))
-            addresses_out: list[typing.Any] = []
-            for addresses_index, addresses_element in enumerate(value.addresses):
+            if len(violations) == addresses_violation_count:
+                addresses_out: list[typing.Any] = []
+                for addresses_index, addresses_element in enumerate(value.addresses):
+                    try:
+                        addresses_out.append(
+                            _AddressTransferTypeConverter().to_transfer_type(
+                                addresses_element
+                            )
+                        )
+                    except temporalio.exceptions.ApplicationError as error:
+                        _collect(violations, f"addresses[{addresses_index}]", error)
+                out["addresses"] = addresses_out
+        if value.address_book is not None:
+            address_book_violation_count = len(violations)
+            if len(violations) == address_book_violation_count:
                 try:
-                    addresses_out.append(
-                        _AddressTransferTypeConverter().to_transfer_type(
-                            addresses_element
+                    out["addressBook"] = (
+                        _AddressBookTransferTypeConverter().to_transfer_type(
+                            value.address_book
                         )
                     )
                 except temporalio.exceptions.ApplicationError as error:
-                    _collect(violations, f"addresses[{addresses_index}]", error)
-            out["addresses"] = addresses_out
-        if value.address_book is not None:
-            try:
-                out["addressBook"] = (
-                    _AddressBookTransferTypeConverter().to_transfer_type(
-                        value.address_book
-                    )
-                )
-            except temporalio.exceptions.ApplicationError as error:
-                _collect(violations, "addressBook", error)
+                    _collect(violations, "addressBook", error)
         if value.dates is not None:
+            dates_violation_count = len(violations)
             if not (isinstance(value.dates, list)):
                 violations.append(Violation(path="dates", reason="expected array"))
-            out["dates"] = [_format_date(element) for element in value.dates]
+            else:
+                for item_index_8, item_element_8 in enumerate(value.dates):
+                    if not (
+                        isinstance(item_element_8, datetime.date)
+                        and not isinstance(item_element_8, datetime.datetime)
+                    ):
+                        violations.append(
+                            Violation(
+                                path=f"dates[{item_index_8}]", reason="expected date"
+                            )
+                        )
+            if len(violations) == dates_violation_count:
+                out["dates"] = [_format_date(element) for element in value.dates]
         if value.date_index is not None:
-            try:
-                out["dateIndex"] = _DateIndexTransferTypeConverter().to_transfer_type(
-                    value.date_index
-                )
-            except temporalio.exceptions.ApplicationError as error:
-                _collect(violations, "dateIndex", error)
+            date_index_violation_count = len(violations)
+            if len(violations) == date_index_violation_count:
+                try:
+                    out["dateIndex"] = (
+                        _DateIndexTransferTypeConverter().to_transfer_type(
+                            value.date_index
+                        )
+                    )
+                except temporalio.exceptions.ApplicationError as error:
+                    _collect(violations, "dateIndex", error)
         if value.blobs is not None:
+            blobs_violation_count = len(violations)
             if not (isinstance(value.blobs, list)):
                 violations.append(Violation(path="blobs", reason="expected array"))
-            out["blobs"] = [_format_base64(element) for element in value.blobs]
+            else:
+                for item_index_8, item_element_8 in enumerate(value.blobs):
+                    if not (isinstance(item_element_8, bytes)):
+                        violations.append(
+                            Violation(
+                                path=f"blobs[{item_index_8}]", reason="expected bytes"
+                            )
+                        )
+            if len(violations) == blobs_violation_count:
+                out["blobs"] = [_format_base64(element) for element in value.blobs]
         if value.blob_index is not None:
-            try:
-                out["blobIndex"] = _BlobIndexTransferTypeConverter().to_transfer_type(
-                    value.blob_index
-                )
-            except temporalio.exceptions.ApplicationError as error:
-                _collect(violations, "blobIndex", error)
+            blob_index_violation_count = len(violations)
+            if len(violations) == blob_index_violation_count:
+                try:
+                    out["blobIndex"] = (
+                        _BlobIndexTransferTypeConverter().to_transfer_type(
+                            value.blob_index
+                        )
+                    )
+                except temporalio.exceptions.ApplicationError as error:
+                    _collect(violations, "blobIndex", error)
         if value.metrics is not None:
-            try:
-                out["metrics"] = _MetricsTransferTypeConverter().to_transfer_type(
-                    value.metrics
-                )
-            except temporalio.exceptions.ApplicationError as error:
-                _collect(violations, "metrics", error)
+            metrics_violation_count = len(violations)
+            if len(violations) == metrics_violation_count:
+                try:
+                    out["metrics"] = _MetricsTransferTypeConverter().to_transfer_type(
+                        value.metrics
+                    )
+                except temporalio.exceptions.ApplicationError as error:
+                    _collect(violations, "metrics", error)
         if value.metric_or_label is not None:
             if not isinstance(value.metric_or_label, bool) and isinstance(
                 value.metric_or_label, (int, float)
@@ -4513,131 +4633,173 @@ class _ShowcaseTransferTypeConverter(
                 )
             out["addressListOrLabel"] = value.address_list_or_label
         if value.location is not None:
-            try:
-                out["location"] = (
-                    _ShowcaseLocationTransferTypeConverter().to_transfer_type(
-                        value.location
-                    )
-                )
-            except temporalio.exceptions.ApplicationError as error:
-                _collect(violations, "location", error)
-        if value.audit is not None:
-            try:
-                out["audit"] = _ShowcaseAuditTransferTypeConverter().to_transfer_type(
-                    value.audit
-                )
-            except temporalio.exceptions.ApplicationError as error:
-                _collect(violations, "audit", error)
-        if value.rows is not None:
-            if not (isinstance(value.rows, list)):
-                violations.append(Violation(path="rows", reason="expected array"))
-            rows_out: list[typing.Any] = []
-            for rows_index, rows_element in enumerate(value.rows):
+            location_violation_count = len(violations)
+            if len(violations) == location_violation_count:
                 try:
-                    rows_out.append(
-                        _ShowcaseRowsItemTransferTypeConverter().to_transfer_type(
-                            rows_element
+                    out["location"] = (
+                        _ShowcaseLocationTransferTypeConverter().to_transfer_type(
+                            value.location
                         )
                     )
                 except temporalio.exceptions.ApplicationError as error:
-                    _collect(violations, f"rows[{rows_index}]", error)
-            out["rows"] = rows_out
-        if value.ledger_py is not None:
-            try:
-                out["ledger"] = _ShowcaseLedgerTransferTypeConverter().to_transfer_type(
-                    value.ledger_py
-                )
-            except temporalio.exceptions.ApplicationError as error:
-                _collect(violations, "ledger", error)
-        if value.metadata is not None:
-            try:
-                out["metadata"] = (
-                    _ShowcaseMetadataTransferTypeConverter().to_transfer_type(
-                        value.metadata
+                    _collect(violations, "location", error)
+        if value.audit is not None:
+            audit_violation_count = len(violations)
+            if len(violations) == audit_violation_count:
+                try:
+                    out["audit"] = (
+                        _ShowcaseAuditTransferTypeConverter().to_transfer_type(
+                            value.audit
+                        )
                     )
-                )
-            except temporalio.exceptions.ApplicationError as error:
-                _collect(violations, "metadata", error)
+                except temporalio.exceptions.ApplicationError as error:
+                    _collect(violations, "audit", error)
+        if value.rows is not None:
+            rows_violation_count = len(violations)
+            if not (isinstance(value.rows, list)):
+                violations.append(Violation(path="rows", reason="expected array"))
+            if len(violations) == rows_violation_count:
+                rows_out: list[typing.Any] = []
+                for rows_index, rows_element in enumerate(value.rows):
+                    try:
+                        rows_out.append(
+                            _ShowcaseRowsItemTransferTypeConverter().to_transfer_type(
+                                rows_element
+                            )
+                        )
+                    except temporalio.exceptions.ApplicationError as error:
+                        _collect(violations, f"rows[{rows_index}]", error)
+                out["rows"] = rows_out
+        if value.ledger_py is not None:
+            ledger_py_violation_count = len(violations)
+            if len(violations) == ledger_py_violation_count:
+                try:
+                    out["ledger"] = (
+                        _ShowcaseLedgerTransferTypeConverter().to_transfer_type(
+                            value.ledger_py
+                        )
+                    )
+                except temporalio.exceptions.ApplicationError as error:
+                    _collect(violations, "ledger", error)
+        if value.metadata is not None:
+            metadata_violation_count = len(violations)
+            if len(violations) == metadata_violation_count:
+                try:
+                    out["metadata"] = (
+                        _ShowcaseMetadataTransferTypeConverter().to_transfer_type(
+                            value.metadata
+                        )
+                    )
+                except temporalio.exceptions.ApplicationError as error:
+                    _collect(violations, "metadata", error)
         if value.quotas is not None:
-            try:
-                out["quotas"] = _QuotasTransferTypeConverter().to_transfer_type(
-                    value.quotas
-                )
-            except temporalio.exceptions.ApplicationError as error:
-                _collect(violations, "quotas", error)
+            quotas_violation_count = len(violations)
+            if len(violations) == quotas_violation_count:
+                try:
+                    out["quotas"] = _QuotasTransferTypeConverter().to_transfer_type(
+                        value.quotas
+                    )
+                except temporalio.exceptions.ApplicationError as error:
+                    _collect(violations, "quotas", error)
         if value.tokens is not None:
-            try:
-                out["tokens"] = _TokensTransferTypeConverter().to_transfer_type(
-                    value.tokens
-                )
-            except temporalio.exceptions.ApplicationError as error:
-                _collect(violations, "tokens", error)
+            tokens_violation_count = len(violations)
+            if len(violations) == tokens_violation_count:
+                try:
+                    out["tokens"] = _TokensTransferTypeConverter().to_transfer_type(
+                        value.tokens
+                    )
+                except temporalio.exceptions.ApplicationError as error:
+                    _collect(violations, "tokens", error)
         if value.nicknames is not None:
-            try:
-                out["nicknames"] = _NicknamesTransferTypeConverter().to_transfer_type(
-                    value.nicknames
-                )
-            except temporalio.exceptions.ApplicationError as error:
-                _collect(violations, "nicknames", error)
+            nicknames_violation_count = len(violations)
+            if len(violations) == nicknames_violation_count:
+                try:
+                    out["nicknames"] = (
+                        _NicknamesTransferTypeConverter().to_transfer_type(
+                            value.nicknames
+                        )
+                    )
+                except temporalio.exceptions.ApplicationError as error:
+                    _collect(violations, "nicknames", error)
         if value.choices is not None:
-            try:
-                out["choices"] = _ChoicesTransferTypeConverter().to_transfer_type(
-                    value.choices
-                )
-            except temporalio.exceptions.ApplicationError as error:
-                _collect(violations, "choices", error)
+            choices_violation_count = len(violations)
+            if len(violations) == choices_violation_count:
+                try:
+                    out["choices"] = _ChoicesTransferTypeConverter().to_transfer_type(
+                        value.choices
+                    )
+                except temporalio.exceptions.ApplicationError as error:
+                    _collect(violations, "choices", error)
         if value.extras is not None:
-            try:
-                out["extras"] = _ExtrasTransferTypeConverter().to_transfer_type(
-                    value.extras
-                )
-            except temporalio.exceptions.ApplicationError as error:
-                _collect(violations, "extras", error)
+            extras_violation_count = len(violations)
+            if len(violations) == extras_violation_count:
+                try:
+                    out["extras"] = _ExtrasTransferTypeConverter().to_transfer_type(
+                        value.extras
+                    )
+                except temporalio.exceptions.ApplicationError as error:
+                    _collect(violations, "extras", error)
         if value.shape is not None:
-            try:
-                out["shape"] = _shape_to_transfer_type(value.shape)
-            except temporalio.exceptions.ApplicationError as error:
-                _collect(violations, "shape", error)
+            shape_violation_count = len(violations)
+            if len(violations) == shape_violation_count:
+                try:
+                    out["shape"] = _shape_to_transfer_type(value.shape)
+                except temporalio.exceptions.ApplicationError as error:
+                    _collect(violations, "shape", error)
         if value.note is not None:
-            try:
-                out["note"] = _note_to_transfer_type(value.note)
-            except temporalio.exceptions.ApplicationError as error:
-                _collect(violations, "note", error)
+            note_violation_count = len(violations)
+            if len(violations) == note_violation_count:
+                try:
+                    out["note"] = _note_to_transfer_type(value.note)
+                except temporalio.exceptions.ApplicationError as error:
+                    _collect(violations, "note", error)
         if value.address is not None:
-            try:
-                out["address"] = _AddressTransferTypeConverter().to_transfer_type(
-                    value.address
-                )
-            except temporalio.exceptions.ApplicationError as error:
-                _collect(violations, "address", error)
+            address_violation_count = len(violations)
+            if len(violations) == address_violation_count:
+                try:
+                    out["address"] = _AddressTransferTypeConverter().to_transfer_type(
+                        value.address
+                    )
+                except temporalio.exceptions.ApplicationError as error:
+                    _collect(violations, "address", error)
         if value.labels is not None:
-            try:
-                out["labels"] = _LabelsTransferTypeConverter().to_transfer_type(
-                    value.labels
-                )
-            except temporalio.exceptions.ApplicationError as error:
-                _collect(violations, "labels", error)
+            labels_violation_count = len(violations)
+            if len(violations) == labels_violation_count:
+                try:
+                    out["labels"] = _LabelsTransferTypeConverter().to_transfer_type(
+                        value.labels
+                    )
+                except temporalio.exceptions.ApplicationError as error:
+                    _collect(violations, "labels", error)
         if value.settings is not None:
-            try:
-                out["settings"] = _SettingsTransferTypeConverter().to_transfer_type(
-                    value.settings
-                )
-            except temporalio.exceptions.ApplicationError as error:
-                _collect(violations, "settings", error)
+            settings_violation_count = len(violations)
+            if len(violations) == settings_violation_count:
+                try:
+                    out["settings"] = _SettingsTransferTypeConverter().to_transfer_type(
+                        value.settings
+                    )
+                except temporalio.exceptions.ApplicationError as error:
+                    _collect(violations, "settings", error)
         if value.attributes is not None:
-            try:
-                out["attributes"] = _AttributesTransferTypeConverter().to_transfer_type(
-                    value.attributes
-                )
-            except temporalio.exceptions.ApplicationError as error:
-                _collect(violations, "attributes", error)
+            attributes_violation_count = len(violations)
+            if len(violations) == attributes_violation_count:
+                try:
+                    out["attributes"] = (
+                        _AttributesTransferTypeConverter().to_transfer_type(
+                            value.attributes
+                        )
+                    )
+                except temporalio.exceptions.ApplicationError as error:
+                    _collect(violations, "attributes", error)
         if value.contact is not None:
-            try:
-                out["contact"] = _ContactPyTransferTypeConverter().to_transfer_type(
-                    value.contact
-                )
-            except temporalio.exceptions.ApplicationError as error:
-                _collect(violations, "contact", error)
+            contact_violation_count = len(violations)
+            if len(violations) == contact_violation_count:
+                try:
+                    out["contact"] = _ContactPyTransferTypeConverter().to_transfer_type(
+                        value.contact
+                    )
+                except temporalio.exceptions.ApplicationError as error:
+                    _collect(violations, "contact", error)
         if value.nullable_count is not None:
             if not (
                 not isinstance(value.nullable_count, bool)
@@ -4675,6 +4837,7 @@ class _ShowcaseTransferTypeConverter(
                     )
             out["nullableCount"] = value.nullable_count
         if value.nullable_ratio is not None:
+            nullable_ratio_violation_count = len(violations)
             if not (
                 not isinstance(value.nullable_ratio, bool)
                 and isinstance(value.nullable_ratio, (int, float))
@@ -4702,7 +4865,8 @@ class _ShowcaseTransferTypeConverter(
                                 reason=f"must be a multiple of 2, got {value.nullable_ratio}",
                             )
                         )
-            out["nullableRatio"] = _binary64(value.nullable_ratio)
+            if len(violations) == nullable_ratio_violation_count:
+                out["nullableRatio"] = _binary64(value.nullable_ratio)
         if value.nullable_flag is not None:
             if not (isinstance(value.nullable_flag, bool)):
                 violations.append(
@@ -4747,6 +4911,7 @@ class _ShowcaseTransferTypeConverter(
                     )
             out["nullableMode"] = value.nullable_mode
         if value.integral_measurements is not None:
+            integral_measurements_violation_count = len(violations)
             if not (isinstance(value.integral_measurements, list)):
                 violations.append(
                     Violation(path="integralMeasurements", reason="expected array")
@@ -4791,10 +4956,12 @@ class _ShowcaseTransferTypeConverter(
                                     reason=f"must be a finite number, got {item_element_8}",
                                 )
                             )
-            out["integralMeasurements"] = [
-                _binary64(element) for element in value.integral_measurements
-            ]
+            if len(violations) == integral_measurements_violation_count:
+                out["integralMeasurements"] = [
+                    _binary64(element) for element in value.integral_measurements
+                ]
         if value.by_five is not None:
+            by_five_violation_count = len(violations)
             if not (
                 not isinstance(value.by_five, bool)
                 and isinstance(value.by_five, (int, float))
@@ -4818,7 +4985,8 @@ class _ShowcaseTransferTypeConverter(
                                 reason=f"must be a multiple of 5, got {value.by_five}",
                             )
                         )
-            out["byFive"] = _binary64(value.by_five)
+            if len(violations) == by_five_violation_count:
+                out["byFive"] = _binary64(value.by_five)
         if value.wildcard is not None:
             if not (isinstance(value.wildcard, str)):
                 violations.append(Violation(path="wildcard", reason="expected string"))
@@ -5678,14 +5846,22 @@ class _ShowcaseLedgerTransferTypeConverter(
             )
         violations: list[Violation] = []
         out: dict[str, typing.Any] = {}
+        if not isinstance(value.additional_properties, dict):
+            raise temporalio.converter.create_payload_validation_error(
+                [Violation(path="", reason="expected object")]
+            )
         for key, entry in value.additional_properties.items():
+            member_violation_count = len(violations)
             path = _member_path(key)
-            try:
-                out[key] = _ShowcaseLedgerValueTransferTypeConverter().to_transfer_type(
-                    entry
-                )
-            except temporalio.exceptions.ApplicationError as error:
-                _collect(violations, path, error)
+            if len(violations) == member_violation_count:
+                try:
+                    out[key] = (
+                        _ShowcaseLedgerValueTransferTypeConverter().to_transfer_type(
+                            entry
+                        )
+                    )
+                except temporalio.exceptions.ApplicationError as error:
+                    _collect(violations, path, error)
         if violations:
             raise temporalio.converter.create_payload_validation_error(violations)
         return out
@@ -5889,14 +6065,16 @@ class _ShowcaseLocationTransferTypeConverter(
                     )
             out["city"] = value.city
         if value.geo is not None:
-            try:
-                out["geo"] = (
-                    _ShowcaseLocationGeoTransferTypeConverter().to_transfer_type(
-                        value.geo
+            geo_violation_count = len(violations)
+            if len(violations) == geo_violation_count:
+                try:
+                    out["geo"] = (
+                        _ShowcaseLocationGeoTransferTypeConverter().to_transfer_type(
+                            value.geo
+                        )
                     )
-                )
-            except temporalio.exceptions.ApplicationError as error:
-                _collect(violations, "geo", error)
+                except temporalio.exceptions.ApplicationError as error:
+                    _collect(violations, "geo", error)
         for key, entry in value.additional_properties.items():
             path = _member_path(key)
             if key in _SHOWCASE_LOCATION_DECLARED:
@@ -6022,6 +6200,7 @@ class _ShowcaseLocationGeoTransferTypeConverter(
         violations: list[Violation] = []
         out: dict[str, typing.Any] = {}
         if value.lat is not None:
+            lat_violation_count = len(violations)
             if not (
                 not isinstance(value.lat, bool) and isinstance(value.lat, (int, float))
             ):
@@ -6034,8 +6213,10 @@ class _ShowcaseLocationGeoTransferTypeConverter(
                             reason=f"must be a finite number, got {value.lat}",
                         )
                     )
-            out["lat"] = _binary64(value.lat)
+            if len(violations) == lat_violation_count:
+                out["lat"] = _binary64(value.lat)
         if value.lon is not None:
+            lon_violation_count = len(violations)
             if not (
                 not isinstance(value.lon, bool) and isinstance(value.lon, (int, float))
             ):
@@ -6048,7 +6229,8 @@ class _ShowcaseLocationGeoTransferTypeConverter(
                             reason=f"must be a finite number, got {value.lon}",
                         )
                     )
-            out["lon"] = _binary64(value.lon)
+            if len(violations) == lon_violation_count:
+                out["lon"] = _binary64(value.lon)
         for key, entry in value.additional_properties.items():
             path = _member_path(key)
             if key in _SHOWCASE_LOCATION_GEO_DECLARED:
@@ -6111,6 +6293,10 @@ class _ShowcaseMetadataTransferTypeConverter(
             )
         violations: list[Violation] = []
         out: dict[str, typing.Any] = {}
+        if not isinstance(value.additional_properties, dict):
+            raise temporalio.converter.create_payload_validation_error(
+                [Violation(path="", reason="expected object")]
+            )
         for key, entry in value.additional_properties.items():
             out[key] = entry
         if len(out) > 3:
@@ -6370,6 +6556,7 @@ class _SquareTransferTypeConverter(
         if value.side is None:
             violations.append(Violation(path="side", reason="required"))
         else:
+            side_violation_count = len(violations)
             if not (
                 not isinstance(value.side, bool)
                 and isinstance(value.side, (int, float))
@@ -6385,7 +6572,8 @@ class _SquareTransferTypeConverter(
                             reason=f"must be a finite number, got {value.side}",
                         )
                     )
-            out["side"] = _binary64(value.side)
+            if len(violations) == side_violation_count:
+                out["side"] = _binary64(value.side)
         for key, entry in value.additional_properties.items():
             path = _member_path(key)
             if key in _SQUARE_DECLARED:
@@ -6590,6 +6778,10 @@ class _TokensTransferTypeConverter(
             )
         violations: list[Violation] = []
         out: dict[str, typing.Any] = {}
+        if not isinstance(value.additional_properties, dict):
+            raise temporalio.converter.create_payload_validation_error(
+                [Violation(path="", reason="expected object")]
+            )
         for key, entry in value.additional_properties.items():
             path = _member_path(key)
             if not (isinstance(entry, str)):

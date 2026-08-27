@@ -123,6 +123,10 @@ class _LabelsTransferTypeConverter(
             )
         violations: list[Violation] = []
         out: dict[str, typing.Any] = {}
+        if not isinstance(value.additional_properties, dict):
+            raise temporalio.converter.create_payload_validation_error(
+                [Violation(path="", reason="expected object")]
+            )
         for key, entry in value.additional_properties.items():
             path = _member_path(key)
             if not (isinstance(entry, str)):
@@ -477,12 +481,14 @@ class _RoomTransferTypeConverter(
                         )
             out["members"] = value.members
         if value.labels is not None:
-            try:
-                out["labels"] = _LabelsTransferTypeConverter().to_transfer_type(
-                    value.labels
-                )
-            except temporalio.exceptions.ApplicationError as error:
-                _collect(violations, "labels", error)
+            labels_violation_count = len(violations)
+            if len(violations) == labels_violation_count:
+                try:
+                    out["labels"] = _LabelsTransferTypeConverter().to_transfer_type(
+                        value.labels
+                    )
+                except temporalio.exceptions.ApplicationError as error:
+                    _collect(violations, "labels", error)
         for key, entry in value.additional_properties.items():
             path = _member_path(key)
             if key in _ROOM_DECLARED:
@@ -585,12 +591,14 @@ class _SendMessageInputTransferTypeConverter(
         if value.message is None:
             violations.append(Violation(path="message", reason="required"))
         else:
-            try:
-                out["message"] = _MessageTransferTypeConverter().to_transfer_type(
-                    value.message
-                )
-            except temporalio.exceptions.ApplicationError as error:
-                _collect(violations, "message", error)
+            message_violation_count = len(violations)
+            if len(violations) == message_violation_count:
+                try:
+                    out["message"] = _MessageTransferTypeConverter().to_transfer_type(
+                        value.message
+                    )
+                except temporalio.exceptions.ApplicationError as error:
+                    _collect(violations, "message", error)
         if violations:
             raise temporalio.converter.create_payload_validation_error(violations)
         return out
