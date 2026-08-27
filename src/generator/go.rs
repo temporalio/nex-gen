@@ -679,6 +679,16 @@ fn generate_single_leaf(
     let mut generated = generate(&leaf.spec, &support.fragments, options)?;
     if go_tree_has_json_models(&[leaf]) {
         let package_name = GoPackageContext::new(&leaf.spec, options)?.package_name;
+        let definitions_path = PathBuf::from("definitions.go");
+        if generated.files.contains_key(&definitions_path) {
+            return Err(Error::GeneratedFileOriginConflict {
+                path: definitions_path,
+                first_origin: leaf.source_path.clone(),
+                second_origin: PathBuf::from("<generated Go validation runtime>"),
+                remedy: "point `--output` at a directory whose name is not `definitions`"
+                    .to_string(),
+            });
+        }
         insert_generated_file(
             &mut generated.files,
             PathBuf::from("definitions.go"),
