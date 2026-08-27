@@ -61,9 +61,20 @@ public final class DateIndex {
     public static final class Serializer extends com.fasterxml.jackson.databind.JsonSerializer<DateIndex> {
         @Override
         public void serialize(DateIndex value, JsonGenerator gen, SerializerProvider serializers) throws IOException {
+            JsonGenerator target = gen;
+            com.fasterxml.jackson.databind.util.TokenBuffer pending = new com.fasterxml.jackson.databind.util.TokenBuffer(gen.getCodec(), false);
+            gen = pending;
             List<Violation> violations = new ArrayList<>();
-            for (Map.Entry<String, LocalDate> entry : value.additionalProperties.entrySet()) {
-                TemporalSupport.checkDate(entry.getValue(), Violation.memberPath(entry.getKey()), violations);
+            if (value.additionalProperties == null) {
+                violations.add(new Violation("", "expected object"));
+            } else {
+                for (Map.Entry<String, LocalDate> entry : value.additionalProperties.entrySet()) {
+                    if (entry.getValue() == null) {
+                        violations.add(new Violation(Violation.memberPath(entry.getKey()), "explicit null not allowed"));
+                        continue;
+                    }
+                    TemporalSupport.checkDate(entry.getValue(), Violation.memberPath(entry.getKey()), violations);
+                }
             }
             if (!violations.isEmpty()) {
                 // TODO: Use PayloadValidationException.newPayloadValidationException once it is available in an SDK release.
@@ -74,6 +85,7 @@ public final class DateIndex {
                 gen.writeStringField(entry.getKey(), TemporalSupport.formatDate(entry.getValue()));
             }
             gen.writeEndObject();
+            pending.serialize(target);
         }
     }
 

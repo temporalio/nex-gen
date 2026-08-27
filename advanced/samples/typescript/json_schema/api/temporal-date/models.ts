@@ -338,62 +338,103 @@ export const temporalTransferTypeConverter =
     }
 
     public toTransferType(value: Temporal): unknown {
+      if (!__nexgenDefinitions.isPlainObject(value)) {
+        throw __nexgenDefinitions.payloadValidationError([
+          { path: "", reason: "expected object" },
+        ]);
+      }
       const violations: __nexgenDefinitions.Violation[] = [];
       const out: Record<string, unknown> = Object.create(null) as Record<
         string,
         unknown
       >;
-      __nexgenDefinitions.validateTemporalDateTime(
-        value.createdAt,
-        "createdAt",
-        violations,
-      );
-      out["createdAt"] = Number.isFinite(value.createdAt.getTime())
-        ? __nexgenDefinitions.serializeTemporalDateTime(value.createdAt)
-        : undefined;
-      __nexgenDefinitions.validateTemporalDate(value.birthday, "birthday", violations);
-      out["birthday"] = value.birthday;
-      __nexgenDefinitions.validateTemporalTime(value.alarm, "alarm", violations);
-      out["alarm"] = value.alarm;
-      __nexgenDefinitions.validateTemporalDuration(
-        value.timeout,
-        "timeout",
-        violations,
-      );
-      out["timeout"] = value.timeout;
-      if (value.updatedAt !== undefined) {
+      if (value.createdAt === undefined || value.createdAt === null) {
+        violations.push({ path: "createdAt", reason: "required" });
+      } else {
         __nexgenDefinitions.validateTemporalDateTime(
-          value.updatedAt,
-          "updatedAt",
+          value.createdAt,
+          "createdAt",
           violations,
         );
-        out["updatedAt"] = Number.isFinite(value.updatedAt.getTime())
-          ? __nexgenDefinitions.serializeTemporalDateTime(value.updatedAt)
+        out["createdAt"] = Number.isFinite(value.createdAt.getTime())
+          ? __nexgenDefinitions.serializeTemporalDateTime(value.createdAt)
           : undefined;
       }
-      if (value.expiresOn !== undefined) {
+      if (value.birthday === undefined || value.birthday === null) {
+        violations.push({ path: "birthday", reason: "required" });
+      } else {
         __nexgenDefinitions.validateTemporalDate(
-          value.expiresOn,
-          "expiresOn",
+          value.birthday,
+          "birthday",
           violations,
         );
-        out["expiresOn"] = value.expiresOn;
+        out["birthday"] = value.birthday;
+      }
+      if (value.alarm === undefined || value.alarm === null) {
+        violations.push({ path: "alarm", reason: "required" });
+      } else {
+        __nexgenDefinitions.validateTemporalTime(value.alarm, "alarm", violations);
+        out["alarm"] = value.alarm;
+      }
+      if (value.timeout === undefined || value.timeout === null) {
+        violations.push({ path: "timeout", reason: "required" });
+      } else {
+        __nexgenDefinitions.validateTemporalDuration(
+          value.timeout,
+          "timeout",
+          violations,
+        );
+        out["timeout"] = value.timeout;
+      }
+      if (value.updatedAt !== undefined) {
+        if (value.updatedAt === null) {
+          violations.push({ path: "updatedAt", reason: "explicit null not allowed" });
+        } else {
+          __nexgenDefinitions.validateTemporalDateTime(
+            value.updatedAt,
+            "updatedAt",
+            violations,
+          );
+          out["updatedAt"] = Number.isFinite(value.updatedAt.getTime())
+            ? __nexgenDefinitions.serializeTemporalDateTime(value.updatedAt)
+            : undefined;
+        }
+      }
+      if (value.expiresOn !== undefined) {
+        if (value.expiresOn === null) {
+          violations.push({ path: "expiresOn", reason: "explicit null not allowed" });
+        } else {
+          __nexgenDefinitions.validateTemporalDate(
+            value.expiresOn,
+            "expiresOn",
+            violations,
+          );
+          out["expiresOn"] = value.expiresOn;
+        }
       }
       if (value.reminder !== undefined) {
-        __nexgenDefinitions.validateTemporalTime(
-          value.reminder,
-          "reminder",
-          violations,
-        );
-        out["reminder"] = value.reminder;
+        if (value.reminder === null) {
+          violations.push({ path: "reminder", reason: "explicit null not allowed" });
+        } else {
+          __nexgenDefinitions.validateTemporalTime(
+            value.reminder,
+            "reminder",
+            violations,
+          );
+          out["reminder"] = value.reminder;
+        }
       }
       if (value.retryDelay !== undefined) {
-        __nexgenDefinitions.validateTemporalDuration(
-          value.retryDelay,
-          "retryDelay",
-          violations,
-        );
-        out["retryDelay"] = value.retryDelay;
+        if (value.retryDelay === null) {
+          violations.push({ path: "retryDelay", reason: "explicit null not allowed" });
+        } else {
+          __nexgenDefinitions.validateTemporalDuration(
+            value.retryDelay,
+            "retryDelay",
+            violations,
+          );
+          out["retryDelay"] = value.retryDelay;
+        }
       }
       if (value.deletedAt !== undefined) {
         if (value.deletedAt !== null) {

@@ -126,19 +126,44 @@ class _BlockTransferTypeConverter(
 
     @typing_extensions.override
     def to_transfer_type(self, value: "Block") -> typing.Any:
+        if not isinstance(value, Block):
+            raise temporalio.converter.create_payload_validation_error(
+                [Violation(path="", reason="expected object")]
+            )
         violations: list[Violation] = []
         out: dict[str, typing.Any] = {}
-        out["blockId"] = value.block_id
-        if abs(value.order) > 9007199254740991:
-            violations.append(
-                Violation(path="order", reason="exceeds ±(2^53-1) integer cap")
-            )
-        if value.order < 0:
-            violations.append(
-                Violation(path="order", reason=f"must be >= 0, got {value.order}")
-            )
-        out["order"] = value.order
+        if value.block_id is None:
+            violations.append(Violation(path="blockId", reason="required"))
+        else:
+            if not (isinstance(value.block_id, str)):
+                violations.append(Violation(path="blockId", reason="expected string"))
+            out["blockId"] = value.block_id
+        if value.order is None:
+            violations.append(Violation(path="order", reason="required"))
+        else:
+            if not (
+                not isinstance(value.order, bool)
+                and (
+                    isinstance(value.order, int)
+                    or (isinstance(value.order, float) and value.order.is_integer())
+                )
+            ):
+                violations.append(Violation(path="order", reason="expected integer"))
+            else:
+                if abs(value.order) > 9007199254740991:
+                    violations.append(
+                        Violation(path="order", reason="exceeds ±(2^53-1) integer cap")
+                    )
+                if value.order < 0:
+                    violations.append(
+                        Violation(
+                            path="order", reason=f"must be >= 0, got {value.order}"
+                        )
+                    )
+            out["order"] = value.order
         if value.text is not None:
+            if not (isinstance(value.text, str)):
+                violations.append(Violation(path="text", reason="expected string"))
             out["text"] = value.text
         if value.style is not None:
             try:
@@ -272,17 +297,36 @@ class _PageTransferTypeConverter(
 
     @typing_extensions.override
     def to_transfer_type(self, value: "Page") -> typing.Any:
+        if not isinstance(value, Page):
+            raise temporalio.converter.create_payload_validation_error(
+                [Violation(path="", reason="expected object")]
+            )
         violations: list[Violation] = []
         out: dict[str, typing.Any] = {}
-        out["pageId"] = value.page_id
-        out["title"] = value.title
-        try:
-            out["meta"] = getattr(
-                PageMeta, "__temporal_transfer_type_converter"
-            ).to_transfer_type(value.meta)
-        except temporalio.exceptions.ApplicationError as error:
-            _collect(violations, "meta", error)
+        if value.page_id is None:
+            violations.append(Violation(path="pageId", reason="required"))
+        else:
+            if not (isinstance(value.page_id, str)):
+                violations.append(Violation(path="pageId", reason="expected string"))
+            out["pageId"] = value.page_id
+        if value.title is None:
+            violations.append(Violation(path="title", reason="required"))
+        else:
+            if not (isinstance(value.title, str)):
+                violations.append(Violation(path="title", reason="expected string"))
+            out["title"] = value.title
+        if value.meta is None:
+            violations.append(Violation(path="meta", reason="required"))
+        else:
+            try:
+                out["meta"] = getattr(
+                    PageMeta, "__temporal_transfer_type_converter"
+                ).to_transfer_type(value.meta)
+            except temporalio.exceptions.ApplicationError as error:
+                _collect(violations, "meta", error)
         if value.blocks is not None:
+            if not (isinstance(value.blocks, list)):
+                violations.append(Violation(path="blocks", reason="expected array"))
             blocks_out: list[typing.Any] = []
             for blocks_index, blocks_element in enumerate(value.blocks):
                 try:

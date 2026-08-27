@@ -62,17 +62,30 @@ public final class Attributes {
     public static final class Serializer extends com.fasterxml.jackson.databind.JsonSerializer<Attributes> {
         @Override
         public void serialize(Attributes value, JsonGenerator gen, SerializerProvider serializers) throws IOException {
+            JsonGenerator target = gen;
+            com.fasterxml.jackson.databind.util.TokenBuffer pending = new com.fasterxml.jackson.databind.util.TokenBuffer(gen.getCodec(), false);
+            gen = pending;
             List<Violation> violations = new ArrayList<>();
-            if (value.additionalProperties.size() < 1) {
-                violations.add(new Violation("", "must have at least 1 properties, got " + value.additionalProperties.size()));
-            }
-            if (value.additionalProperties.size() > 3) {
-                violations.add(new Violation("", "must have at most 3 properties, got " + value.additionalProperties.size()));
-            }
-            for (String pnKey : value.additionalProperties.keySet()) {
-                int pnLength = pnKey.codePointCount(0, pnKey.length());
-                if (pnLength > 8) {
-                    violations.add(new Violation(Violation.memberPath(pnKey), "invalid property name \"" + pnKey + "\": must have length <= 8, got " + pnLength));
+            if (value.additionalProperties == null) {
+                violations.add(new Violation("", "expected object"));
+            } else {
+                if (value.additionalProperties.size() < 1) {
+                    violations.add(new Violation("", "must have at least 1 properties, got " + value.additionalProperties.size()));
+                }
+                if (value.additionalProperties.size() > 3) {
+                    violations.add(new Violation("", "must have at most 3 properties, got " + value.additionalProperties.size()));
+                }
+                for (String pnKey : value.additionalProperties.keySet()) {
+                    int pnLength = pnKey.codePointCount(0, pnKey.length());
+                    if (pnLength > 8) {
+                        violations.add(new Violation(Violation.memberPath(pnKey), "invalid property name \"" + pnKey + "\": must have length <= 8, got " + pnLength));
+                    }
+                }
+                for (Map.Entry<String, String> entry : value.additionalProperties.entrySet()) {
+                    if (entry.getValue() == null) {
+                        violations.add(new Violation(Violation.memberPath(entry.getKey()), "explicit null not allowed"));
+                        continue;
+                    }
                 }
             }
             if (!violations.isEmpty()) {
@@ -84,6 +97,7 @@ public final class Attributes {
                 gen.writeStringField(entry.getKey(), entry.getValue());
             }
             gen.writeEndObject();
+            pending.serialize(target);
         }
     }
 

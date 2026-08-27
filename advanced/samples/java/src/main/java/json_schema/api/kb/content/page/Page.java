@@ -107,6 +107,15 @@ public final class Page {
             if (value.meta == null) {
                 violations.add(new Violation("meta", "required"));
             }
+            if (value.blocks != null) {
+                for (int validationIndex0 = 0; validationIndex0 < value.blocks.size(); validationIndex0++) {
+                    Block validationValue0 = value.blocks.get(validationIndex0);
+                    if (validationValue0 == null) {
+                        violations.add(new Violation("blocks" + "[" + validationIndex0 + "]", "explicit null not allowed"));
+                    } else {
+                    }
+                }
+            }
             gen.writeStartObject();
             if (value.pageId != null) {
                 gen.writeStringField("pageId", value.pageId);

@@ -1294,17 +1294,11 @@ fn field_needs_serialize_check(schema: &Schema) -> bool {
             .any(field_needs_serialize_check);
     }
     match schema.ty.as_ref().and_then(Value::as_str) {
-        Some("string") => schema.has_string_constraints(),
+        Some("string") | Some("boolean") => true,
         // `number` always carries the wire-wide finiteness predicate, and
         // `integer` the ±(2^53−1) cap, even when the schema declares no bound.
         Some("number") | Some("integer") => true,
-        Some("array") => {
-            schema.has_array_constraints()
-                || schema
-                    .items
-                    .as_deref()
-                    .is_some_and(field_needs_serialize_check)
-        }
+        Some("array") => true,
         _ => false,
     }
 }
@@ -1431,7 +1425,36 @@ fn render_ts_field_checks(
     path_expr: &str,
     indent: &str,
 ) {
-    render_ts_field_checks_at_depth(output, schema, value_expr, path_expr, indent, 0);
+    render_ts_field_checks_at_depth(output, schema, value_expr, path_expr, indent, 0, true);
+}
+
+fn ts_serialize_type_check(schema: &Schema, value_expr: &str) -> Option<(String, &'static str)> {
+    // Materialized wire strings are already target-language objects by the
+    // time serialize validation runs. Their dedicated format/encoding checks
+    // below validate that representation before producing the wire string.
+    if temporal_kind_direct(schema).is_some() || content_encoding_direct(schema).is_some() {
+        return None;
+    }
+    match schema.ty.as_ref().and_then(Value::as_str) {
+        Some("string") => Some((
+            format!("typeof {value_expr} === 'string'"),
+            "expected string",
+        )),
+        Some("boolean") => Some((
+            format!("typeof {value_expr} === 'boolean'"),
+            "expected boolean",
+        )),
+        Some("number") => Some((
+            format!("typeof {value_expr} === 'number'"),
+            "expected number",
+        )),
+        Some("integer") => Some((
+            format!("typeof {value_expr} === 'number' && Number.isInteger({value_expr})"),
+            "expected integer",
+        )),
+        Some("array") => Some((format!("Array.isArray({value_expr})"), "expected array")),
+        _ => None,
+    }
 }
 
 fn render_ts_field_checks_at_depth(
@@ -1441,11 +1464,14 @@ fn render_ts_field_checks_at_depth(
     path_expr: &str,
     indent: &str,
     depth: usize,
+    check_type: bool,
 ) {
     // A nullability wrapper's constraints live on its non-null branch; the caller
     // has already guarded the value against `null`.
     if let Some(non_null) = nullable_non_null_schema(schema) {
-        render_ts_field_checks_at_depth(output, non_null, value_expr, path_expr, indent, depth);
+        render_ts_field_checks_at_depth(
+            output, non_null, value_expr, path_expr, indent, depth, check_type,
+        );
         return;
     }
     if let Some(kind) = temporal_kind_direct(schema) {
@@ -1497,6 +1523,28 @@ fn render_ts_field_checks_at_depth(
         if let Some(union) = classify_ts_union(schema, &[]) {
             render_ts_union_value_checks(output, &union, value_expr, path_expr, indent);
         }
+        return;
+    }
+    if check_type && let Some((predicate, reason)) = ts_serialize_type_check(schema, value_expr) {
+        output.push_str(indent);
+        output.push_str(&format!("if (!({predicate})) {{\n"));
+        output.push_str(indent);
+        output.push_str(&format!(
+            "  violations.push({{ path: {path_expr}, reason: '{reason}' }});\n"
+        ));
+        output.push_str(indent);
+        output.push_str("} else {\n");
+        render_ts_field_checks_at_depth(
+            output,
+            schema,
+            value_expr,
+            path_expr,
+            &format!("{indent}  "),
+            depth,
+            false,
+        );
+        output.push_str(indent);
+        output.push_str("}\n");
         return;
     }
     if let Some(const_value) = &schema.const_value {
@@ -1567,6 +1615,7 @@ fn render_ts_field_checks_at_depth(
                     &item_path,
                     &check_indent,
                     depth + 1,
+                    true,
                 );
                 if allows_null(items) {
                     output.push_str(&item_indent);
@@ -3507,6 +3556,9 @@ fn render_model_serializer_body(
     // in-memory model and throw the aggregated payload-validation failure before emitting
     // the wire object — matching the parse path (both directions over one set of
     // check emitters).
+    output.push_str(&format!(
+        "  if (!{DEFINITIONS_NAMESPACE}.isPlainObject(value)) {{\n    throw {DEFINITIONS_NAMESPACE}.payloadValidationError([{{ path: '', reason: 'expected object' }}]);\n  }}\n"
+    ));
     let needs_validation = model_needs_serialize_validation(&schema)?;
     if needs_validation {
         output.push_str(&format!(
@@ -3578,22 +3630,46 @@ fn render_model_serializer_body(
                     None => serialize_expr_collecting(property, &value_expr, &path_expr),
                 };
             if required.contains(json_name) {
-                render_ts_serialize_property_check(output, json_name, property, "  ");
-                output.push_str("  ");
+                let requires_value = !allows_null(property);
+                let indent = if requires_value {
+                    output.push_str(&format!(
+                        "  if ({value_expr} === undefined || {value_expr} === null) {{\n    violations.push({{ path: {path_expr}, reason: 'required' }});\n  }} else {{\n"
+                    ));
+                    "    "
+                } else {
+                    "  "
+                };
+                render_ts_serialize_property_check(output, json_name, property, indent);
+                output.push_str(indent);
                 output.push_str(&ts_index_access("out", json_name));
                 output.push_str(" = ");
                 output.push_str(&assignment);
                 output.push_str(";\n");
+                if requires_value {
+                    output.push_str("  }\n");
+                }
             } else {
                 output.push_str("  if (value.");
                 output.push_str(&field_name);
                 output.push_str(" !== undefined) {\n");
-                render_ts_serialize_property_check(output, json_name, property, "    ");
-                output.push_str("    ");
+                let rejects_null = !allows_null(property);
+                let indent = if rejects_null {
+                    output.push_str(&format!(
+                        "    if ({value_expr} === null) {{\n      violations.push({{ path: {path_expr}, reason: 'explicit null not allowed' }});\n    }} else {{\n"
+                    ));
+                    "      "
+                } else {
+                    "    "
+                };
+                render_ts_serialize_property_check(output, json_name, property, indent);
+                output.push_str(indent);
                 output.push_str(&ts_index_access("out", json_name));
                 output.push_str(" = ");
                 output.push_str(&assignment);
                 output.push_str(";\n");
+                if rejects_null {
+                    output.push_str("    }\n");
+                }
                 output.push_str("  }\n");
             }
         }

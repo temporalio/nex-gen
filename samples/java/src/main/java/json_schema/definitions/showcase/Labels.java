@@ -60,9 +60,22 @@ public final class Labels {
     public static final class Serializer extends com.fasterxml.jackson.databind.JsonSerializer<Labels> {
         @Override
         public void serialize(Labels value, JsonGenerator gen, SerializerProvider serializers) throws IOException {
+            JsonGenerator target = gen;
+            com.fasterxml.jackson.databind.util.TokenBuffer pending = new com.fasterxml.jackson.databind.util.TokenBuffer(gen.getCodec(), false);
+            gen = pending;
             List<Violation> violations = new ArrayList<>();
-            if (value.additionalProperties.size() > 50) {
-                violations.add(new Violation("", "must have at most 50 properties, got " + value.additionalProperties.size()));
+            if (value.additionalProperties == null) {
+                violations.add(new Violation("", "expected object"));
+            } else {
+                if (value.additionalProperties.size() > 50) {
+                    violations.add(new Violation("", "must have at most 50 properties, got " + value.additionalProperties.size()));
+                }
+                for (Map.Entry<String, String> entry : value.additionalProperties.entrySet()) {
+                    if (entry.getValue() == null) {
+                        violations.add(new Violation(Violation.memberPath(entry.getKey()), "explicit null not allowed"));
+                        continue;
+                    }
+                }
             }
             if (!violations.isEmpty()) {
                 // TODO: Use PayloadValidationException.newPayloadValidationException once it is available in an SDK release.
@@ -73,6 +86,7 @@ public final class Labels {
                 gen.writeStringField(entry.getKey(), entry.getValue());
             }
             gen.writeEndObject();
+            pending.serialize(target);
         }
     }
 

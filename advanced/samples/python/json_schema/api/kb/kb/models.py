@@ -52,8 +52,20 @@ class _GetCategoryTreeInputTransferTypeConverter(
 
     @typing_extensions.override
     def to_transfer_type(self, value: "GetCategoryTreeInput") -> typing.Any:
+        if not isinstance(value, GetCategoryTreeInput):
+            raise temporalio.converter.create_payload_validation_error(
+                [Violation(path="", reason="expected object")]
+            )
+        violations: list[Violation] = []
         out: dict[str, typing.Any] = {}
-        out["rootId"] = value.root_id
+        if value.root_id is None:
+            violations.append(Violation(path="rootId", reason="required"))
+        else:
+            if not (isinstance(value.root_id, str)):
+                violations.append(Violation(path="rootId", reason="expected string"))
+            out["rootId"] = value.root_id
+        if violations:
+            raise temporalio.converter.create_payload_validation_error(violations)
         return out
 
 
@@ -100,8 +112,20 @@ class _GetPageInputTransferTypeConverter(
 
     @typing_extensions.override
     def to_transfer_type(self, value: "GetPageInput") -> typing.Any:
+        if not isinstance(value, GetPageInput):
+            raise temporalio.converter.create_payload_validation_error(
+                [Violation(path="", reason="expected object")]
+            )
+        violations: list[Violation] = []
         out: dict[str, typing.Any] = {}
-        out["pageId"] = value.page_id
+        if value.page_id is None:
+            violations.append(Violation(path="pageId", reason="required"))
+        else:
+            if not (isinstance(value.page_id, str)):
+                violations.append(Violation(path="pageId", reason="expected string"))
+            out["pageId"] = value.page_id
+        if violations:
+            raise temporalio.converter.create_payload_validation_error(violations)
         return out
 
 
@@ -160,14 +184,40 @@ class _PutBlockOutputTransferTypeConverter(
 
     @typing_extensions.override
     def to_transfer_type(self, value: "PutBlockOutput") -> typing.Any:
+        if not isinstance(value, PutBlockOutput):
+            raise temporalio.converter.create_payload_validation_error(
+                [Violation(path="", reason="expected object")]
+            )
         violations: list[Violation] = []
         out: dict[str, typing.Any] = {}
-        out["blockId"] = value.block_id
-        if abs(value.revision) > 9007199254740991:
-            violations.append(
-                Violation(path="revision", reason="exceeds ±(2^53-1) integer cap")
-            )
-        out["revision"] = value.revision
+        if value.block_id is None:
+            violations.append(Violation(path="blockId", reason="required"))
+        else:
+            if not (isinstance(value.block_id, str)):
+                violations.append(Violation(path="blockId", reason="expected string"))
+            out["blockId"] = value.block_id
+        if value.revision is None:
+            violations.append(Violation(path="revision", reason="required"))
+        else:
+            if not (
+                not isinstance(value.revision, bool)
+                and (
+                    isinstance(value.revision, int)
+                    or (
+                        isinstance(value.revision, float)
+                        and value.revision.is_integer()
+                    )
+                )
+            ):
+                violations.append(Violation(path="revision", reason="expected integer"))
+            else:
+                if abs(value.revision) > 9007199254740991:
+                    violations.append(
+                        Violation(
+                            path="revision", reason="exceeds ±(2^53-1) integer cap"
+                        )
+                    )
+            out["revision"] = value.revision
         if violations:
             raise temporalio.converter.create_payload_validation_error(violations)
         return out

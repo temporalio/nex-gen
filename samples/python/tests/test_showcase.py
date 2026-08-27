@@ -1111,10 +1111,30 @@ def test_serialize_rejects_invalid_in_memory_values() -> None:
             ),
         ),
         ({"revision": typing.cast(typing.Any, 2)}, ("revision", "must equal 1")),
+        ({"count": typing.cast(typing.Any, True)}, ("count", "expected integer")),
+        ({"count": typing.cast(typing.Any, 1.5)}, ("count", "expected integer")),
+        (
+            {"count": typing.cast(typing.Any, 10**400)},
+            ("count", "exceeds ±(2^53-1) integer cap"),
+        ),
+        ({"active": typing.cast(typing.Any, 1)}, ("active", "expected boolean")),
+        ({"nickname": typing.cast(typing.Any, [])}, ("nickname", "expected string")),
+        ({"tags": typing.cast(typing.Any, "ab")}, ("tags", "expected array")),
+        ({"name": typing.cast(typing.Any, None)}, ("name", "required")),
     ]:
         with pytest.raises(temporalio.exceptions.ApplicationError) as excinfo:
             _ = converter.to_transfer_type(dataclasses.replace(full, **replacement))
         assert violation_pairs(excinfo.value) == [expected]
+
+    with pytest.raises(temporalio.exceptions.ApplicationError) as excinfo:
+        _ = converter_for(Address).to_transfer_type(typing.cast(typing.Any, 7))
+    assert violation_pairs(excinfo.value) == [("", "expected object")]
+
+    with pytest.raises(temporalio.exceptions.ApplicationError) as excinfo:
+        _ = converter_for(Attributes).to_transfer_type(
+            Attributes(additional_properties={"host": typing.cast(typing.Any, [])})
+        )
+    assert violation_pairs(excinfo.value) == [("host", "expected string")]
 
     # Object-level checks fire on serialize too.
     with pytest.raises(temporalio.exceptions.ApplicationError) as excinfo:

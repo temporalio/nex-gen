@@ -25,6 +25,7 @@ import org.junit.jupiter.api.Test;
 
 import json_schema.definitions.showcase.Address;
 import json_schema.definitions.showcase.Attributes;
+import json_schema.definitions.showcase.BlobIndex;
 import json_schema.definitions.showcase.Circle;
 import json_schema.definitions.showcase.ContactJava;
 import json_schema.definitions.showcase.Extras;
@@ -1233,6 +1234,25 @@ final class JsonSchemaShowcaseRoundTripTest {
             assertTrue(messageChain(error).contains((String) testCase[0]), messageChain(error));
             assertTrue(messageChain(error).contains("finite number"), messageChain(error));
         }
+
+        RuntimeException nullElement = assertThrows(RuntimeException.class, () ->
+                CONVERTER.toPayload(showcaseWith(
+                        null, null, null, null, null, null, null, null,
+                        java.util.Arrays.asList(java.util.Arrays.asList((Double) null)),
+                        null, null)));
+        assertTrue(messageChain(nullElement).contains("numberGrid[0][0]"), messageChain(nullElement));
+        assertTrue(messageChain(nullElement).contains("explicit null not allowed"), messageChain(nullElement));
+
+        Map<String, Long> nullQuota = new java.util.LinkedHashMap<>();
+        nullQuota.put("cpu", null);
+        RuntimeException nullMapMember = assertThrows(
+                RuntimeException.class, () -> CONVERTER.toPayload(new Quotas(nullQuota)));
+        assertTrue(messageChain(nullMapMember).contains("cpu"), messageChain(nullMapMember));
+        assertTrue(messageChain(nullMapMember).contains("explicit null not allowed"), messageChain(nullMapMember));
+
+        RuntimeException nullMap = assertThrows(
+                RuntimeException.class, () -> CONVERTER.toPayload(new BlobIndex(null)));
+        assertTrue(messageChain(nullMap).contains("expected object"), messageChain(nullMap));
 
         String base =
                 "{\"kind\":\"showcase\",\"revision\":1,\"enabled\":true,\"status\":\"active\","

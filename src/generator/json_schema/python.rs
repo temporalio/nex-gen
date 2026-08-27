@@ -2191,6 +2191,9 @@ fn py_field_needs_serialize_check(schema: &Schema) -> bool {
     if let Some(non_null) = nullable_member_schema(schema) {
         return py_field_needs_serialize_check(non_null);
     }
+    if schema.reference.is_some() {
+        return true;
+    }
     if schema.const_value.is_some() || schema.enum_values.is_some() {
         return true;
     }
@@ -2212,12 +2215,7 @@ fn py_field_needs_serialize_check(schema: &Schema) -> bool {
             .any(py_field_needs_serialize_check);
     }
     match schema.ty.as_ref().and_then(Value::as_str) {
-        Some("string") => {
-            schema.min_length.is_some()
-                || schema.max_length.is_some()
-                || schema.pattern.is_some()
-                || schema.format.is_some()
-        }
+        Some("string") | Some("boolean") => true,
         // A `number` always carries one: the finiteness guard applies whether or
         // not a bound is declared, because `json.dumps` would otherwise write an
         // in-memory `inf`/`nan` out as bytes no other target can read (see
@@ -2227,16 +2225,7 @@ fn py_field_needs_serialize_check(schema: &Schema) -> bool {
         // the ±(2^53−1) cap has to be asserted before the value reaches the wire
         // whether or not a bound is declared.
         Some("integer") => true,
-        Some("array") => {
-            schema.min_items.is_some()
-                || schema.max_items.is_some()
-                || schema.unique_items == Some(true)
-                || schema.contains.is_some()
-                || schema
-                    .items
-                    .as_deref()
-                    .is_some_and(py_field_needs_serialize_check)
-        }
+        Some("array") => true,
         _ => false,
     }
 }
@@ -2281,6 +2270,35 @@ fn py_model_needs_serialize_validation(schema: &Schema) -> Result<bool> {
 enum PyCheckSide {
     Parse,
     Serialize,
+    SerializeTypeChecked,
+}
+
+fn py_serialize_type_check(schema: &Schema, value_expr: &str) -> Option<(String, &'static str)> {
+    let schema = nullable_member_schema(schema).unwrap_or(schema);
+    if temporal_kind_direct(schema).is_some() || content_encoding_direct(schema).is_some() {
+        return None;
+    }
+    match schema.ty.as_ref().and_then(Value::as_str) {
+        Some("string") => Some((format!("isinstance({value_expr}, str)"), "expected string")),
+        Some("boolean") => Some((
+            format!("isinstance({value_expr}, bool)"),
+            "expected boolean",
+        )),
+        Some("number") => Some((
+            format!(
+                "not isinstance({value_expr}, bool) and isinstance({value_expr}, (int, float))"
+            ),
+            "expected number",
+        )),
+        Some("integer") => Some((
+            format!(
+                "not isinstance({value_expr}, bool) and (isinstance({value_expr}, int) or (isinstance({value_expr}, float) and {value_expr}.is_integer()))"
+            ),
+            "expected integer",
+        )),
+        Some("array") => Some((format!("isinstance({value_expr}, list)"), "expected array")),
+        _ => None,
+    }
 }
 
 /// Emits the per-value constraint checks over an in-memory `value_expr`,
@@ -2305,6 +2323,32 @@ fn render_py_field_checks(
         return render_py_field_checks(
             output, non_null, models, value_expr, path_expr, indent, side,
         );
+    }
+    if side == PyCheckSide::Serialize
+        && let Some((predicate, reason)) = py_serialize_type_check(schema, value_expr)
+    {
+        let mut body = String::new();
+        render_py_field_checks(
+            &mut body,
+            schema,
+            models,
+            value_expr,
+            path_expr,
+            &format!("{indent}    "),
+            PyCheckSide::SerializeTypeChecked,
+        )?;
+        output.push_str(indent);
+        output.push_str(&format!("if not ({predicate}):\n"));
+        output.push_str(indent);
+        output.push_str(&format!(
+            "    violations.append(Violation(path={path_expr}, reason=\"{reason}\"))\n"
+        ));
+        if !body.is_empty() {
+            output.push_str(indent);
+            output.push_str("else:\n");
+            output.push_str(&body);
+        }
+        return Ok(());
     }
     // An inline sum type narrows to the branch it holds and runs that branch's
     // own checks. An object branch validates through its own converter instead,
@@ -2379,7 +2423,7 @@ fn render_py_field_checks(
             // including this module's own. Serializing it would write bytes
             // nothing can read back (P12). Go emits the same assertion with the
             // same reason (`go.rs:2745-2762`).
-            if side == PyCheckSide::Serialize {
+            if side != PyCheckSide::Parse {
                 render_py_violation_if(
                     output,
                     indent,
@@ -2418,7 +2462,11 @@ fn render_py_field_checks(
                     &element,
                     &item_path,
                     &check_indent,
-                    side,
+                    if side == PyCheckSide::Parse {
+                        PyCheckSide::Parse
+                    } else {
+                        PyCheckSide::Serialize
+                    },
                 )?;
                 // Some materialized schemas (for example `date`) report that
                 // they need serialize validation but their native helper proves
@@ -3936,6 +3984,13 @@ fn render_model_serializer_body(
     // the wire object — both directions over one set of check emitters. A nested
     // conversion aggregates into the same list, so the violations declared here
     // also hold everything the members below report (P11).
+    output.push_str(&format!(
+        "if not isinstance(value, {}):\n",
+        model.model_name
+    ));
+    output.push_str(
+        "    raise temporalio.converter.create_payload_validation_error([Violation(path=\"\", reason=\"expected object\")])\n",
+    );
     let needs_violations =
         py_model_needs_serialize_validation(schema)? || py_model_serialize_can_raise(schema)?;
     if needs_violations {
@@ -4011,8 +4066,17 @@ fn render_model_serializer_body(
                 )),
                 _ => None,
             };
-            let guarded = !required.contains(json_name);
-            let indent = if guarded {
+            let is_required = required.contains(json_name);
+            let requires_value = is_required && !allows_null(property);
+            let guarded = !is_required || requires_value;
+            let indent = if requires_value {
+                output.push_str(&format!("if {value_expr} is None:\n"));
+                output.push_str(&format!(
+                    "    violations.append(Violation(path={path_expr}, reason=\"required\"))\n"
+                ));
+                output.push_str("else:\n");
+                "    "
+            } else if guarded {
                 // Absent and explicit `null` collapsed to `None` on the way in,
                 // so both re-serialize as omitted.
                 output.push_str(&format!("if {value_expr} is not None:\n"));

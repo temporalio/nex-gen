@@ -237,15 +237,31 @@ class _TemporalTransferTypeConverter(
 
     @typing_extensions.override
     def to_transfer_type(self, value: "Temporal") -> typing.Any:
+        if not isinstance(value, Temporal):
+            raise temporalio.converter.create_payload_validation_error(
+                [Violation(path="", reason="expected object")]
+            )
         violations: list[Violation] = []
         out: dict[str, typing.Any] = {}
-        _check_date_time(value.created_at, "createdAt", violations)
-        out["createdAt"] = _format_date_time(value.created_at)
-        out["birthday"] = _format_date(value.birthday)
-        _check_time(value.alarm, "alarm", violations)
-        out["alarm"] = _format_time(value.alarm)
-        _check_duration(value.timeout, "timeout", violations)
-        out["timeout"] = _format_duration(value.timeout)
+        if value.created_at is None:
+            violations.append(Violation(path="createdAt", reason="required"))
+        else:
+            _check_date_time(value.created_at, "createdAt", violations)
+            out["createdAt"] = _format_date_time(value.created_at)
+        if value.birthday is None:
+            violations.append(Violation(path="birthday", reason="required"))
+        else:
+            out["birthday"] = _format_date(value.birthday)
+        if value.alarm is None:
+            violations.append(Violation(path="alarm", reason="required"))
+        else:
+            _check_time(value.alarm, "alarm", violations)
+            out["alarm"] = _format_time(value.alarm)
+        if value.timeout is None:
+            violations.append(Violation(path="timeout", reason="required"))
+        else:
+            _check_duration(value.timeout, "timeout", violations)
+            out["timeout"] = _format_duration(value.timeout)
         if value.updated_at is not None:
             _check_date_time(value.updated_at, "updatedAt", violations)
             out["updatedAt"] = _format_date_time(value.updated_at)

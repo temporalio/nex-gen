@@ -1054,6 +1054,30 @@ describe("json-schema showcase generated definitions", () => {
       }),
     ).toThrow(/must equal 1/);
 
+    for (const [replacement, reason] of [
+      [{ count: true }, /count: expected integer/],
+      [{ count: 1.5 }, /count: expected integer/],
+      [{ active: 1 }, /active: expected boolean/],
+      [{ nickname: [] }, /nickname: expected string/],
+      [{ tags: "ab" }, /tags: expected array/],
+      [{ name: null }, /name: required/],
+    ] as const) {
+      expect(() =>
+        showcaseTransferTypeConverter.toTransferType({
+          ...full,
+          ...replacement,
+        } as unknown as Showcase),
+      ).toThrow(reason);
+    }
+    expect(() => addressTransferTypeConverter.toTransferType(7 as never)).toThrow(
+      /expected object/,
+    );
+    expect(() =>
+      attributesTransferTypeConverter.toTransferType({
+        additionalProperties: { host: [] },
+      } as never),
+    ).toThrow(/host: expected string/);
+
     // allOf-merged bound: an in-memory `size` past the tightened maximum fails.
     const widget = widgetTransferTypeConverter.fromTransferType(
       loadFixture("widget.json"),

@@ -94,6 +94,15 @@ public final class Category {
             if (value.name == null) {
                 violations.add(new Violation("name", "required"));
             }
+            if (value.children != null) {
+                for (int validationIndex0 = 0; validationIndex0 < value.children.size(); validationIndex0++) {
+                    Category validationValue0 = value.children.get(validationIndex0);
+                    if (validationValue0 == null) {
+                        violations.add(new Violation("children" + "[" + validationIndex0 + "]", "explicit null not allowed"));
+                    } else {
+                    }
+                }
+            }
             gen.writeStartObject();
             if (value.id != null) {
                 gen.writeStringField("id", value.id);

@@ -390,7 +390,7 @@ fn schema_has_recursive_value_checks(schema: &Schema) -> bool {
         || !NumericConstraints::from_schema(schema).is_empty()
         || !StringLengthConstraints::from_schema(schema).is_empty()
         || !ArrayConstraints::from_schema(schema).is_empty()
-        || element_shape(schema).is_some_and(schema_has_recursive_value_checks)
+        || element_shape(schema).is_some()
 }
 
 fn render_java_recursive_value_checks(
@@ -449,16 +449,23 @@ fn render_java_recursive_value_checks(
                     indent,
                 );
             }
-            if let Some(item_schema) = element_shape(schema)
-                && schema_has_recursive_value_checks(item_schema)
-            {
+            if let Some(item_schema) = element_shape(schema) {
+                let item_nullable = schema.items.as_deref().is_some_and(allows_null);
                 let index = format!("validationIndex{depth}");
                 let item = format!("validationValue{depth}");
                 let item_path = format!("{path_expr} + \"[\" + {index} + \"]\"");
                 output.push_str(&format!(
-                    "{indent}for (int {index} = 0; {index} < {value_expr}.size(); {index}++) {{\n{indent}    {} {item} = {value_expr}.get({index});\n{indent}    if ({item} != null) {{\n",
+                    "{indent}for (int {index} = 0; {index} < {value_expr}.size(); {index}++) {{\n{indent}    {} {item} = {value_expr}.get({index});\n{indent}    if ({item} == null) {{\n",
                     element_ty.boxed_name()
                 ));
+                if item_nullable {
+                    output.push_str(&format!("{indent}        continue;\n"));
+                } else {
+                    output.push_str(&format!(
+                        "{indent}        violations.add(new Violation({item_path}, \"explicit null not allowed\"));\n"
+                    ));
+                }
+                output.push_str(&format!("{indent}    }} else {{\n"));
                 render_java_recursive_value_checks(
                     output,
                     &item,
@@ -3531,9 +3538,7 @@ fn field_has_serialize_check(field: &FieldPlan) -> bool {
     {
         return true;
     }
-    if matches!(field.ty, JavaType::List(_))
-        && element_shape(&field.schema).is_some_and(schema_has_recursive_value_checks)
-    {
+    if matches!(field.ty, JavaType::List(_)) && element_shape(&field.schema).is_some() {
         return true;
     }
     match &field.ty {
@@ -3609,16 +3614,23 @@ fn render_java_serialize_field_check(output: &mut String, field: &FieldPlan, ind
                         &inner,
                     );
                 }
-                if let Some(item_schema) = element_shape(&field.schema)
-                    && schema_has_recursive_value_checks(item_schema)
-                {
+                if let Some(item_schema) = element_shape(&field.schema) {
+                    let item_nullable = field.schema.items.as_deref().is_some_and(allows_null);
                     let index = "validationIndex0";
                     let item = "validationValue0";
                     let item_path = format!("{json} + \"[\" + {index} + \"]\"");
                     body.push_str(&format!(
-                        "{inner}for (int {index} = 0; {index} < {accessor}.size(); {index}++) {{\n{inner}    {} {item} = {accessor}.get({index});\n{inner}    if ({item} != null) {{\n",
+                        "{inner}for (int {index} = 0; {index} < {accessor}.size(); {index}++) {{\n{inner}    {} {item} = {accessor}.get({index});\n{inner}    if ({item} == null) {{\n",
                         element_ty.boxed_name()
                     ));
+                    if item_nullable {
+                        body.push_str(&format!("{inner}        continue;\n"));
+                    } else {
+                        body.push_str(&format!(
+                            "{inner}        violations.add(new Violation({item_path}, \"explicit null not allowed\"));\n"
+                        ));
+                    }
+                    body.push_str(&format!("{inner}    }} else {{\n"));
                     render_java_recursive_value_checks(
                         &mut body,
                         item,
@@ -3999,6 +4011,8 @@ fn render_object_serializer(
                 ));
                 if additional.nullable {
                     output.push_str("                    if (entry.getValue() == null) {\n                        continue;\n                    }\n");
+                } else {
+                    output.push_str("                    if (entry.getValue() == null) {\n                        violations.add(new Violation(Violation.memberPath(entry.getKey()), \"explicit null not allowed\"));\n                        continue;\n                    }\n");
                 }
                 render_java_member_checks(
                     output,
@@ -5550,6 +5564,11 @@ fn render_typed_map_class(
     output.push_str(&format!(
         "        @Override\n        public void serialize({class} value, JsonGenerator gen, SerializerProvider serializers) throws IOException {{\n"
     ));
+    // Buffer the complete map for the same reason as struct-shaped objects:
+    // a nested validating serializer can fail after it has started writing.
+    output.push_str("            JsonGenerator target = gen;\n");
+    output.push_str("            com.fasterxml.jackson.databind.util.TokenBuffer pending = new com.fasterxml.jackson.databind.util.TokenBuffer(gen.getCodec(), false);\n");
+    output.push_str("            gen = pending;\n");
 
     // Serialize-side (P12): member-count and key-shape constraints over the
     // in-memory map, plus each member re-checked against `T`, thrown as an
@@ -5564,7 +5583,7 @@ fn render_typed_map_class(
             member,
             value,
             MAP_MEMBER_POSITION,
-            "                ",
+            "                    ",
         );
         render_java_materialized_wire_checks(
             &mut member_checks,
@@ -5573,7 +5592,7 @@ fn render_typed_map_class(
             member,
             value,
             MAP_MEMBER_POSITION,
-            "                ",
+            "                    ",
         );
         // A union-typed member is re-checked against the branch it holds, through
         // the union's own dispatcher (the parse side runs the same checks inside
@@ -5583,53 +5602,50 @@ fn render_typed_map_class(
             && java_union_has_checks(union)
         {
             member_checks.push_str(&format!(
-                "                {interface}.validate(entry.getValue(), Violation.memberPath(entry.getKey()), violations);\n"
+                "                    {interface}.validate(entry.getValue(), Violation.memberPath(entry.getKey()), violations);\n"
             ));
         }
     }
-    let map_needs_validation = schema.min_properties.is_some()
-        || schema.max_properties.is_some()
-        || schema.property_names.is_some()
-        || !member_checks.is_empty();
     // A model-valued member reports through its own payload-validation failure;
     // re-path and merge it here rather than letting it escape unrooted (P11).
     let captures_nested = field_serialize_may_nest(value);
-    if !map_needs_validation && captures_nested {
-        output.push_str("            List<Violation> violations = new ArrayList<>();\n");
-    }
-    if map_needs_validation {
-        output.push_str("            List<Violation> violations = new ArrayList<>();\n");
-        render_java_property_count_checks(
+    output.push_str("            List<Violation> violations = new ArrayList<>();\n");
+    output.push_str("            if (value.additionalProperties == null) {\n");
+    output.push_str("                violations.add(new Violation(\"\", \"expected object\"));\n");
+    output.push_str("            } else {\n");
+    render_java_property_count_checks(
+        output,
+        "value.additionalProperties.size()",
+        schema,
+        "                ",
+    );
+    if let Some(subschema) = &schema.property_names {
+        render_java_serialize_property_name_checks(
             output,
-            "value.additionalProperties.size()",
-            schema,
-            "            ",
+            "value.additionalProperties.keySet()",
+            subschema,
+            "                ",
         );
-        if let Some(subschema) = &schema.property_names {
-            render_java_serialize_property_name_checks(
-                output,
-                "value.additionalProperties.keySet()",
-                subschema,
-                "            ",
-            );
-        }
-        if !member_checks.is_empty() {
-            output.push_str(&format!(
-                "            for (Map.Entry<String, {value_type}> entry : value.additionalProperties.entrySet()) {{\n"
-            ));
-            if nullable_members {
-                output.push_str("                if (entry.getValue() == null) {\n");
-                output.push_str("                    continue;\n                }\n");
-            }
-            output.push_str(&member_checks);
-            output.push_str("            }\n");
-        }
-        if !captures_nested {
-            output.push_str("            if (!violations.isEmpty()) {\n");
-            render_payload_validation_failure(output, "                ");
-            output.push_str("            }\n");
-        }
     }
+    if member.is_some() {
+        output.push_str(&format!(
+            "                for (Map.Entry<String, {value_type}> entry : value.additionalProperties.entrySet()) {{\n"
+        ));
+        if nullable_members {
+            output.push_str("                    if (entry.getValue() == null) {\n");
+            output.push_str("                        continue;\n                    }\n");
+        } else {
+            output.push_str("                    if (entry.getValue() == null) {\n");
+            output.push_str("                        violations.add(new Violation(Violation.memberPath(entry.getKey()), \"explicit null not allowed\"));\n");
+            output.push_str("                        continue;\n                    }\n");
+        }
+        output.push_str(&member_checks);
+        output.push_str("                }\n");
+    }
+    output.push_str("            }\n");
+    output.push_str("            if (!violations.isEmpty()) {\n");
+    render_payload_validation_failure(output, "                ");
+    output.push_str("            }\n");
 
     output.push_str("            gen.writeStartObject();\n");
     output.push_str(&format!(
@@ -5648,6 +5664,7 @@ fn render_typed_map_class(
         render_payload_validation_failure(output, "                ");
         output.push_str("            }\n");
     }
+    output.push_str("            pending.serialize(target);\n");
     output.push_str("        }\n    }\n\n");
 
     // Deserializer
