@@ -3112,6 +3112,14 @@ services:
         ts_date_time_types: Default::default(),
     })
     .expect("separate Java packages keep `Page` apart");
+    let service = fs::read_to_string(temp_dir.join("pkg/root/Svc.java")).unwrap();
+    assert!(
+        service.contains("one(com.example.pkg.a.page.Page input);")
+            && service.contains("two(com.example.pkg.b.page.Page input);"),
+        "ambiguous foreign model names must be package-qualified:\n{service}"
+    );
+    assert!(!service.contains("import com.example.pkg.a.page.Page;"));
+    assert!(!service.contains("import com.example.pkg.b.page.Page;"));
     fs::remove_dir_all(temp_dir).unwrap();
 }
 

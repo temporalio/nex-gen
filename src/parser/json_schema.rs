@@ -7992,6 +7992,9 @@ pub(crate) struct NameManifest {
     /// `ServiceSpec::code_name` at load and read from there; the manifest only
     /// enters them into the collision pass, so it needs no service map.)
     type_names: BTreeMap<String, String>,
+    /// Model full name to its emitted module/package scope. This lets consumers
+    /// distinguish a bare binding from a qualified cross-module reference.
+    type_modules: BTreeMap<String, String>,
 }
 
 impl NameManifest {
@@ -8000,6 +8003,10 @@ impl NameManifest {
     /// `None` for a target with no JSON identifier policy or an unknown model.
     pub(crate) fn type_name(&self, full_name: &str) -> Option<&str> {
         self.type_names.get(full_name).map(String::as_str)
+    }
+
+    fn type_module(&self, full_name: &str) -> Option<&str> {
+        self.type_modules.get(full_name).map(String::as_str)
     }
 }
 
@@ -8098,6 +8105,9 @@ pub(crate) fn build_name_manifest(
         manifest
             .type_names
             .insert(model.full_name.clone(), type_ident.clone());
+        manifest
+            .type_modules
+            .insert(model.full_name.clone(), model.module_key.clone());
         ns_models.push(NsModel {
             module_key: model.module_key.clone(),
             full_name: model.full_name.clone(),
@@ -8298,6 +8308,32 @@ fn validate_service_file_scopes(
                 let Some(type_ident) = manifest.type_name(reference) else {
                     continue;
                 };
+                if language == Language::Java
+                    && manifest.type_module(reference) != Some(service.module_key.as_str())
+                {
+                    // Java may qualify a model from another package. Its simple
+                    // name therefore does not enter the declaring package's
+                    // type/service scope, and two foreign packages may both
+                    // contribute (for example) a `Page` operation type.
+                    // SDK imports remain reserved below through the explicit
+                    // check, because P15 intentionally rejects an I/O model
+                    // named `Operation`/`Service` instead of qualifying around
+                    // that public collision.
+                    let mut imports = Namespace::default();
+                    for imported in service_import_idents(language) {
+                        imports.insert(
+                            language,
+                            (*imported).to_string(),
+                            format!("generated service-file import `{imported}`"),
+                        )?;
+                    }
+                    imports.insert(
+                        language,
+                        type_ident.to_string(),
+                        format!("operation I/O type `{reference}`"),
+                    )?;
+                    continue;
+                }
                 scope.insert(
                     language,
                     type_ident.to_string(),
