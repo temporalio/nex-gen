@@ -4248,7 +4248,6 @@ fn render_temporal_property_unmarshal(
     schema: &Schema,
 ) {
     let parse_fn = go_temporal_parse_fn(kind);
-    let emitted_position = schema.go_member_name(json_name);
     let key = go_string_literal(json_name);
     let path = go_violation_path_literal(json_name);
     output.push_str("\tif s, ok := parseStringField(get(");
