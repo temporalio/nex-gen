@@ -951,16 +951,18 @@ fn parse_json_documents(
         });
     }
 
+    if let Some((path, literal)) =
+        crate::json_schema::yaml_lex::fractional_integer_literal_in_sources(&sources)
+    {
+        return Err(Error::InvalidJsonSchema {
+            path,
+            reason: format!(
+                "{literal} is incompatible with `type: integer`: the written fractional part must be zero"
+            ),
+        });
+    }
     let mut docs = IndexMap::new();
     for (path, input) in sources {
-        if let Some(literal) = crate::json_schema::yaml_lex::fractional_integer_literal(&input) {
-            return Err(Error::InvalidJsonSchema {
-                path,
-                reason: format!(
-                    "{literal} is incompatible with `type: integer`: the written fractional part must be zero"
-                ),
-            });
-        }
         let doc =
             serde_yaml::from_str::<Document>(&input).map_err(|error| Error::JsonSchemaParse {
                 path: path.clone(),
@@ -10060,11 +10062,37 @@ properties:
         let error = numeric_reject("type: integer\nconst: 4503599627370496.5");
         assert!(error.contains("incompatible"), "{error}");
 
+        // The integer type and literal may arrive on different conjunction
+        // branches; normalization must not erase the authored fraction before
+        // the directional literal check sees the effective type.
+        for keyword in [
+            "const: 4503599627370496.5",
+            "default: 4503599627370496.5",
+            "enum: [1, 4503599627370496.5]",
+        ] {
+            let error = numeric_reject(&format!(
+                "allOf:\n  - {{ type: integer }}\n  - {{ {keyword} }}"
+            ));
+            assert!(error.contains("incompatible"), "{keyword}: {error}");
+        }
+
         // A written zero fractional part remains an integer even at the same
         // magnitude; the lexical gate must not conservatively reject all
         // binary64 floats in the ambiguous precision band.
         parse(
             "$schema: https://json-schema.org/draft/2020-12/schema\ntype: object\nproperties:\n  value: { type: integer, const: 4503599627370496.0 }",
+        );
+        parse(
+            "$schema: https://json-schema.org/draft/2020-12/schema\ntype: object\nproperties:\n  value:\n    allOf:\n      - { type: integer }\n      - { const: 4503599627370496.0 }",
+        );
+        parse(
+            "$schema: https://json-schema.org/draft/2020-12/schema\ntype: object\nproperties:\n  value:\n    allOf:\n      - { type: integer }\n      - { default: 4503599627370496.5 }\n      - { default: 4503599627370496.0 }",
+        );
+
+        // Annotation objects are data even when a conjunction makes their
+        // containing schema integer-typed.
+        parse(
+            "$schema: https://json-schema.org/draft/2020-12/schema\ntype: object\nproperties:\n  value:\n    allOf:\n      - { type: integer }\n      - examples:\n          - { type: integer, const: 4503599627370496.5 }",
         );
 
         // Immediately below 2^52, binary64 still retains the half and the same

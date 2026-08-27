@@ -6,11 +6,14 @@
 //! defined over the binary64 value and belong in the ordinary loader. The one
 //! exception here is JSON Schema's written-number definition of `integer`.
 //! This small event-tree pass retains scalar text just long enough to reject a
-//! fractional `const`/`default`/`enum` member on a directly typed integer node.
+//! fractional `const`/`default`/`enum` member on an effectively integer-typed
+//! node, including a type contributed through `allOf` or `$ref`.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::CStr;
+use std::fs;
 use std::mem::MaybeUninit;
+use std::path::{Path, PathBuf};
 use std::slice;
 
 use unsafe_libyaml::{
@@ -43,15 +46,386 @@ enum Event {
     MappingEnd,
 }
 
-/// Returns the first authored fractional numeric literal on a directly typed
-/// integer schema node. Syntax failures are intentionally left to `serde_yaml`,
-/// which owns the repository's established located parse diagnostic.
-pub(crate) fn fractional_integer_literal(input: &str) -> Option<String> {
-    let events = parse_events(input)?;
-    let mut index = 0;
-    let mut anchors = BTreeMap::new();
-    let root = parse_node(&events, &mut index, &mut anchors)?;
-    find_fractional_integer_literal(&root)
+/// Returns the first authored fractional numeric literal whose normalized
+/// schema is integer-typed. Syntax failures are intentionally left to
+/// `serde_yaml`, which owns the repository's established located parse
+/// diagnostic.
+///
+/// The source set matters because an `allOf` or `$ref` sibling can contribute
+/// the integer type while another branch/file contributes the literal. Keeping
+/// this inference in the lossless tree avoids teaching normalization about YAML
+/// spellings while still following exactly the schema-valued conjunction edges.
+pub(crate) fn fractional_integer_literal_in_sources(
+    sources: &[(PathBuf, String)],
+) -> Option<(PathBuf, String)> {
+    let documents = Documents::parse(sources)?;
+    documents.find_fractional_integer_literal()
+}
+
+#[cfg(test)]
+fn fractional_integer_literal(input: &str) -> Option<String> {
+    fractional_integer_literal_in_sources(&[(PathBuf::from("api.yaml"), input.to_string())])
+        .map(|(_, literal)| literal)
+}
+
+struct Documents {
+    roots: BTreeMap<PathBuf, (PathBuf, Node)>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum SchemaKind {
+    Integer,
+    Number,
+    String,
+    Boolean,
+    Object,
+    Array,
+    Null,
+    Conflict,
+}
+
+impl Documents {
+    fn parse(sources: &[(PathBuf, String)]) -> Option<Self> {
+        let mut roots = BTreeMap::new();
+        for (path, input) in sources {
+            let events = parse_events(input)?;
+            let mut index = 0;
+            let mut anchors = BTreeMap::new();
+            let root = parse_node(&events, &mut index, &mut anchors)?;
+            roots.insert(canonical(path), (path.clone(), root));
+        }
+        Some(Self { roots })
+    }
+
+    fn find_fractional_integer_literal(&self) -> Option<(PathBuf, String)> {
+        self.roots
+            .iter()
+            .find_map(|(canonical_path, (path, root))| {
+                self.find_in_schema(path, canonical_path, root, None, false)
+                    .map(|literal| (path.clone(), literal))
+            })
+    }
+
+    fn find_in_schema(
+        &self,
+        source_path: &Path,
+        canonical_path: &Path,
+        node: &Node,
+        inherited_kind: Option<SchemaKind>,
+        conjunction_branch: bool,
+    ) -> Option<String> {
+        let Node::Mapping(entries) = node else {
+            return None;
+        };
+        let local_kind =
+            self.effective_kind(source_path, canonical_path, node, &mut BTreeSet::new());
+        let effective_kind = intersect_kinds(inherited_kind, local_kind);
+        if effective_kind == Some(SchemaKind::Integer) {
+            if let Some(literal) = fractional_assertion_keyword(entries) {
+                return Some(literal);
+            }
+            // `default` is an annotation with last-wins merge semantics. Check
+            // the surviving value once at the conjunction root rather than
+            // rejecting an earlier branch that normalization overwrites.
+            if !conjunction_branch
+                && let Some(default) =
+                    self.merged_default(source_path, canonical_path, node, &mut BTreeSet::new())
+                && let Some(literal) = fractional_numeric_scalar(&default)
+            {
+                return Some(format!("`default` value {literal}"));
+            }
+        }
+
+        // Ordinary child schema positions start a fresh instance context. An
+        // `allOf` branch is different: it constrains the same instance, so the
+        // effective kind of the whole conjunction is inherited by every branch.
+        for keyword in [
+            "items",
+            "additionalProperties",
+            "contains",
+            "propertyNames",
+            "not",
+        ] {
+            if let Some(child) = mapping_value(entries, keyword) {
+                let inherited = if keyword == "contains" {
+                    mapping_value(entries, "items")
+                        .and_then(|items| {
+                            self.effective_kind(
+                                source_path,
+                                canonical_path,
+                                items,
+                                &mut BTreeSet::new(),
+                            )
+                        })
+                        .filter(|kind| *kind == SchemaKind::Integer)
+                } else {
+                    None
+                };
+                if let Some(found) =
+                    self.find_in_schema(source_path, canonical_path, child, inherited, false)
+                {
+                    return Some(found);
+                }
+            }
+        }
+        if let Some(Node::Sequence(branches)) = mapping_value(entries, "oneOf") {
+            for branch in branches {
+                if let Some(found) =
+                    self.find_in_schema(source_path, canonical_path, branch, None, false)
+                {
+                    return Some(found);
+                }
+            }
+        }
+        if let Some(Node::Sequence(branches)) = mapping_value(entries, "allOf") {
+            for branch in branches {
+                if let Some(found) =
+                    self.find_in_schema(source_path, canonical_path, branch, effective_kind, true)
+                {
+                    return Some(found);
+                }
+            }
+        }
+        for keyword in ["properties", "$defs"] {
+            if let Some(Node::Mapping(children)) = mapping_value(entries, keyword) {
+                for (_, child) in children {
+                    if let Some(found) =
+                        self.find_in_schema(source_path, canonical_path, child, None, false)
+                    {
+                        return Some(found);
+                    }
+                }
+            }
+        }
+
+        // Nexus envelope operation input/output positions are schemas too.
+        if let Some(Node::Mapping(services)) = mapping_value(entries, "services") {
+            for (_, service) in services {
+                let Node::Mapping(service) = service else {
+                    continue;
+                };
+                let Some(Node::Mapping(operations)) = mapping_value(service, "operations") else {
+                    continue;
+                };
+                for (_, operation) in operations {
+                    let Node::Mapping(operation) = operation else {
+                        continue;
+                    };
+                    for keyword in ["input", "output"] {
+                        if let Some(child) = mapping_value(operation, keyword)
+                            && let Some(found) =
+                                self.find_in_schema(source_path, canonical_path, child, None, false)
+                        {
+                            return Some(found);
+                        }
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    fn effective_kind(
+        &self,
+        source_path: &Path,
+        canonical_path: &Path,
+        node: &Node,
+        visiting_refs: &mut BTreeSet<(PathBuf, String)>,
+    ) -> Option<SchemaKind> {
+        let Node::Mapping(entries) = node else {
+            return None;
+        };
+        let mut kind = mapping_value(entries, "type")
+            .and_then(scalar)
+            .and_then(schema_kind);
+        if let Some(reference) = mapping_value(entries, "$ref").and_then(scalar)
+            && let Some((target_source_path, target_canonical_path, target, identity)) =
+                self.resolve_reference(source_path, canonical_path, reference)
+            && visiting_refs.insert(identity.clone())
+        {
+            kind = intersect_kinds(
+                kind,
+                self.effective_kind(
+                    target_source_path,
+                    target_canonical_path,
+                    target,
+                    visiting_refs,
+                ),
+            );
+            visiting_refs.remove(&identity);
+        }
+        if let Some(Node::Sequence(branches)) = mapping_value(entries, "allOf") {
+            for branch in branches {
+                kind = intersect_kinds(
+                    kind,
+                    self.effective_kind(source_path, canonical_path, branch, visiting_refs),
+                );
+            }
+        }
+        kind
+    }
+
+    fn merged_default(
+        &self,
+        source_path: &Path,
+        canonical_path: &Path,
+        node: &Node,
+        visiting_refs: &mut BTreeSet<(PathBuf, String)>,
+    ) -> Option<Node> {
+        let Node::Mapping(entries) = node else {
+            return None;
+        };
+        let mut default = None;
+        if let Some(reference) = mapping_value(entries, "$ref").and_then(scalar)
+            && let Some((target_source_path, target_canonical_path, target, identity)) =
+                self.resolve_reference(source_path, canonical_path, reference)
+            && visiting_refs.insert(identity.clone())
+        {
+            default = self.merged_default(
+                target_source_path,
+                target_canonical_path,
+                target,
+                visiting_refs,
+            );
+            visiting_refs.remove(&identity);
+        }
+        if let Some(Node::Sequence(branches)) = mapping_value(entries, "allOf") {
+            for branch in branches {
+                if let Some(branch_default) =
+                    self.merged_default(source_path, canonical_path, branch, visiting_refs)
+                {
+                    default = Some(branch_default);
+                }
+            }
+        }
+        // A node's own keywords are the final branch in normalization, so its
+        // annotation wins over both its `$ref` target and explicit `allOf`.
+        if let Some(own_default) = mapping_value(entries, "default") {
+            default = Some(own_default.clone());
+        }
+        default
+    }
+
+    fn resolve_reference<'a>(
+        &'a self,
+        source_path: &Path,
+        canonical_path: &Path,
+        reference: &str,
+    ) -> Option<(&'a Path, &'a Path, &'a Node, (PathBuf, String))> {
+        let (file_part, pointer) = reference.split_once('#').unwrap_or((reference, ""));
+        let target_path = if file_part.is_empty() {
+            canonical_path.to_path_buf()
+        } else {
+            if Path::new(file_part).is_absolute() {
+                return None;
+            }
+            canonical(
+                &source_path
+                    .parent()
+                    .unwrap_or_else(|| Path::new("."))
+                    .join(file_part),
+            )
+        };
+        let (target_canonical_path, (target_source_path, root)) =
+            self.roots.get_key_value(&target_path)?;
+        let target = resolve_pointer(root, pointer)?;
+        Some((
+            target_source_path.as_path(),
+            target_canonical_path.as_path(),
+            target,
+            (target_canonical_path.clone(), pointer.to_string()),
+        ))
+    }
+}
+
+fn schema_kind(kind: &str) -> Option<SchemaKind> {
+    match kind {
+        "integer" => Some(SchemaKind::Integer),
+        "number" => Some(SchemaKind::Number),
+        "string" => Some(SchemaKind::String),
+        "boolean" => Some(SchemaKind::Boolean),
+        "object" => Some(SchemaKind::Object),
+        "array" => Some(SchemaKind::Array),
+        "null" => Some(SchemaKind::Null),
+        _ => None,
+    }
+}
+
+fn intersect_kinds(left: Option<SchemaKind>, right: Option<SchemaKind>) -> Option<SchemaKind> {
+    match (left, right) {
+        (None, kind) | (kind, None) => kind,
+        (Some(left), Some(right)) if left == right => Some(left),
+        (Some(SchemaKind::Integer), Some(SchemaKind::Number))
+        | (Some(SchemaKind::Number), Some(SchemaKind::Integer)) => Some(SchemaKind::Integer),
+        _ => Some(SchemaKind::Conflict),
+    }
+}
+
+fn resolve_pointer<'a>(root: &'a Node, pointer: &str) -> Option<&'a Node> {
+    if pointer.is_empty() {
+        return Some(root);
+    }
+    let tokens = pointer
+        .strip_prefix('/')?
+        .split('/')
+        .map(decode_pointer_token)
+        .collect::<Option<Vec<_>>>()?;
+    // Match the loader's schema-position-only reference grammar: a fragment
+    // may name the root or a (possibly nested) `$defs` entry, never arbitrary
+    // annotation/data positions that merely look schema-shaped.
+    if tokens.len() < 2
+        || tokens.len() % 2 != 0
+        || tokens.iter().step_by(2).any(|token| token != "$defs")
+    {
+        return None;
+    }
+    let mut current = root;
+    for token in tokens {
+        let Node::Mapping(entries) = current else {
+            return None;
+        };
+        current = mapping_value(entries, &token)?;
+    }
+    Some(current)
+}
+
+fn decode_pointer_token(token: &str) -> Option<String> {
+    let mut decoded = String::with_capacity(token.len());
+    let mut chars = token.chars();
+    while let Some(character) = chars.next() {
+        if character != '~' {
+            decoded.push(character);
+            continue;
+        }
+        match chars.next()? {
+            '0' => decoded.push('~'),
+            '1' => decoded.push('/'),
+            _ => return None,
+        }
+    }
+    Some(decoded)
+}
+
+fn canonical(path: &Path) -> PathBuf {
+    fs::canonicalize(path).unwrap_or_else(|_| normalize(path))
+}
+
+fn normalize(path: &Path) -> PathBuf {
+    let mut out = PathBuf::new();
+    for component in path.components() {
+        match component {
+            std::path::Component::ParentDir => {
+                if out.file_name().is_some() {
+                    out.pop();
+                } else if !out.has_root() {
+                    out.push("..");
+                }
+            }
+            std::path::Component::CurDir => {}
+            other => out.push(other.as_os_str()),
+        }
+    }
+    out
 }
 
 fn parse_events(input: &str) -> Option<Vec<Event>> {
@@ -200,82 +574,16 @@ fn mapping_value<'a>(entries: &'a [(Node, Node)], key: &str) -> Option<&'a Node>
         .find_map(|(candidate, value)| (scalar(candidate) == Some(key)).then_some(value))
 }
 
-fn find_fractional_integer_literal(node: &Node) -> Option<String> {
-    let Node::Mapping(entries) = node else {
-        return None;
-    };
-    if mapping_value(entries, "type").and_then(scalar) == Some("integer") {
-        for keyword in ["const", "default"] {
-            if let Some(value) = mapping_value(entries, keyword)
-                && let Some(literal) = fractional_numeric_scalar(value)
-            {
-                return Some(format!("`{keyword}` value {literal}"));
-            }
-        }
-        if let Some(Node::Sequence(values)) = mapping_value(entries, "enum") {
-            for value in values {
-                if let Some(literal) = fractional_numeric_scalar(value) {
-                    return Some(format!("`enum` value {literal}"));
-                }
-            }
-        }
+fn fractional_assertion_keyword(entries: &[(Node, Node)]) -> Option<String> {
+    if let Some(value) = mapping_value(entries, "const")
+        && let Some(literal) = fractional_numeric_scalar(value)
+    {
+        return Some(format!("`const` value {literal}"));
     }
-
-    // Recurse through schema positions only. Annotation payloads and arbitrary
-    // foreign objects may themselves contain keys named `type`/`const`; they
-    // are data, not schemas, and must never acquire schema diagnostics.
-    for keyword in [
-        "items",
-        "additionalProperties",
-        "contains",
-        "propertyNames",
-        "not",
-    ] {
-        if let Some(child) = mapping_value(entries, keyword)
-            && let Some(found) = find_fractional_integer_literal(child)
-        {
-            return Some(found);
-        }
-    }
-    for keyword in ["oneOf", "allOf"] {
-        if let Some(Node::Sequence(branches)) = mapping_value(entries, keyword) {
-            for branch in branches {
-                if let Some(found) = find_fractional_integer_literal(branch) {
-                    return Some(found);
-                }
-            }
-        }
-    }
-    for keyword in ["properties", "$defs"] {
-        if let Some(Node::Mapping(children)) = mapping_value(entries, keyword) {
-            for (_, child) in children {
-                if let Some(found) = find_fractional_integer_literal(child) {
-                    return Some(found);
-                }
-            }
-        }
-    }
-
-    // Nexus envelope operation input/output positions are schemas too.
-    if let Some(Node::Mapping(services)) = mapping_value(entries, "services") {
-        for (_, service) in services {
-            let Node::Mapping(service) = service else {
-                continue;
-            };
-            let Some(Node::Mapping(operations)) = mapping_value(service, "operations") else {
-                continue;
-            };
-            for (_, operation) in operations {
-                let Node::Mapping(operation) = operation else {
-                    continue;
-                };
-                for keyword in ["input", "output"] {
-                    if let Some(child) = mapping_value(operation, keyword)
-                        && let Some(found) = find_fractional_integer_literal(child)
-                    {
-                        return Some(found);
-                    }
-                }
+    if let Some(Node::Sequence(values)) = mapping_value(entries, "enum") {
+        for value in values {
+            if let Some(literal) = fractional_numeric_scalar(value) {
+                return Some(format!("`enum` value {literal}"));
             }
         }
     }
@@ -354,6 +662,57 @@ mod tests {
     }
 
     #[test]
+    fn follows_effective_integer_type_across_conjunctions() {
+        for keyword in [
+            "const: 4503599627370496.5",
+            "default: 4503599627370496.5",
+            "enum: [1, 4503599627370496.5]",
+        ] {
+            let schema = format!("allOf:\n  - {{ type: integer }}\n  - {{ {keyword} }}");
+            assert!(fractional_integer_literal(&schema).is_some(), "{keyword}");
+        }
+        assert_eq!(
+            fractional_integer_literal(
+                "allOf:\n  - { type: integer }\n  - { const: 4503599627370496.0 }"
+            ),
+            None
+        );
+        assert_eq!(
+            fractional_integer_literal(
+                "allOf:\n  - { type: integer }\n  - { default: 4503599627370496.5 }\n  - { default: 4503599627370496.0 }"
+            ),
+            None
+        );
+        assert!(
+            fractional_integer_literal(
+                "allOf:\n  - { type: integer }\n  - { default: 4503599627370496.0 }\n  - { default: 4503599627370496.5 }"
+            )
+            .is_some()
+        );
+    }
+
+    #[test]
+    fn follows_effective_integer_type_across_external_ref_siblings() {
+        let sources = [
+            (
+                PathBuf::from("defs.yaml"),
+                "$defs:\n  Whole: { type: integer }".to_string(),
+            ),
+            (
+                PathBuf::from("api.yaml"),
+                "$ref: defs.yaml#/$defs/Whole\nconst: 4503599627370496.5".to_string(),
+            ),
+        ];
+        assert_eq!(
+            fractional_integer_literal_in_sources(&sources),
+            Some((
+                PathBuf::from("api.yaml"),
+                "`const` value 4503599627370496.5".to_string()
+            ))
+        );
+    }
+
+    #[test]
     fn follows_nested_and_aliased_schema_nodes() {
         assert!(
             fractional_integer_literal(
@@ -368,6 +727,18 @@ mod tests {
         assert_eq!(
             fractional_integer_literal(
                 "type: object\nproperties: {}\nexamples:\n  - type: integer\n    const: 4503599627370496.5"
+            ),
+            None
+        );
+        assert_eq!(
+            fractional_integer_literal(
+                "allOf:\n  - { type: integer }\n  - examples:\n      - type: integer\n        const: 4503599627370496.5"
+            ),
+            None
+        );
+        assert_eq!(
+            fractional_integer_literal(
+                "examples:\n  schemaish: { type: integer }\n$ref: '#/examples/schemaish'\nconst: 4503599627370496.5"
             ),
             None
         );
