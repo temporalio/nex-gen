@@ -10,7 +10,7 @@ use std::cell::{Cell, RefCell};
 
 use crate::error::{Error, Result};
 use crate::generator::json_schema::build_json_name_manifest;
-use crate::generator::json_schema::register_cross_module_ref_names;
+use crate::generator::json_schema::{bare_ref_target, register_cross_module_ref_names};
 use crate::generator::typescript::{
     RenderedExternalModelFragments, WireValueConversion, render_typescript_doc_comment,
     typescript_generated_field_name,
@@ -1827,7 +1827,7 @@ fn render_external_models(
     }
 
     Ok(RenderedExternalModelFragments {
-        imports: render_json_model_imports(runtime_import_module),
+        imports: render_json_model_imports(runtime_import_module, &output),
         body: output,
         type_exported_names: json_models
             .iter()
@@ -1846,7 +1846,7 @@ fn render_external_models(
 /// that could collide with user-authored identifiers.
 const DEFINITIONS_NAMESPACE: &str = "__nexgenDefinitions";
 
-fn render_json_model_imports(runtime_import_module: &str) -> String {
+fn render_json_model_imports(runtime_import_module: &str, body: &str) -> String {
     let mut imports = String::new();
     // Every model gets a converter, so the SDK contract it implements is always
     // referenced. Type-only: nexus-rpc contributes no runtime code to `models.ts`.
@@ -1855,11 +1855,13 @@ fn render_json_model_imports(runtime_import_module: &str) -> String {
     // (TS 6's `esnext.temporal` lib) — no import required (P4).
     // `payloadValidationError`/`isPlainObject`/`Violation` are referenced by every
     // generated model's parser, so the import is always live.
-    imports.push_str("import * as ");
-    imports.push_str(DEFINITIONS_NAMESPACE);
-    imports.push_str(" from \"");
-    imports.push_str(runtime_import_module);
-    imports.push_str("\";\n");
+    if body.contains(DEFINITIONS_NAMESPACE) {
+        imports.push_str("import * as ");
+        imports.push_str(DEFINITIONS_NAMESPACE);
+        imports.push_str(" from \"");
+        imports.push_str(runtime_import_module);
+        imports.push_str("\";\n");
+    }
     imports
 }
 
@@ -3169,6 +3171,14 @@ fn render_ts_inline_union_serializers(
 }
 
 fn render_model_interface(output: &mut String, model: &PlannedJsonType) -> Result<()> {
+    if let Some(reference) = bare_ref_target(model) {
+        output.push_str("export type ");
+        output.push_str(&model.model_name);
+        output.push_str(" = ");
+        output.push_str(&reference_model_name(reference));
+        output.push_str(";\n");
+        return Ok(());
+    }
     let schema = decode_schema(model)?;
     if is_ts_union(&schema) {
         render_ts_schema_doc(output, "", &schema);
@@ -3261,6 +3271,18 @@ fn render_model_transfer_type_converter(
     model: &PlannedJsonType,
     models: &[&PlannedJsonType],
 ) -> Result<()> {
+    if let Some(reference) = bare_ref_target(model) {
+        output.push_str("export const ");
+        output.push_str(&ts_transfer_type_converter_name(&model.model_name));
+        output.push_str(": TransferTypeConverter<");
+        output.push_str(&model.model_name);
+        output.push_str("> = ");
+        output.push_str(&ts_transfer_type_converter_name(&reference_model_name(
+            reference,
+        )));
+        output.push_str(";\n");
+        return Ok(());
+    }
     let schema = decode_schema(model)?;
     if let Some(union) = classify_ts_union(&schema, models) {
         open_transfer_type_converter(output, &model.model_name);

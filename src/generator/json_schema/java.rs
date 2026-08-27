@@ -9,6 +9,7 @@ use serde_json::Value;
 use crate::error::{Error, Result};
 use crate::generator::ExternalModelBackend;
 use crate::generator::java::render_java_doc_comment;
+use crate::generator::json_schema::bare_ref_target;
 use crate::language::Language;
 use crate::parser::{ManifestModel, NameManifest, build_name_manifest};
 use crate::planning::{PlannedFamily, PlannedJsonType, PlannedSpec};
@@ -2008,6 +2009,27 @@ fn decode_schema(model: &PlannedJsonType) -> Result<Schema> {
     })
 }
 
+/// Resolves an exact bare-ref model alias to the declaration that owns the
+/// Java class. Java intentionally emits no alias class, so both member and
+/// operation references use this final target directly.
+pub(in crate::generator) fn resolve_bare_ref_alias<'a>(
+    model: &'a PlannedJsonType,
+    all_models: &'a BTreeMap<String, PlannedJsonType>,
+) -> &'a PlannedJsonType {
+    let mut current = model;
+    for _ in 0..=all_models.len() {
+        let Some(reference) = bare_ref_target(current) else {
+            break;
+        };
+        let key = reference.strip_prefix("#/$defs/").unwrap_or(reference);
+        let Some(target) = all_models.get(key) else {
+            break;
+        };
+        current = target;
+    }
+    current
+}
+
 fn schema_type_includes(schema: &Schema, ty: &str) -> bool {
     match schema.ty.as_ref() {
         Some(Value::String(value)) => value == ty,
@@ -2258,8 +2280,12 @@ pub(in crate::generator) fn render_model_file(
     let resolved_registry: BTreeMap<String, (String, String)> = registry
         .iter()
         .map(|(key, (package, class))| {
+            let manifest_key = all_models
+                .get(key)
+                .map(|model| resolve_bare_ref_alias(model, all_models).full_name.as_str())
+                .unwrap_or(key);
             let class = manifest
-                .type_name(key)
+                .type_name(manifest_key)
                 .map(str::to_string)
                 .unwrap_or_else(|| class.clone());
             (key.clone(), (package.clone(), class))

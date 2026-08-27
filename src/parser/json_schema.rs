@@ -1004,7 +1004,7 @@ fn parse_json_documents(
         if let Some(defs) = &doc.defs {
             validate_def_model_tree(path, defs, &[])?;
         }
-        if root_is_schema_shaped(&doc.root) && !doc.root.is_bare_ref() {
+        if root_is_schema_shaped(&doc.root) {
             validate_model_schema(path, &doc.root, "root schema")?;
         }
     }
@@ -1021,7 +1021,7 @@ fn parse_json_documents(
         if let Some(defs) = &doc.defs {
             collect_json_models_from_defs(path, canonical_path, defs, &[], &mut models)?;
         }
-        if root_is_schema_shaped(&doc.root) && !doc.root.is_bare_ref() {
+        if root_is_schema_shaped(&doc.root) {
             let model_name = root_model_name(path);
             // The root type and the file's `$defs` share one namespace (P15), and
             // the root's derived name *is* its model identity — the key every
@@ -5713,9 +5713,13 @@ fn operation_model_type(
     validate_schema_common(path, schema, &format!("operation {operation_key} {suffix}"))?;
     if let Some(reference) = &schema.reference {
         let model = resolve_ref(path, canonical_path, reference, docs, models)?;
+        let model_path = docs
+            .get(&model.canonical_path)
+            .map(|(source_path, _)| source_path.as_path())
+            .unwrap_or(model.canonical_path.as_path());
         require_object_io(
-            path,
-            canonical_path,
+            model_path,
+            &model.canonical_path,
             &model.schema,
             operation_key,
             suffix,
@@ -5784,6 +5788,7 @@ fn require_object_io(
 ) -> Result<()> {
     let mut current = schema.clone();
     let mut current_canonical = canonical_path.to_path_buf();
+    let mut current_path = path.to_path_buf();
     let mut guard = 0usize;
     loop {
         if current.ty.as_ref().and_then(Value::as_str) == Some("object") {
@@ -5794,8 +5799,12 @@ fn require_object_io(
                 .reference
                 .clone()
                 .expect("a bare `$ref` carries a reference");
-            let model = resolve_ref(path, &current_canonical, &reference, docs, models)?;
+            let model = resolve_ref(&current_path, &current_canonical, &reference, docs, models)?;
             current_canonical = model.canonical_path.clone();
+            current_path = docs
+                .get(&model.canonical_path)
+                .map(|(source_path, _)| source_path.clone())
+                .unwrap_or_else(|| model.canonical_path.clone());
             current = model.schema.clone();
             guard += 1;
             if guard > models.len() + 1 {
@@ -5842,7 +5851,7 @@ fn collect_raw_models(
         if let Some(defs) = &doc.defs {
             collect_raw_defs(path, canonical_path, defs, &[], &mut raw)?;
         }
-        if root_is_schema_shaped(&doc.root) && !doc.root.is_bare_ref() {
+        if root_is_schema_shaped(&doc.root) {
             raw.insert(TypeKey::Root(canonical_path.clone()), doc.root.clone());
         }
     }
@@ -7122,7 +7131,11 @@ fn resolve_ref_key(
         if !doc_paths.contains(&target) {
             return Err(Error::InvalidJsonSchema {
                 path: path.to_path_buf(),
-                reason: format!("`$ref` target file `{file_part}` is not in the input set"),
+                reason: format!(
+                    "`$ref` target file `{file_part}` resolved from `{}` to `{}`, which is not in the input set",
+                    path.display(),
+                    target.display()
+                ),
             });
         }
         target
@@ -9318,7 +9331,7 @@ fn collect_python_module_idents<'a>(
                 python::union_serialize_fn(&base),
                 origin("union serialize function"),
             )?;
-        } else {
+        } else if !model.schema.is_bare_ref() {
             top.insert(
                 language,
                 python::converter_class_name(&model.type_ident),
@@ -9547,6 +9560,77 @@ $defs:
         assert_eq!(output.name.as_str(), "SendMessageOutput");
         assert!(spec.external_type_binding("SendMessageInput").is_some());
         assert!(spec.external_type_binding("SendMessageOutput").is_some());
+    }
+
+    #[test]
+    fn bare_ref_def_is_preserved_as_an_alias_and_resolves_for_operation_io() {
+        let spec = parse(
+            r##"
+nexusrpc: "1.0.0"
+$schema: https://json-schema.org/draft/2020-12/schema
+services:
+  AliasService:
+    operations:
+      echo:
+        input: { $ref: "#/$defs/Alias" }
+        output: { $ref: "#/$defs/Alias" }
+$defs:
+  Alias: { $ref: "#/$defs/Target" }
+  Target:
+    type: object
+    additionalProperties: false
+    required: [value]
+    properties: { value: { type: string } }
+"##,
+        );
+
+        let alias = spec
+            .external_type_binding("Alias")
+            .and_then(ExternalTypeBindingSpec::json_model)
+            .expect("alias model");
+        assert_eq!(alias.schema["$ref"], "#/$defs/Target");
+        let operation = &spec.services[0].operations[0];
+        for io in [operation.input.as_ref(), operation.output.as_ref()] {
+            let Some(TypeSpec::External(ExternalTypeSpec::Json(model))) = io else {
+                panic!("alias operation I/O should remain a JSON model");
+            };
+            assert_eq!(model.name.as_str(), "Alias");
+        }
+    }
+
+    #[test]
+    fn cross_file_bare_ref_root_is_a_resolvable_operation_alias() {
+        let spec = api_spec_from_json_schema_sources(
+            Language::Python,
+            vec![
+                (
+                    PathBuf::from("target.yaml"),
+                    "$schema: https://json-schema.org/draft/2020-12/schema\ntype: object\nadditionalProperties: false\nrequired: [value]\nproperties: { value: { type: string } }\n".to_string(),
+                ),
+                (
+                    PathBuf::from("alias.yaml"),
+                    "$schema: https://json-schema.org/draft/2020-12/schema\n$ref: target.yaml#\n".to_string(),
+                ),
+                (
+                    PathBuf::from("service.nexusrpc.yaml"),
+                    "nexusrpc: 1.0.0\nservices:\n  AliasService:\n    operations:\n      echo:\n        input: { $ref: alias.yaml# }\n        output: { $ref: alias.yaml# }\n".to_string(),
+                ),
+            ],
+        )
+        .expect("root alias should resolve through to an object");
+
+        let alias = spec
+            .external_type_binding("Alias")
+            .and_then(ExternalTypeBindingSpec::json_model)
+            .expect("root alias model");
+        assert_eq!(alias.schema["$ref"], "#/$defs/Target");
+        assert!(spec.external_type_binding("Target").is_some());
+        let Some(TypeSpec::External(ExternalTypeSpec::Json(input))) =
+            spec.services[0].operations[0].input.as_ref()
+        else {
+            panic!("operation input should resolve to the alias model");
+        };
+        assert_eq!(input.name.as_str(), "Alias");
     }
 
     #[test]

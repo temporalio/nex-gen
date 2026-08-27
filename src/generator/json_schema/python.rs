@@ -10,7 +10,7 @@ use serde_json::Value;
 use crate::error::{Error, Result};
 use crate::generator::ExternalModelBackend;
 use crate::generator::json_schema::build_json_name_manifest;
-use crate::generator::json_schema::register_cross_module_ref_names;
+use crate::generator::json_schema::{bare_ref_target, register_cross_module_ref_names};
 use crate::generator::python::{
     PythonImports, PythonModelHoists, RenderedModelFragments, WireValueConversion,
     module_common_prefix_len, python_field_name, render_generated_file_header,
@@ -157,6 +157,10 @@ thread_local! {
     /// no converter class — its conversion is a pair of module-private free
     /// functions — so a `$ref` at one dispatches differently.
     static UNION_NAMES: RefCell<BTreeSet<String>> = const { RefCell::new(BTreeSet::new()) };
+    /// Exact bare-ref aliases keyed by emitted alias identifier. Conversion
+    /// follows this map to the declaration that owns the runtime converter,
+    /// while annotations keep the authored alias name.
+    static ALIAS_TARGETS: RefCell<BTreeMap<String, String>> = const { RefCell::new(BTreeMap::new()) };
 }
 
 fn set_ref_names(ref_names: &BTreeMap<String, String>) {
@@ -167,6 +171,7 @@ fn set_ref_names(ref_names: &BTreeMap<String, String>) {
 fn set_module_context(json_models: &[&PlannedJsonType]) -> Result<()> {
     let locals = json_models
         .iter()
+        .filter(|model| bare_ref_target(model).is_none())
         .map(|model| model.model_name.clone())
         .collect::<BTreeSet<_>>();
     let unions = json_models
@@ -176,6 +181,14 @@ fn set_module_context(json_models: &[&PlannedJsonType]) -> Result<()> {
         .collect::<BTreeSet<_>>();
     LOCAL_MODELS.with(|cell| *cell.borrow_mut() = locals);
     UNION_NAMES.with(|cell| *cell.borrow_mut() = unions);
+    let aliases = json_models
+        .iter()
+        .filter_map(|model| {
+            bare_ref_target(model)
+                .map(|reference| (model.model_name.clone(), reference_model_name(reference)))
+        })
+        .collect();
+    ALIAS_TARGETS.with(|cell| *cell.borrow_mut() = aliases);
     Ok(())
 }
 
@@ -185,6 +198,17 @@ fn is_local_model(name: &str) -> bool {
 
 fn is_union_type_name(name: &str) -> bool {
     UNION_NAMES.with(|cell| cell.borrow().contains(name))
+}
+
+fn alias_runtime_name(name: &str) -> String {
+    let mut current = name.to_string();
+    for _ in 0..64 {
+        let Some(next) = ALIAS_TARGETS.with(|cell| cell.borrow().get(&current).cloned()) else {
+            break;
+        };
+        current = next;
+    }
+    current
 }
 
 /// The private converter class a model's wire contract lives in.
@@ -223,8 +247,9 @@ fn parse_slot_local(field_name: &str) -> String {
 /// imported from a sibling module is reached through the class attribute the SDK
 /// decorator set, because the converter itself is module-private there.
 fn converter_expr(model_name: &str) -> String {
-    if is_local_model(model_name) {
-        format!("{}()", converter_class_name(model_name))
+    let model_name = alias_runtime_name(model_name);
+    if is_local_model(&model_name) {
+        format!("{}()", converter_class_name(&model_name))
     } else {
         format!("getattr({model_name}, \"__temporal_transfer_type_converter\")")
     }
@@ -761,12 +786,17 @@ pub(in crate::generator) fn render_external_models(
     let class_models: Vec<&PlannedJsonType> = json_models
         .iter()
         .copied()
-        .filter(|model| !is_python_union_model(model))
+        .filter(|model| bare_ref_target(model).is_none() && !is_python_union_model(model))
         .collect();
     let union_models: Vec<&PlannedJsonType> = json_models
         .iter()
         .copied()
-        .filter(|model| is_python_union_model(model))
+        .filter(|model| bare_ref_target(model).is_none() && is_python_union_model(model))
+        .collect();
+    let alias_models: Vec<&PlannedJsonType> = json_models
+        .iter()
+        .copied()
+        .filter(|model| bare_ref_target(model).is_some())
         .collect();
 
     set_module_context(json_models)?;
@@ -828,6 +858,36 @@ pub(in crate::generator) fn render_external_models(
             None,
             false,
         );
+    }
+
+    // Python assignments evaluate their right-hand side immediately. Emit
+    // aliases after ordinary classes/unions and order alias chains so every
+    // local target already exists; cross-module targets are imported above.
+    let mut pending = alias_models;
+    let alias_names = pending
+        .iter()
+        .map(|model| model.model_name.clone())
+        .collect::<BTreeSet<_>>();
+    let mut emitted = BTreeSet::new();
+    while !pending.is_empty() {
+        let index = pending
+            .iter()
+            .position(|model| {
+                let target = reference_model_name(
+                    bare_ref_target(model).expect("alias model carries a target"),
+                );
+                !alias_names.contains(&target) || emitted.contains(&target)
+            })
+            .expect("bare-ref alias cycles are rejected by the parser");
+        let model = pending.remove(index);
+        let target =
+            reference_model_name(bare_ref_target(model).expect("alias model carries a target"));
+        push_section(&mut body);
+        body.push_str(&model.model_name);
+        body.push_str(" = ");
+        body.push_str(&target);
+        body.push('\n');
+        emitted.insert(model.model_name.clone());
     }
 
     // Each is emitted only when the rendered body actually references the module
@@ -2901,11 +2961,12 @@ fn classify_py_union(schema: &Schema, models: &[&PlannedJsonType]) -> Result<Opt
                 let (py_type, converter, union_base, memory_type, label) = match &branch.reference {
                     Some(reference) => {
                         let name = reference_model_name(reference);
-                        if is_union_type_name(&name) {
+                        let runtime_name = alias_runtime_name(&name);
+                        if is_union_type_name(&runtime_name) {
                             (
                                 name.clone(),
                                 None,
-                                Some(union_fn_base(&name)),
+                                Some(union_fn_base(&runtime_name)),
                                 Some(name.clone()),
                                 name,
                             )
@@ -4371,12 +4432,13 @@ fn render_value_parser(
 ) -> Result<()> {
     if let Some(reference) = &schema.reference {
         let model_name = reference_model_name(reference);
-        if is_union_type_name(&model_name) {
+        let runtime_name = alias_runtime_name(&model_name);
+        if is_union_type_name(&runtime_name) {
             let parsed = format!("{slot}_parsed");
             output.push_str(indent);
             output.push_str(&format!(
                 "{parsed} = {}({raw_expr}, {path_expr}, violations)\n",
-                union_parse_fn(&union_fn_base(&model_name))
+                union_parse_fn(&union_fn_base(&runtime_name))
             ));
             output.push_str(indent);
             output.push_str(&format!("if {parsed} is not None:\n"));
@@ -5042,10 +5104,11 @@ fn render_open_object_collection(
 fn serialize_expr(schema: &Schema, value_expr: &str, depth: usize) -> String {
     if let Some(reference) = &schema.reference {
         let model_name = reference_model_name(reference);
-        if is_union_type_name(&model_name) {
+        let runtime_name = alias_runtime_name(&model_name);
+        if is_union_type_name(&runtime_name) {
             return format!(
                 "{}({value_expr})",
-                union_serialize_fn(&union_fn_base(&model_name))
+                union_serialize_fn(&union_fn_base(&runtime_name))
             );
         }
         return format!(

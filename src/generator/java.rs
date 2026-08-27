@@ -42,26 +42,9 @@ pub(crate) fn generate(
         }
     }
 
-    // Registry from each model's canonical `full_name` (the string that appears
-    // in planned `$ref` values) to its Java (package, class).
-    let mut registry: BTreeMap<String, (String, String)> = BTreeMap::new();
-    for leaf in &leaves {
-        for (_, binding) in leaf.spec.external_types() {
-            if let Some(json_type) = binding.json_model() {
-                let module = json_type.module_path.as_ref().unwrap_or(&leaf.module_path);
-                registry.insert(
-                    json_type.full_name.clone(),
-                    (
-                        JavaContext::package_for_module(base_package, &module.0),
-                        json_type.model_name.clone(),
-                    ),
-                );
-            }
-        }
-    }
-
     // Every JSON model keyed by its canonical `full_name`, so a `oneOf` union
-    // def can resolve its `$ref` object members' schemas + discriminants.
+    // def can resolve its `$ref` object members' schemas + discriminants, and
+    // bare-ref aliases can collapse to the class-owning target.
     let mut all_models: BTreeMap<String, PlannedJsonType> = BTreeMap::new();
     for leaf in &leaves {
         for (_, binding) in leaf.spec.external_types() {
@@ -69,6 +52,23 @@ pub(crate) fn generate(
                 all_models.insert(json_type.full_name.clone(), json_type.clone());
             }
         }
+    }
+
+    // Registry from each model's canonical `full_name` (the string that appears
+    // in planned `$ref` values) to its Java (package, class). Alias keys point
+    // directly at their final target because Java emits no alias declaration.
+    let mut registry: BTreeMap<String, (String, String)> = BTreeMap::new();
+    let root_module = ModulePath::default();
+    for (full_name, json_type) in &all_models {
+        let target = java_json::resolve_bare_ref_alias(json_type, &all_models);
+        let module = target.module_path.as_ref().unwrap_or(&root_module);
+        registry.insert(
+            full_name.clone(),
+            (
+                JavaContext::package_for_module(base_package, &module.0),
+                target.model_name.clone(),
+            ),
+        );
     }
 
     let mut files = BTreeMap::new();
@@ -84,6 +84,11 @@ pub(crate) fn generate(
             let Some(json_type) = binding.json_model() else {
                 continue;
             };
+            if java_json::resolve_bare_ref_alias(json_type, &all_models).full_name
+                != json_type.full_name
+            {
+                continue;
+            }
             let contents = java_json::render_model_file(
                 json_type,
                 base_package,
@@ -97,7 +102,7 @@ pub(crate) fn generate(
         }
 
         for service in &leaf.spec.services {
-            let contents = render_service_file(service, module, base_package)?;
+            let contents = render_service_file(service, module, base_package, &all_models)?;
             let service_ident = service
                 .code_name
                 .for_language(crate::language::Language::Java)
@@ -187,6 +192,7 @@ fn render_service_file(
     service: &ServiceSpec<PlannedFamily>,
     module: &ModulePath,
     base_package: &str,
+    all_models: &BTreeMap<String, PlannedJsonType>,
 ) -> Result<String> {
     let package = JavaContext::package_for_module(base_package, &module.0);
 
@@ -254,8 +260,8 @@ fn render_service_file(
             body.push_str("    @Deprecated\n");
         }
 
-        let output = io_type(operation.output.as_ref(), module, base_package);
-        let input = io_type(operation.input.as_ref(), module, base_package);
+        let output = io_type(operation.output.as_ref(), module, base_package, all_models);
+        let input = io_type(operation.input.as_ref(), module, base_package, all_models);
         let return_type = match &output {
             Some((pkg, class)) => {
                 if ambiguous_io_classes.contains(class) {
@@ -310,10 +316,12 @@ fn io_type(
     ty: Option<&TypeSpec<PlannedFamily>>,
     module: &ModulePath,
     base_package: &str,
+    all_models: &BTreeMap<String, PlannedJsonType>,
 ) -> Option<(String, String)> {
     let ty = ty?;
     match ty.without_option() {
         TypeSpec::External(ExternalTypeSpec::Json(json_type)) => {
+            let json_type = java_json::resolve_bare_ref_alias(json_type, all_models);
             let target = json_type.module_path.as_ref().unwrap_or(module);
             Some((
                 JavaContext::package_for_module(base_package, &target.0),

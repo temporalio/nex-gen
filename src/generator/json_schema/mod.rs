@@ -8,7 +8,21 @@ pub(in crate::generator) use crate::planning::build_json_name_manifest;
 
 use std::collections::BTreeMap;
 
-use crate::planning::PlannedSpec;
+use crate::planning::{PlannedJsonType, PlannedSpec};
+
+/// Returns the target of a named JSON Schema alias.
+///
+/// Alias declarations are deliberately recognized from the exact authored
+/// shape: a model containing only `$ref`. A reference with annotations or
+/// other siblings is governed by the ordinary reference/merge rules instead.
+pub(in crate::generator) fn bare_ref_target(model: &PlannedJsonType) -> Option<&str> {
+    let object = model.schema.as_object()?;
+    object
+        .iter()
+        .all(|(key, value)| key == "$ref" || value.is_null())
+        .then(|| object.get("$ref")?.as_str())
+        .flatten()
+}
 
 /// Registers the emitted identifier of every model declared in *another* module
 /// in a backend's `$ref` registry, under both key forms a backend looks a

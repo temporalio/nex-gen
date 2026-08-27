@@ -16,7 +16,7 @@ use nexgen::spec::SupportFragmentSpec;
 use nexgen::{GenerateRequest, generate_to_file};
 
 mod common;
-use common::json_input_path;
+use common::{json_input_path, write_bare_ref_alias_closure};
 
 const PRIMARY_EXAMPLE_ID: &str = "workflow-service";
 const TYPE_ROUNDTRIP_EXAMPLE_ID: &str = "type-roundtrip";
@@ -2198,6 +2198,55 @@ fn python_json_cross_module_py_name_override_moves_every_reference() {
         assert!(!services.contains(stale), "{stale}\n{services}");
         assert!(!models.contains(stale), "{stale}\n{models}");
     }
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+#[test]
+fn python_json_bare_ref_root_alias_is_the_target_class_at_runtime() {
+    let temp_dir = unique_output_path("py-json-bare-ref-alias");
+    let input = write_bare_ref_alias_closure(&temp_dir);
+    let output_path = temp_dir.join("output");
+    generate_to_file(&GenerateRequest {
+        language: nexgen::language::Language::Python,
+        input_paths: vec![input],
+        support_paths: Vec::new(),
+        descriptor_paths: Vec::new(),
+        output_path: output_path.clone(),
+        format: false,
+        generate_native_api: false,
+        java_package_name: None,
+        ts_date_time_types: Default::default(),
+    })
+    .unwrap();
+
+    let alias = fs::read_to_string(output_path.join("alias/alternate/models.py")).unwrap();
+    assert!(alias.contains("Alternate = Main"), "{alias}");
+    assert!(!alias.contains("class Alternate"), "{alias}");
+    let target = fs::read_to_string(output_path.join("target/main/models.py")).unwrap();
+    assert!(target.contains("Mirror = Main"), "{target}");
+    assert!(!target.contains("class Mirror"), "{target}");
+    let service = fs::read_to_string(output_path.join("service/services.py")).unwrap();
+    assert!(service.contains("Alternate"), "{service}");
+    let holder = fs::read_to_string(output_path.join("service/models.py")).unwrap();
+    assert!(holder.contains("item: Alternate"), "{holder}");
+
+    let status = Command::new("uv")
+        .current_dir(&temp_dir)
+        .args([
+            "run",
+            "--project",
+            project_root()
+                .join("advanced/samples/python")
+                .to_str()
+                .unwrap(),
+            "--locked",
+            "python",
+            "-c",
+            "from output.alias.alternate.models import Alternate, Main; from output.target.main.models import Mirror; assert Alternate is Main; assert Mirror is Main; assert Alternate(value='ok').value == 'ok'",
+        ])
+        .status()
+        .unwrap();
+    assert!(status.success());
     fs::remove_dir_all(temp_dir).unwrap();
 }
 

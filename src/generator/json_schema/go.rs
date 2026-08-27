@@ -12,6 +12,7 @@ use crate::generator::go::{
     GoPackageContext, PlannedMessageSource, PlannedMessageType, PlannedValueType, go_field_name,
     render_go_doc_comment as render_wrapped_go_doc_comment,
 };
+use crate::generator::json_schema::bare_ref_target;
 use crate::generator::json_schema::build_json_name_manifest;
 use crate::generator::json_schema::register_cross_module_ref_names;
 use crate::json_schema::scalar::{ScalarKind, ScalarMatcher};
@@ -1582,7 +1583,7 @@ fn render_external_models(
         return Ok(ModelFragments::default());
     }
 
-    let mut imports = BTreeSet::from(["encoding/json".to_string()]);
+    let mut imports = BTreeSet::new();
     let mut output = String::new();
     let resolvable = models
         .iter()
@@ -1618,6 +1619,9 @@ fn render_external_models(
     // schema's own prose, and an unused import is a Go compile error, so a
     // description ending a sentence with "at a time." must not pull in `time`.
     let code = go_code_without_comments(&output);
+    if code.contains("json.") {
+        imports.insert("encoding/json".to_string());
+    }
     if code.contains("bytes.") {
         imports.insert("bytes".to_string());
     }
@@ -2655,6 +2659,14 @@ fn render_model(
     model_names: &BTreeMap<String, String>,
     unions: &BTreeMap<String, GoUnion>,
 ) -> Result<()> {
+    if let Some(reference) = bare_ref_target(model) {
+        output.push_str("type ");
+        output.push_str(&model.model_name);
+        output.push_str(" = ");
+        output.push_str(&reference_model_name(reference, model_names));
+        output.push_str("\n");
+        return Ok(());
+    }
     let schema = decode_schema(model)?;
     // A named `oneOf` union model is emitted as a sealed interface by
     // `render_go_unions`, not as a struct.

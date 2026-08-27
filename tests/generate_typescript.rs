@@ -14,7 +14,7 @@ use nexgen::spec::SupportFragmentSpec;
 use nexgen::{GenerateRequest, SupportFiles, generate_to_file};
 
 mod common;
-use common::json_input_path;
+use common::{json_input_path, write_bare_ref_alias_closure};
 
 const PRIMARY_EXAMPLE_ID: &str = "workflow-service";
 const START_WORKFLOW_EXAMPLE_ID: &str = "start-workflow";
@@ -1660,6 +1660,69 @@ fn typescript_json_cross_module_ts_name_override_moves_every_reference() {
         assert!(!services.contains(stale), "{stale}\n{services}");
         assert!(!models.contains(stale), "{stale}\n{models}");
     }
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+#[test]
+fn typescript_json_bare_ref_root_alias_typechecks_and_uses_target_converter() {
+    let temp_dir = unique_typescript_runtime_path("ts-json-bare-ref-alias");
+    let input = write_bare_ref_alias_closure(&temp_dir);
+    let output_path = temp_dir.join("output");
+    generate_to_file(&GenerateRequest {
+        language: nexgen::language::Language::TypeScript,
+        input_paths: vec![input],
+        support_paths: Vec::new(),
+        descriptor_paths: Vec::new(),
+        output_path: output_path.clone(),
+        format: false,
+        generate_native_api: false,
+        java_package_name: None,
+        ts_date_time_types: Default::default(),
+    })
+    .unwrap();
+
+    let alias = fs::read_to_string(output_path.join("alias/alternate/models.ts")).unwrap();
+    assert!(alias.contains("export type Alternate = Main;"), "{alias}");
+    assert!(
+        alias.contains(
+            "export const alternateTransferTypeConverter: TransferTypeConverter<Alternate> = mainTransferTypeConverter;"
+        ),
+        "{alias}"
+    );
+    assert!(!alias.contains("export interface Alternate"), "{alias}");
+    let target = fs::read_to_string(output_path.join("target/main/models.ts")).unwrap();
+    assert!(target.contains("export type Mirror = Main;"), "{target}");
+    assert!(!target.contains("export interface Mirror"), "{target}");
+    let service = fs::read_to_string(output_path.join("service/services.ts")).unwrap();
+    assert!(service.contains("Alternate"), "{service}");
+    assert!(
+        service.contains("alternateTransferTypeConverter"),
+        "{service}"
+    );
+    let holder = fs::read_to_string(output_path.join("service/models.ts")).unwrap();
+    assert!(holder.contains("item: Alternate;"), "{holder}");
+    assert!(
+        holder.contains("alternateTransferTypeConverter.fromTransferType"),
+        "{holder}"
+    );
+
+    let runtime = output_path.join("alias.test.ts");
+    fs::write(
+        &runtime,
+        r#"import { describe, expect, test } from "vitest";
+import { alternateTransferTypeConverter } from "./alias/alternate/models";
+
+describe("bare-ref alias", () => {
+  test("uses the target wire contract", () => {
+    expect(alternateTransferTypeConverter.fromTransferType({ value: "ok" })).toEqual({ value: "ok" });
+    expect(() => alternateTransferTypeConverter.fromTransferType({})).toThrow();
+  });
+});
+"#,
+    )
+    .unwrap();
+    typecheck_generated_typescript(&output_path, "bare-ref alias");
+    run_generated_typescript_test(&temp_dir, &runtime, "bare-ref alias");
     fs::remove_dir_all(temp_dir).unwrap();
 }
 
