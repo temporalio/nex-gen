@@ -194,6 +194,27 @@ fn render_service_file(
     imports.insert("io.nexusrpc.Operation".to_string());
     imports.insert("io.nexusrpc.Service".to_string());
 
+    // Java permits the same simple model name in separate packages. If one
+    // service refers to both, importing both would make the generated method
+    // signatures ambiguous, so spell those particular references with their
+    // qualified names. Unique foreign types retain the customary import.
+    let mut io_packages_by_class: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    for operation in &service.operations {
+        for ty in [operation.input.as_ref(), operation.output.as_ref()]
+            .into_iter()
+            .flatten()
+        {
+            if let Some((pkg, class)) = io_type(Some(ty), module, base_package) {
+                io_packages_by_class.entry(class).or_default().insert(pkg);
+            }
+        }
+    }
+    let ambiguous_io_classes = io_packages_by_class
+        .iter()
+        .filter(|(_, packages)| packages.len() > 1)
+        .map(|(class, _)| class.clone())
+        .collect::<BTreeSet<_>>();
+
     let mut body = String::new();
     render_service_javadoc(
         &mut body,
@@ -237,10 +258,14 @@ fn render_service_file(
         let input = io_type(operation.input.as_ref(), module, base_package);
         let return_type = match &output {
             Some((pkg, class)) => {
-                if pkg != &package {
-                    imports.insert(format!("{pkg}.{class}"));
+                if ambiguous_io_classes.contains(class) {
+                    format!("{pkg}.{class}")
+                } else {
+                    if pkg != &package {
+                        imports.insert(format!("{pkg}.{class}"));
+                    }
+                    class.clone()
                 }
-                class.clone()
             }
             None => "void".to_string(),
         };
@@ -251,10 +276,17 @@ fn render_service_file(
             .unwrap_or_else(|| operation.name.to_lower_camel_case());
         match &input {
             Some((pkg, class)) => {
-                if pkg != &package {
-                    imports.insert(format!("{pkg}.{class}"));
-                }
-                body.push_str(&format!("    {return_type} {method}({class} input);\n"));
+                let parameter_type = if ambiguous_io_classes.contains(class) {
+                    format!("{pkg}.{class}")
+                } else {
+                    if pkg != &package {
+                        imports.insert(format!("{pkg}.{class}"));
+                    }
+                    class.clone()
+                };
+                body.push_str(&format!(
+                    "    {return_type} {method}({parameter_type} input);\n"
+                ));
             }
             None => {
                 body.push_str(&format!("    {return_type} {method}();\n"));
