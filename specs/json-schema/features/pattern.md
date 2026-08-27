@@ -403,8 +403,8 @@ carried in a test's source. That corpus is this keyword's regression suite —
 new edge cases are added there, not enumerated here.
 
 `tests/json_schema_corpus_runtime.rs` is the executable consumer: it generates
-one member per accepted pattern and runs all 102 runtime rows through Go,
-TypeScript, Python, and Java. The 38 `expect_gate_reject` rows exercise the gate
+one member per accepted pattern and runs all 97 runtime rows through Go,
+TypeScript, Python, and Java. The 44 `expect_gate_reject` rows exercise the gate
 helper directly; they are not end-to-end loader coverage because no runtime
 pattern is emitted for a rejected schema.
 `tests/json_schema_conformance_manifest.rs` adds the integration/serialize
