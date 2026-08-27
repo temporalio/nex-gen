@@ -337,14 +337,8 @@ the recursion-pointer rule above applies to cyclic edges. Imports follow
 - **Java** — same-package references need no import in a single-input run;
   cross-file references import the target from its per-input sub-package.
 
-**Bare-`$ref` alias.** *(Status: unimplemented — a bare-`$ref` root
-is currently loaded as "not a model": nothing is emitted for it in any
-language, and a `$ref` from another file to that root fails to resolve. A
-bare-`$ref` `$defs` entry is collected as a model and emitted as an object with
-**no members**, which loses the target's whole shape and makes the four targets
-disagree on the same payload; that is not a licensed outcome under either
-reading below. The rules below are the intended design.)* A **schema that is
-exactly `{"$ref": <target>}`** — a file root or a `$defs` entry — is an
+**Bare-`$ref` alias.** A **schema that is exactly `{"$ref": <target>}`** — a
+file root or a `$defs` entry — is an
 **alias** for the target: every position that references the alias denotes the
 target's shape, including an operation's `input`/`output` ([[services]]), and no
 shapeless type is emitted. Where the language supports an alias declaration it
@@ -393,8 +387,8 @@ helper is emitted — the named-type machinery already in place
 | Self-ref via array, required | `{value:{...}, children:{type:array, items:{$ref:"#"}}}` (tree) |
 | Mutual cross-file cycle | `a.json#/X` ↔ `b.json#/Y` with a terminating edge → hoisted to `_recursive` (Py) |
 | Dead `$defs` | a `$defs` entry never referenced → still emitted/exported |
-| Bare-`$ref` root (**unimplemented**) | file root `{"$ref":"#/$defs/Main"}` → alias (Go/TS/Py), `Main` (Java) |
-| Bare-`$ref` `$defs` entry (**unimplemented**) | `$defs.Alias: {"$ref":"#/$defs/Target"}` → alias for `Target`, never an empty model |
+| Bare-`$ref` root | file root `{"$ref":"#/$defs/Main"}` → alias (Go/TS/Py), `Main` (Java) |
+| Bare-`$ref` `$defs` entry | `$defs.Alias: {"$ref":"#/$defs/Target"}` → alias for `Target`, never an empty model |
 | `$ref` with siblings | `{"$ref":"#/$defs/X", "minProperties":1}` → implicit `allOf`, merged ([[allOf]]) |
 | `$ref` with a non-conjunct sibling | `{"$ref":"#/$defs/X", "$comment":"note"}`, `{"$ref":"#/$defs/X", "deprecated":true}` → reference kept, no synthesized type |
 
