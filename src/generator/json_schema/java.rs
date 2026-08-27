@@ -227,6 +227,17 @@ fn java_bound_literal(number: &serde_json::Number, is_integer: bool) -> String {
     }
 }
 
+/// Renders an authored JSON Schema count for use in Java source. Counts above
+/// `Integer.MAX_VALUE` need the `L` suffix even when compared with an `int`-
+/// valued collection size; the loader permits the full portable 2^53-1 range.
+fn java_count_literal(count: u64) -> String {
+    if count > i32::MAX as u64 {
+        format!("{count}L")
+    } else {
+        count.to_string()
+    }
+}
+
 /// Emits the numeric-constraint predicates over `value_expr` (a validated
 /// `long`/`double` in scope) into the collecting deserializer, appending
 /// `Violation`s. `is_integer` selects `long`/`double` divisibility.
@@ -570,13 +581,15 @@ fn render_java_string_checks(
             "{indent}int length = {value_expr}.codePointCount(0, {value_expr}.length());\n"
         ));
         if let Some(min) = constraints.min_length {
+            let min_literal = java_count_literal(min);
             output.push_str(&format!(
-                "{indent}if (length < {min}) {{\n{indent}    violations.add(new Violation({json}, \"must have length >= {min}, got \" + length));\n{indent}}}\n"
+                "{indent}if (length < {min_literal}) {{\n{indent}    violations.add(new Violation({json}, \"must have length >= {min}, got \" + length));\n{indent}}}\n"
             ));
         }
         if let Some(max) = constraints.max_length {
+            let max_literal = java_count_literal(max);
             output.push_str(&format!(
-                "{indent}if (length > {max}) {{\n{indent}    violations.add(new Violation({json}, \"must have length <= {max}, got \" + length));\n{indent}}}\n"
+                "{indent}if (length > {max_literal}) {{\n{indent}    violations.add(new Violation({json}, \"must have length <= {max}, got \" + length));\n{indent}}}\n"
             ));
         }
     }
@@ -626,13 +639,15 @@ fn render_java_inline_string_checks(
             "{indent}int nestedLength = {value_expr}.codePointCount(0, {value_expr}.length());\n"
         ));
         if let Some(min) = constraints.min_length {
+            let min_literal = java_count_literal(min);
             output.push_str(&format!(
-                "{indent}if (nestedLength < {min}) {{\n{indent}    violations.add(new Violation({path_expr}, \"must have length >= {min}, got \" + nestedLength));\n{indent}}}\n"
+                "{indent}if (nestedLength < {min_literal}) {{\n{indent}    violations.add(new Violation({path_expr}, \"must have length >= {min}, got \" + nestedLength));\n{indent}}}\n"
             ));
         }
         if let Some(max) = constraints.max_length {
+            let max_literal = java_count_literal(max);
             output.push_str(&format!(
-                "{indent}if (nestedLength > {max}) {{\n{indent}    violations.add(new Violation({path_expr}, \"must have length <= {max}, got \" + nestedLength));\n{indent}}}\n"
+                "{indent}if (nestedLength > {max_literal}) {{\n{indent}    violations.add(new Violation({path_expr}, \"must have length <= {max}, got \" + nestedLength));\n{indent}}}\n"
             ));
         }
     }
@@ -747,13 +762,15 @@ fn render_java_property_count_checks(
     indent: &str,
 ) {
     if let Some(min) = schema.min_properties {
+        let min_literal = java_count_literal(min as u64);
         output.push_str(&format!(
-            "{indent}if ({size_expr} < {min}) {{\n{indent}    violations.add(new Violation(\"\", \"must have at least {min} properties, got \" + {size_expr}));\n{indent}}}\n"
+            "{indent}if ({size_expr} < {min_literal}) {{\n{indent}    violations.add(new Violation(\"\", \"must have at least {min} properties, got \" + {size_expr}));\n{indent}}}\n"
         ));
     }
     if let Some(max) = schema.max_properties {
+        let max_literal = java_count_literal(max as u64);
         output.push_str(&format!(
-            "{indent}if ({size_expr} > {max}) {{\n{indent}    violations.add(new Violation(\"\", \"must have at most {max} properties, got \" + {size_expr}));\n{indent}}}\n"
+            "{indent}if ({size_expr} > {max_literal}) {{\n{indent}    violations.add(new Violation(\"\", \"must have at most {max} properties, got \" + {size_expr}));\n{indent}}}\n"
         ));
     }
 }
@@ -784,13 +801,15 @@ fn render_java_property_name_checks(
             "{indent}    int pnLength = pnKey.codePointCount(0, pnKey.length());\n"
         ));
         if let Some(min) = constraints.min_length {
+            let min_literal = java_count_literal(min);
             output.push_str(&format!(
-                "{indent}    if (pnLength < {min}) {{\n{indent}        violations.add(new Violation(pnKey, \"invalid property name \\\"\" + pnKey + \"\\\": must have length >= {min}, got \" + pnLength));\n{indent}    }}\n"
+                "{indent}    if (pnLength < {min_literal}) {{\n{indent}        violations.add(new Violation(pnKey, \"invalid property name \\\"\" + pnKey + \"\\\": must have length >= {min}, got \" + pnLength));\n{indent}    }}\n"
             ));
         }
         if let Some(max) = constraints.max_length {
+            let max_literal = java_count_literal(max);
             output.push_str(&format!(
-                "{indent}    if (pnLength > {max}) {{\n{indent}        violations.add(new Violation(pnKey, \"invalid property name \\\"\" + pnKey + \"\\\": must have length <= {max}, got \" + pnLength));\n{indent}    }}\n"
+                "{indent}    if (pnLength > {max_literal}) {{\n{indent}        violations.add(new Violation(pnKey, \"invalid property name \\\"\" + pnKey + \"\\\": must have length <= {max}, got \" + pnLength));\n{indent}    }}\n"
             ));
         }
     }
@@ -914,13 +933,15 @@ fn java_matcher_condition(
         ));
     }
     if let Some(min) = matcher.min_length {
+        let min_literal = java_count_literal(min);
         parts.push(format!(
-            "{elem}.codePointCount(0, {elem}.length()) >= {min}"
+            "{elem}.codePointCount(0, {elem}.length()) >= {min_literal}"
         ));
     }
     if let Some(max) = matcher.max_length {
+        let max_literal = java_count_literal(max);
         parts.push(format!(
-            "{elem}.codePointCount(0, {elem}.length()) <= {max}"
+            "{elem}.codePointCount(0, {elem}.length()) <= {max_literal}"
         ));
     }
     if let Some(pattern) = &matcher.pattern {
@@ -1052,13 +1073,15 @@ fn render_java_array_checks(
     indent: &str,
 ) {
     if let Some(min) = constraints.min_items {
+        let min_literal = java_count_literal(min);
         output.push_str(&format!(
-            "{indent}if ({list}.size() < {min}) {{\n{indent}    violations.add(new Violation({json}, \"must have at least {min} items, got \" + {list}.size()));\n{indent}}}\n"
+            "{indent}if ({list}.size() < {min_literal}) {{\n{indent}    violations.add(new Violation({json}, \"must have at least {min} items, got \" + {list}.size()));\n{indent}}}\n"
         ));
     }
     if let Some(max) = constraints.max_items {
+        let max_literal = java_count_literal(max);
         output.push_str(&format!(
-            "{indent}if ({list}.size() > {max}) {{\n{indent}    violations.add(new Violation({json}, \"must have at most {max} items, got \" + {list}.size()));\n{indent}}}\n"
+            "{indent}if ({list}.size() > {max_literal}) {{\n{indent}    violations.add(new Violation({json}, \"must have at most {max} items, got \" + {list}.size()));\n{indent}}}\n"
         ));
     }
     if constraints.unique_items {
@@ -1098,6 +1121,7 @@ fn render_java_array_checks(
         let condition = java_matcher_condition(matcher, &matcher_value, &matcher_ty, scope);
         let guard = java_typed_matcher_guard(matcher, &matcher_value, &matcher_ty);
         let effective_min = constraints.min_contains.unwrap_or(1);
+        let effective_min_literal = java_count_literal(effective_min);
         output.push_str(&format!("{indent}int matchCount = 0;\n"));
         output.push_str(&format!("{indent}for ({boxed} element : {list}) {{\n"));
         output.push_str(&format!(
@@ -1107,7 +1131,9 @@ fn render_java_array_checks(
         output.push_str(&format!("{indent}    }}\n"));
         output.push_str(&format!("{indent}}}\n"));
         if effective_min > 0 {
-            output.push_str(&format!("{indent}if (matchCount < {effective_min}) {{\n"));
+            output.push_str(&format!(
+                "{indent}if (matchCount < {effective_min_literal}) {{\n"
+            ));
             if constraints.min_contains.is_some() {
                 output.push_str(&format!(
                     "{indent}    violations.add(new Violation({json}, \"too few matching items: at least {effective_min}, got \" + matchCount));\n"
@@ -1120,7 +1146,8 @@ fn render_java_array_checks(
             output.push_str(&format!("{indent}}}\n"));
         }
         if let Some(max) = constraints.max_contains {
-            output.push_str(&format!("{indent}if (matchCount > {max}) {{\n"));
+            let max_literal = java_count_literal(max);
+            output.push_str(&format!("{indent}if (matchCount > {max_literal}) {{\n"));
             output.push_str(&format!(
                 "{indent}    violations.add(new Violation({json}, \"too many matching items: at most {max}, got \" + matchCount));\n"
             ));
@@ -1143,13 +1170,15 @@ fn render_java_raw_array_checks(
     indent: &str,
 ) {
     if let Some(min) = constraints.min_items {
+        let min_literal = java_count_literal(min);
         output.push_str(&format!(
-            "{indent}if ({node}.size() < {min}) {{\n{indent}    violations.add(new Violation({json}, \"must have at least {min} items, got \" + {node}.size()));\n{indent}}}\n"
+            "{indent}if ({node}.size() < {min_literal}) {{\n{indent}    violations.add(new Violation({json}, \"must have at least {min} items, got \" + {node}.size()));\n{indent}}}\n"
         ));
     }
     if let Some(max) = constraints.max_items {
+        let max_literal = java_count_literal(max);
         output.push_str(&format!(
-            "{indent}if ({node}.size() > {max}) {{\n{indent}    violations.add(new Violation({json}, \"must have at most {max} items, got \" + {node}.size()));\n{indent}}}\n"
+            "{indent}if ({node}.size() > {max_literal}) {{\n{indent}    violations.add(new Violation({json}, \"must have at most {max} items, got \" + {node}.size()));\n{indent}}}\n"
         ));
     }
     if constraints.unique_items {
@@ -1184,12 +1213,13 @@ fn render_java_raw_array_checks(
         };
         let condition = java_matcher_condition(matcher, value, &evaluation_ty, scope);
         let effective_min = constraints.min_contains.unwrap_or(1);
+        let effective_min_literal = java_count_literal(effective_min);
         output.push_str(&format!(
             "{indent}int rawMatchCount = 0;\n{indent}for (JsonNode rawElement : {node}) {{\n{indent}    if ({guard} && ({condition})) {{\n{indent}        rawMatchCount++;\n{indent}    }}\n{indent}}}\n"
         ));
         if effective_min > 0 {
             output.push_str(&format!(
-                "{indent}if (rawMatchCount < {effective_min}) {{\n"
+                "{indent}if (rawMatchCount < {effective_min_literal}) {{\n"
             ));
             if constraints.min_contains.is_some() {
                 output.push_str(&format!(
@@ -1203,8 +1233,9 @@ fn render_java_raw_array_checks(
             output.push_str(&format!("{indent}}}\n"));
         }
         if let Some(max) = constraints.max_contains {
+            let max_literal = java_count_literal(max);
             output.push_str(&format!(
-                "{indent}if (rawMatchCount > {max}) {{\n{indent}    violations.add(new Violation({json}, \"too many matching items: at most {max}, got \" + rawMatchCount));\n{indent}}}\n"
+                "{indent}if (rawMatchCount > {max_literal}) {{\n{indent}    violations.add(new Violation({json}, \"too many matching items: at most {max}, got \" + rawMatchCount));\n{indent}}}\n"
             ));
         }
     }
@@ -3794,13 +3825,15 @@ fn render_java_serialize_property_name_checks(
             "{indent}    int pnLength = pnKey.codePointCount(0, pnKey.length());\n"
         ));
         if let Some(min) = constraints.min_length {
+            let min_literal = java_count_literal(min);
             output.push_str(&format!(
-                "{indent}    if (pnLength < {min}) {{\n{indent}        violations.add(new Violation(pnKey, \"invalid property name \\\"\" + pnKey + \"\\\": must have length >= {min}, got \" + pnLength));\n{indent}    }}\n"
+                "{indent}    if (pnLength < {min_literal}) {{\n{indent}        violations.add(new Violation(pnKey, \"invalid property name \\\"\" + pnKey + \"\\\": must have length >= {min}, got \" + pnLength));\n{indent}    }}\n"
             ));
         }
         if let Some(max) = constraints.max_length {
+            let max_literal = java_count_literal(max);
             output.push_str(&format!(
-                "{indent}    if (pnLength > {max}) {{\n{indent}        violations.add(new Violation(pnKey, \"invalid property name \\\"\" + pnKey + \"\\\": must have length <= {max}, got \" + pnLength));\n{indent}    }}\n"
+                "{indent}    if (pnLength > {max_literal}) {{\n{indent}        violations.add(new Violation(pnKey, \"invalid property name \\\"\" + pnKey + \"\\\": must have length <= {max}, got \" + pnLength));\n{indent}    }}\n"
             ));
         }
     }

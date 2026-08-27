@@ -1946,6 +1946,69 @@ properties:
     fs::remove_dir_all(temp_dir).unwrap();
 }
 
+#[test]
+fn java_json_large_portable_counts_use_long_literals() {
+    let temp_dir = unique_output_path("java-json-long-counts");
+    fs::create_dir_all(&temp_dir).unwrap();
+    let input_path = temp_dir.join("counts.yaml");
+    fs::write(
+        &input_path,
+        r##"$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+minProperties: 2147483648
+maxProperties: 4294967295
+properties:
+  text:
+    type: string
+    minLength: 2147483648
+    maxLength: 4294967295
+  values:
+    type: array
+    items: { type: string }
+    minItems: 2147483648
+    maxItems: 4294967295
+    contains: { type: string, minLength: 2147483648 }
+    minContains: 2147483648
+    maxContains: 4294967295
+"##,
+    )
+    .unwrap();
+    let output_path = temp_dir.join("counts");
+
+    generate_to_file(&GenerateRequest {
+        language: nexgen::language::Language::Java,
+        input_paths: vec![input_path],
+        support_paths: Vec::new(),
+        descriptor_paths: Vec::new(),
+        output_path: output_path.clone(),
+        format: false,
+        generate_native_api: false,
+        java_package_name: Some("counts".to_string()),
+        ts_date_time_types: Default::default(),
+    })
+    .unwrap();
+
+    let model = &read_java_files(&output_path)[&PathBuf::from("Counts.java")];
+    for predicate in [
+        "wireKeys.size() < 2147483648L",
+        "wireKeys.size() > 4294967295L",
+        "length < 2147483648L",
+        "length > 4294967295L",
+        ".size() < 2147483648L",
+        ".size() > 4294967295L",
+        "matchCount < 2147483648L",
+        "matchCount > 4294967295L",
+    ] {
+        assert!(model.contains(predicate), "{predicate}\n{model}");
+    }
+    assert!(
+        model.contains("must have at least 2147483648 items")
+            && !model.contains("must have at least 2147483648L items"),
+        "diagnostic counts must remain plain decimal text\n{model}"
+    );
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
 /// The pinned temporal grammar admits a fractional second of any width, and
 /// every target keeps what its own type can hold rather than rejecting: Go, Java
 /// and TypeScript at nanoseconds, Python at microseconds. That is P1's exception
