@@ -64,7 +64,17 @@ Loader behavior:
   requiring a shape — see [[type]]). Diagnostic names the location and
   asks for `items:{...}`.
 - `items` **without** `type:"array"` → reject per [[type]] (missing or
-  mismatched `type`); require explicit `type:"array"`.
+  mismatched `type`); require explicit `type:"array"`. The rule is not scoped
+  to scalar types: a declared **`type:"object"`** carrying an `items` rejects
+  too — an object's shape keywords ([[properties]],
+  [[additionalProperties]]) do not license an array applicator beside them, and
+  accepting one and dropping it is the silent passthrough **P7.1** forbids.
+  It also holds however the `type` comes to be *absent*: a node carrying a
+  [[oneOf]] or a [[ref]] declares no `type` of its own, so an `items` beside
+  one is an authoring error and rejects rather than being dropped. An array
+  *branch* carries its `items` inside the branch (see [[oneOf]]), and a sibling
+  `items` folded onto a `$ref`'s merged node is subject to that node's own
+  shape rules — a merged `type:"object"` rejects it like any other object.
 - `items` value not a valid subschema → reject (recurse).
 - `items` that is shapeless — `{}` / `true` / `false` → reject per
   **P7.1** (no element shape). Diagnostic names the array and asks for an
@@ -113,7 +123,13 @@ Notes:
   `…ItemItem` for a nested array — moved into `$defs`, and the element
   rewritten to a `$ref`, so the element type is an ordinary named model or
   union in every target (see [[properties]] §"Naming an inline object shape"
-  and [[oneOf]] §"Unions in element positions"). Go and Java decode a *union*
+  and [[oneOf]] §"Unions in element positions"). This holds for **every**
+  array position, not only a declared property: an array that is a [[oneOf]]
+  branch or a typed-map member has its inline element shape named and hoisted
+  the same way, at any depth. No element position falls back to an untyped map
+  or a bare `Object`/`String` — if a name cannot be synthesized the load fails,
+  rather than the element being emitted opaque and its declared members lost.
+  Go and Java decode a *union*
   element through the union's dispatcher one value at a time — neither can
   allocate a sealed interface from a whole-collection decode.
 - **Java** uses `List<T>` (interface type; the concrete `ArrayList` is an
@@ -122,7 +138,7 @@ Notes:
   PRINCIPLES Java §3); element boxing follows `T`'s own [[type]] mapping.
 - **Empty vs absent.** `[]` (present, empty) is distinct from an absent
   array (owned by [[required]]) and from `null` (owned by
-  [[nullability]]); see the Go nil-slice hazard under Serialize-side.
+  [[nullability]]); see the Go nil-slice substitution under Serialize-side.
 
 ## Validator mapping
 
@@ -172,6 +188,17 @@ binding) comes from [[type]]'s `"array"` row.
   the same generator-owned adapter as a declared property, at every nesting
   depth. Required runtime support is discovered recursively from the element
   schema, rather than only from top-level properties.
+- **The wrapper does not change what the elements require.** Wrapping the
+  array in the [[nullability]] wrapper leaves the element schema's demands on
+  the emitter untouched: every package-level compiled-regex static the elements
+  or a [[contains]] matcher need — [[pattern]], [[format]],
+  [[contentEncoding]] — is still emitted for a **nullable** array, at the same
+  position the code referencing it uses, or the package refers to an undeclared
+  identifier. And a nullable array is still `[]T`, including as a typed
+  [[additionalProperties]] value, so the element traversal ranges over the
+  value and never over `*value`. The same holds however the array is reached —
+  a declared property, a typed-map member, a [[oneOf]] branch, or a deeper
+  element.
 - **Empty array.** The element loop is vacuous; an empty `[]` passes the
   `items` check (array-length floors, when supported, live in their own
   specs — see Interactions).
@@ -187,20 +214,27 @@ order (arrays are ordered — unlike object members, element order is part
 of the value and is preserved).
 
 This includes arrays that are branches of a [[oneOf]]: branch selection does
-not bypass the ordinary recursive array parser/mapper, so constraints,
-materialization, nested models, and indexed aggregation remain identical to a
-declared array property.
+not bypass the ordinary recursive array parser/mapper, so **element
+conversion**, constraints, materialization, nested models, and indexed
+aggregation remain identical to a declared array property. A branch whose
+elements are models is converted element by element, never handed to the
+encoder as the in-memory collection.
 
-- **Go nil-slice hazard.** A `nil` `[]T` marshals to JSON `null` under
-  `encoding/json`, not `[]`. For a **required, non-nullable** array that
-  is the wrong wire form. The generated `MarshalJSON` therefore emits
-  `[]` for a required non-nullable array whose in-memory slice is `nil`
-  (or the serialize-side `Validate` rejects `nil`, per the [[nullability]]
-  omit-vs-emit table) — the same absent-vs-zero distinction **P9** forces
-  everywhere. TS/Python/Java don't alias an empty list to `null`, so this
-  is a Go-only encoder concern; the decision itself is owned by
-  [[required]] + [[nullability]], flagged here because the array type is
-  where it bites.
+- **Go nil-slice substitution.** A `nil` `[]T` marshals to JSON `null` under
+  `encoding/json`, not `[]`. For a **required, non-nullable** array that is the
+  wrong wire form, so the generated `MarshalJSON` writes `[]` — Go has no
+  non-nil empty-slice type, and the substitution is the deliberate, implemented
+  design for that one target (see the [[nullability]] serialize table). It
+  preserves the absent-vs-zero distinction **P9** forces everywhere. What is
+  **Go-only** is this **empty-vs-`null` aliasing**, not the wider question: the
+  other three targets can each hold an empty reference on a required
+  non-nullable array (Java `null`, Python `None`, TypeScript
+  `undefined`/`null`), and there the serialize side must **reject** rather than
+  write an emptiness the schema forbids. *(Status: unimplemented — Java omits
+  the key, TypeScript and Python assign the empty reference straight through;
+  none of the three raises the violation this clause requires.)* The decision itself is owned by
+  [[required]] + [[nullability]], recorded here because the array type is where
+  it bites.
 
 ## Property-testing matrix
 
@@ -228,7 +262,8 @@ declared array property.
 | Out-of-subset element (P7.1, recurse) | `{type:array, items:{type:object}}` (object with no shape) |
 | Array-valued `items` (draft-7 tuple) | `{type:array, items:[{type:string},{type:integer}]}` |
 | Tuple via `prefixItems` (P6) | `{type:array, prefixItems:[{type:string},{type:integer}]}` |
-| `items` paired with non-array `type` | `{type:string, items:{type:string}}` |
+| `items` paired with non-array `type` | `{type:string, items:{type:string}}`, `{type:object, properties:{…}, items:{type:string}}` |
+| `items` beside a `oneOf` or a `$ref` (no `type` of its own) | `{oneOf:[{type:string},{type:integer}], items:{type:string}}` |
 
 ### Runtime fixtures (validator)
 
@@ -266,11 +301,14 @@ declared array property.
   over the same element set (see their specs); both count the full array
   including every `items`-validated element, and are orthogonal to the
   element typing `items` supplies. **[[uniqueItems]]**: element-uniqueness
-  assertion, covered by its own spec when landed.
+  assertion over the same element set (its own spec).
 - **[[nullability]]**: owns optional/nullable wrapping of the array field;
   element-level nullability is expressed by the element subschema (the
-  `oneOf` null pattern) and composes with the field wrapping. The Go
-  nil-slice → `null` encoder concern (Serialize-side) is decided here.
+  `oneOf` null pattern) and composes with the field wrapping. The
+  empty-vs-`null` decision on a required non-nullable array — Go's `[]`
+  substitution and the other three targets' reject (Serialize-side) — is made
+  there. Wrapping the array does not change what its elements require of the
+  emitter (Validator mapping).
 - **[[required]]**: orthogonal — decides whether the array member must be
   present; `items` types its elements. A present-but-empty `[]` satisfies
   `required` (presence, not non-emptiness — non-emptiness is

@@ -10,13 +10,15 @@ affects validation. **Supported** — it lowers into each target's
 **native deprecation marker** (Go's `// Deprecated:` godoc paragraph, a
 TS JSDoc `@deprecated` tag, a Java `@Deprecated` annotation, a Python
 PEP 702 `@deprecated(…, category=None)` marker), so editors, compilers,
-and type checkers surface the marker to the extent their native mechanism
-allows — a genuine limit in TypeScript (JSDoc deprecation reaches language
-services, not a `tsc` diagnostic) and in Python (PEP 702 has no field form).
-It is **not** a licence for a marker the generator has simply placed wrongly:
-Go's `// Deprecated:` must be its own godoc paragraph, and a marker emitted
-without the preceding blank line is inert through no fault of the toolchain. It has no validation, serialization, or access-warning effect. It is
-a **tag** in the doc-comment assembly
+and type checkers surface the marker as far as that native mechanism
+reaches. Two of those reaches are genuinely limited: TypeScript's JSDoc
+deprecation is a language-service signal rather than a `tsc` diagnostic,
+and PEP 702 defines no field form. That is a limit of the mechanism, not a
+licence for a marker the generator has placed where its tool cannot see
+it — Go's `// Deprecated:` is only live as its own godoc paragraph, so
+emitting it without the preceding blank `//` line is a generator defect,
+not a toolchain limit. The marker has no validation, serialization, or
+access-warning effect. It is a **tag** in the doc-comment assembly
 [[description]] owns; because `deprecated` is boolean-only it carries no
 message of its own, so the human rationale comes from the sibling
 [[description]].
@@ -74,8 +76,12 @@ The defining choices (citing [[PRINCIPLES.md]]):
 - **No modeling problem to block it.** [[readOnly]] / [[writeOnly]]
   reject because their directional intent has no single-type lowering;
   `deprecated` has no such fork — it merely *marks* a location and leaves
-  the type, its fields, and the wire shape unchanged. There is exactly
-  one declaration to attach the marker to, in every language.
+  the type, its fields, and the wire shape unchanged. Every target has an
+  **authored** declaration to attach the marker to: the type or the member
+  the keyword was written on. It never propagates to a *synthesized*
+  declaration — a per-member closed-value type, a union-branch wrapper —
+  because the author did not declare those, so a marker on them is
+  gratuitous and would make the marker count target-dependent.
 - **Annotation, no runtime effect (P10/P12/P1).** `deprecated`
   contributes **no** constraint predicate to the shared `Validate` and
   **no** parse/encode adapter logic. A deprecated value is accepted and
@@ -86,10 +92,12 @@ The defining choices (citing [[PRINCIPLES.md]]):
   even its `@deprecated` marker raises no access-time `DeprecationWarning`
   (see Type mapping); we deliberately do **not** emit the runtime
   `Field(deprecated=True)` form, keeping the four targets in parity (P1).
-- **Never an identifier; no P15 surface (P13/P1/P15).** `deprecated`
-  never names a type, field, service, or operation and synthesizes no new
-  identifier, so — like [[description]] — it adds **nothing** to the
-  per-scope collision pass.
+- **Never an identifier (P13/P1/P15).** `deprecated` never names a type,
+  field, service, or operation. On an ordinary declaration it therefore
+  synthesizes nothing and adds nothing to the per-scope collision pass.
+  Beside a `$ref` it must stay that way too: the marker belongs on the
+  **member** bound to the reference, so the reference survives and no
+  clone, and no new identifier, is created (see Loader behavior).
 
 Loader behavior:
 - `deprecated` value **not a boolean** → **reject** (P7.1; the spec's own
@@ -104,10 +112,36 @@ Loader behavior:
   rejecting it would force authors to strip meaningful, harmless metadata
   just to generate. (Contrast [[readOnly]] / [[writeOnly]], whose `false`
   rejects — but those keywords are rejected wholesale regardless.)
-- Multiple `deprecated` occurrences applicable to one node after an
-  [[allOf]] merge (P6) — an explicit `allOf` branch or a `$ref`
-  sibling — → **OR**: if **any** applicable occurrence is `true`, the
-  location is deprecated. This differs from [[description]] / [[title]] /
+- `deprecated` as a **sibling of `$ref`**, **of either value**, leaves the
+  reference intact — the keyword is never a merge conjunct, because it
+  deprecates the *member* and asserts nothing about the referenced value. The
+  OR is applied at the **use site**: the member keeps the referenced type and
+  the marker lands on the member, which is what the Type-mapping table below
+  says and what all four targets can express (a Go struct-field doc comment, a
+  TS property JSDoc tag, a Python `Annotated`, a Java getter annotation). The
+  sibling must **not** trigger the implicit-`allOf` fold ([[ref]], [[allOf]]):
+  a fold would clone the target into a use-site type, move the marker off the
+  member the author annotated, and — for `deprecated: false`, which means
+  exactly what omitting the keyword means — change a member's type with no
+  marker and no diagnostic to explain it.
+  *(Status: unimplemented — the fold gate admits only the four `x-<lang>-name`
+  keywords, so today either value of a `deprecated` sibling triggers the fold.)*
+- `deprecated` on a [[nullability]] `null` branch → **reject**, of either
+  value: a `null` branch must be exactly `{type: "null"}` with no siblings, an
+  invariant [[nullability]] owns and this keyword does not override. To mark a
+  **nullable member**, write `deprecated` on the wrapper beside the `oneOf`;
+  on the **non-null branch** it is an inline subschema with no declaration and
+  is therefore dropped, so the two spellings are not interchangeable.
+- `deprecated` at a **document root** — a definitions-only root or a Nexus
+  envelope root — is **accepted**: `true` deprecates the generated root type
+  where there is one, and is otherwise dropped like any marker with no
+  declaration to attach to. It never makes a root "model-shaped": an imported
+  document routinely carries a document-level annotation, and a reject there
+  would have to describe a model the author never wrote.
+- Multiple `deprecated` occurrences applicable to one node — the branches
+  of an explicit [[allOf]] merge (P6), or a `$ref` sibling ORed against the
+  resolved target's own value — → **OR**: if **any** applicable occurrence
+  is `true`, the location is deprecated. This differs from [[description]] / [[title]] /
   [[default]], which resolve last-wins; `deprecated` follows the spec's
   own any-true-wins rule (§9.3). A merged `false` occurrence is ignored
   (as in isolation), so it never suppresses a sibling `true` — the
@@ -121,7 +155,8 @@ Loader behavior:
 
 **None.** `deprecated` does not change the emitted type and contributes
 no identifier. Its sole materialization is the **native deprecation
-marker** (and a doc-comment tag) on the nearest generated declaration:
+marker** (and a doc-comment tag) on the declaration generated for the
+schema location it was written on:
 
 | Placement | What gets marked |
 |---|---|
@@ -129,20 +164,22 @@ marker** (and a doc-comment tag) on the nearest generated declaration:
 | property subschema | the generated **field / getter / member** |
 | service (envelope) | the generated **service interface**; see [[services]] |
 | operation (envelope) | the generated **operation method**; see [[services]] |
-| inline subschema with no declaration | dropped — nowhere to attach a marker |
+| inline subschema with no declaration | dropped — nowhere to attach a marker. This is the rule for every such position: an [[items]] element, a typed-map value, a [[contains]] matcher, a [[propertyNames]] key subschema, and the non-null branch of a degenerate nullability `oneOf`. None of them rejects; all of them drop. |
 
 Per-language marker (the meat — a native construct, not just comment
 text):
 
 | Language | Native marker | Effect for consumers |
 |---|---|---|
-| Go | a `// Deprecated: This <kind> is deprecated.` paragraph in the doc comment (godoc convention; generic reason — see below) | `gopls` / `staticcheck` SA1019 flag every use; `go doc` renders it. A doc-comment tag, not a keyword. |
+| Go | a `// Deprecated: This <kind> is deprecated.` paragraph in the doc comment — **its own paragraph**, preceded by a blank `//` line, at every declaration kind (godoc convention; generic reason — see below) | `staticcheck` SA1019 flags every use and `go doc` renders it, but **only** because the marker opens a paragraph: the analyzer splits the comment on blank lines and requires a part to *begin* `Deprecated: `. A doc-comment tag, not a keyword. |
 | TypeScript | a bare JSDoc `@deprecated` tag in the `/** … */` block | Editors and language services strike through or suggest at call sites; `tsc` emits no deprecation diagnostic. |
 | Python | PEP 702 `@deprecated("…", category=None)` (`typing_extensions` backport) on a generated type/service; fields and operation attributes use `Annotated[T, deprecated("…", category=None)]` as documentation metadata | Type/service decorators are recognized by PEP 702-aware checkers. Field and operation attribute metadata is not a PEP 702 warning construct. `category=None` suppresses access-time `DeprecationWarning`. |
-| Java | the `@Deprecated` annotation on the type / getter / method, paired with a Javadoc `@deprecated` tag | `javac` warns at every use; IDEs strike-through. |
+| Java | the `@Deprecated` annotation on the type / getter / method, paired with a Javadoc `@deprecated This <kind> is deprecated.` tag | `javac` warns at every use; IDEs strike-through; `javadoc` renders the tag text in the "Deprecated." block and `deprecated-list.html`. |
 
-No new identifier is ever synthesized, so `deprecated` has **no P15
-collision surface**.
+The marker attaches to a declaration that already exists; no new identifier
+is synthesized for it, in any position — including beside a `$ref`, where the
+reference survives and the marker lands on the member (see Loader behavior).
+So `deprecated` contributes nothing to the per-scope collision pass (P15).
 
 ## Doc-comment tag and the message limitation
 
@@ -160,12 +197,15 @@ prose that lives in the doc-comment body ([[description]]) directly above
 the marker, and copying it in would repeat the same text twice in the
 generated source.
 
-The marker is emitted **bare** wherever the native construct allows it —
-a JSDoc `@deprecated` tag with no text (TS), the `@Deprecated` annotation
-plus a bare Javadoc `@deprecated` tag (Java). Two targets *require* a
-non-empty reason string, and there we emit a **generic** one,
-`This <kind> is deprecated.` — where `<kind>` ∈ type / field / service /
-operation, already known from the placement:
+The marker is emitted **bare** only where the native construct carries no
+text slot at all — a JSDoc `@deprecated` tag (TS). The other three targets
+have a text slot that their tooling renders, so they carry a **generic**
+reason, `This <kind> is deprecated.` — where `<kind>` ∈ type / field /
+service / operation, already known from the placement:
+- **Java** — the `@Deprecated` annotation paired with
+  `@deprecated This <kind> is deprecated.`; `javadoc` renders the tag text
+  into the type's "Deprecated." block and into `deprecated-list.html`, and a
+  bare tag renders an empty explanation there.
 - **Go** — the godoc convention is a `// Deprecated: <text>` paragraph; a
   bare `Deprecated:` reads incomplete, so the generic reason fills it:
   `// Deprecated: This field is deprecated.`
@@ -176,9 +216,10 @@ operation, already known from the placement:
   category=None)]` on a field. (`category=None` is what keeps the marker
   static-only — see Type mapping.)
 
-The rationale the author actually wrote still travels with the symbol —
-in the doc-comment body immediately above the marker — for all four
-targets.
+The rationale the author actually wrote still travels with the symbol, in
+the doc-comment body, for every target — adjacent to the marker in Go,
+TypeScript and Java, and *below* it in Python, whose decorator necessarily
+precedes the docstring it documents.
 
 ## Validator mapping
 
@@ -208,20 +249,25 @@ either artifact.
 | Merged occurrences OR to true | `allOf:[{deprecated:true},{…}]` → deprecated (any true wins; see [[allOf]]) |
 | `deprecated: false` (explicit not-deprecated) | `{deprecated:false, type:"string"}` → accepted, no marker, no diagnostic |
 | Deprecated service / operation | envelope `services.ChatService.operations.legacyCall.deprecated` → marker on the generated method (see [[services]]) |
+| Sibling of a `$ref` (either value) | `{$ref:"#/$defs/User", deprecated:true}` → member keeps type `User`, marker on the member; `deprecated:false` leaves the member byte-identical to omitting it |
+| At a document root | a definitions-only or Nexus envelope root carrying `deprecated` → accepted; marks the root type if there is one, else dropped |
+| Member with a closed value set | `{type:"string", enum:["a","b"], deprecated:true}` → one marker, on the member; the synthesized closed-value type is left unmarked |
 
 ### Rejected at load time (negative)
 
 | Reason | Example |
 |---|---|
-| Value not a boolean | `{deprecated:"true"}`, `{deprecated:1}` |
+| Value not a boolean | `{deprecated:"true"}`, `{deprecated:1}`, `{deprecated:null}` |
+| On a nullability `null` branch (either value) | `{oneOf:[{type:"string"},{type:"null", deprecated:false}]}` (see [[nullability]]) |
 
 ### Runtime fixtures
 
 None. `deprecated` has no runtime behavior — it neither validates nor
 (de)serializes. Its only observable output is the generated declaration
 (marker + doc tag), covered by generation-snapshot tests. The Python
-snapshot asserts the `category=None` form. A dedicated access-warning runtime
-assertion is still needed; the snapshot alone cannot prove warning behavior.
+snapshot asserts the `category=None` form, which is a text assertion: proving
+that accessing a deprecated symbol raises no `DeprecationWarning` needs a
+runtime assertion that executes the access.
 
 ## Interactions
 
@@ -236,9 +282,11 @@ assertion is still needed; the snapshot alone cannot prove warning behavior.
   marker attaches to the generated field/getter.
 - **[[services]]**: the Nexus envelope can mark a service or operation
   `deprecated`; the marker lands on the generated interface / method.
-- **[[allOf]]** / **[[ref]]**: merges can bring multiple `deprecated`
-  occurrences onto one node; they **OR** (any true ⇒ deprecated), unlike
-  the last-wins annotations.
+- **[[allOf]]** / **[[ref]]**: an explicit `allOf` can bring multiple
+  `deprecated` occurrences onto one node; they **OR** (any true ⇒
+  deprecated), unlike the last-wins annotations. As a `$ref` **sibling** the
+  keyword does not merge at all — the reference stays a reference and the OR
+  is applied at the use site (see Loader behavior).
 - **[[required]]**, **[[default]]**, **[[const]]**, **[[nullability]]**:
   fully orthogonal — a deprecated member keeps its presence, default,
   fixed value, and nullability; only the marker is added.

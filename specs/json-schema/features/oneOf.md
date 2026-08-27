@@ -154,6 +154,15 @@ name that, in **every** object branch:
 - has a scalar **`const`** (a single-value [[enum]] is equivalent), with
   the `const` **values pairwise-distinct** across the branches.
 
+**Distinctness is by value, not by spelling.** The comparison is [[const]]'s
+value equality — the same equality the emitted dispatcher applies to the wire
+token — so numbers compare mathematically: `const: 1` and `const: 1.0`
+are **one** discriminator value and two branches carrying them are *not*
+distinct. Comparing JSON representations instead would admit a union whose
+second branch no ordinary producer can ever select, because the runtime
+comparator cannot tell the two apart; the payload would decode silently as the
+first branch. Such a pair is the "no discriminator" reject below.
+
 That property is the **discriminator**; its `const` value is the inner
 selector. This is the pure-JSON-Schema tagged-union idiom — no OpenAPI
 `discriminator` object required — and it is **validation-bearing**: the
@@ -319,9 +328,9 @@ Loader behavior:
 - Any branch without a single recognized `type` (missing `type`,
   `true`/`false`/`{}`, a nested combinator) → reject: no classifiable kind.
 - Two or more **object** branches → require the `const`-tag discriminator
-  (exactly one shared required-`const` property, pairwise-distinct values);
-  zero such properties or more than one qualifying → reject (no
-  discriminator / ambiguous).
+  (exactly one shared required-`const` property whose values are pairwise
+  distinct *by value*); zero such properties or more than one qualifying →
+  reject (no discriminator / ambiguous).
 - An **inline** structured object branch (declared `properties`, or a typed
   `additionalProperties`) → resolve its name (below), move it into `$defs`
   under that name, and rewrite the branch to a `$ref` at it. From that point
@@ -333,31 +342,34 @@ Loader behavior:
 - A synthesized branch name already declared in `$defs`, or colliding with
   another emitted type → reject per **P15**, `x-<lang>-name` as the escape
   hatch (as for every synthesized name).
-- A `default` on a `oneOf` sum type → reject: the literal does not identify
-  which branch to construct. The two-branch [[nullability]] wrapper remains
-  governed by [[default]].
-- **Any other keyword as a sibling of `oneOf` on the same node → reject.** A
-  node that carries `oneOf` is a union; it is not simultaneously a leaf, an
-  object, or a closed value set. The union node admits only: the annotations
-  ([[title]], [[description]], [[comment]], [[examples]], [[deprecated]]), an
-  `x-<lang>-name` override, and `default` (which rejects, above). Everything
-  else — `type`, [[properties]], [[items]], [[additionalProperties]],
-  [[const]]/[[enum]], and every count or string bound — is a load reject whose
-  fix-it says to move the keyword **into the branch or branches it constrains**.
+- **What a `oneOf` node may carry, in one rule.** A node that carries `oneOf`
+  is a union: it is not simultaneously a leaf, an object, or a closed value set.
+  It admits the annotations ([[title]], [[description]], [[comment]],
+  [[examples]], [[deprecated]]), an `x-<lang>-name` override, and `default` —
+  which **rejects** on a sum type, because the literal does not identify which
+  branch to construct, and is **where a nullable member's `default` belongs** on
+  the two-branch [[nullability]] wrapper (see [[nullability]] and [[default]]).
+  **Every other keyword is a load reject**, whichever of the two shapes the node
+  is: `type`, [[properties]], [[items]], [[additionalProperties]],
+  [[const]]/[[enum]], and every count or string bound. The fix-it names the
+  branch or branches the keyword constrains and says to move it there — a closed
+  value set over a sum type is spelled by putting the `const`/`enum` in each
+  branch, and on a nullability wrapper by putting it on the **non-null** branch,
+  which is the spelling every target agrees on. Accepting such a sibling and
+  dropping it is exactly the silent discard **P7.1** exists to prevent, and
+  because [[type]]'s leaf-`type` and object-without-shape checks key on the
+  node's `type`, a discarded sibling can also switch an unrelated guard off. The
+  rule holds at every position a union can occupy — a property, a `$defs` entry,
+  an `items`, a typed `additionalProperties`, an operation `input`/`output`.
 
-  This is a **P7.1** obligation, not a preference. All four backends currently
-  discard such a sibling silently, and its presence additionally suppresses
-  [[type]]'s leaf-`type` and object-without-shape rejects, so a keyword the
-  author wrote has no effect *and* disables an unrelated guard. Silent discard
-  is the outcome P7.1 exists to prevent. The rule holds at every position a
-  union can occupy — a property, a `$defs` entry, an `items`, a typed
-  `additionalProperties`, and an operation `input`/`output`.
-
-  `const`/`enum` deserve their own mention because the failure is louder than a
-  drop: today the same schema yields three different accept sets across the four
-  targets, and two of them emit code their own type-checker rejects. A closed
-  value set over a union is written by putting the `const`/`enum` **in each
-  branch**, which is the spelling the conformance corpus already uses.
+  **And it is spelling-independent.** A node whose `$ref` resolves to a named
+  union is adjudicated by the same rule: an annotation sibling attaches to the
+  reference and is not a conjunct ([[ref]]), a `default` sibling gets the
+  sum-type `default` reject, and any other sibling gets *this* reject — naming
+  the union, the sibling, and the branch to move it into, never an [[allOf]]
+  merge diagnostic over a keyword the author did not write (**P7.2**). The
+  inline and reference spellings of one union accept and reject the same set of
+  siblings.
 - A `oneOf` **sum type** written inline in an element position (an array's
   `items` at any depth, an object's typed `additionalProperties`) → name it
   after its position (below), move it into `$defs`, and rewrite the position to
@@ -776,10 +788,22 @@ Those checks live in that function for every union that has one, named or
 inline, which is what puts them ahead of the dispatch — the only place
 that can stop it. A union no branch of which transforms its value needs no
 such function at all: the member is emitted as-is and the declaring
-model's converter runs the checks inline. Either way the violations are
-reported under the member's path — a union function collects them at the
-empty path and the declaring converter re-paths them through `_collect`
-(**P11**) — and aggregate with the member's siblings.
+model's converter runs the checks inline.
+
+A branch **transforms its value** whenever any part of it does, not only when
+the branch is itself a model or a materialized scalar. An **array branch whose
+elements are models**, temporals or binary values transforms — per element,
+through the ordinary [[items]] mapper — so it is emitted through its converter
+on the serialize side exactly as on the parse side, with each element's
+constraints run and each violation pathed by index under the member. Handing
+such a branch's in-memory value straight to the wire emits language objects
+where JSON is required and skips the element validation **P12** requires in both
+directions; a branch is "emitted as-is" only when its value is already the wire
+form — a scalar, or a collection of scalars, that no element mapper touches.
+
+Either way the violations are reported under the member's path — a union
+function collects them at the empty path and the declaring converter re-paths
+them through `_collect` (**P11**) — and aggregate with the member's siblings.
 
 The parse direction, which is handed untrusted input rather than a value
 of the declared union type, tests every branch and raises
@@ -797,6 +821,7 @@ of the declared union type, tests every branch and raises
 | Three disjoint kinds | `{oneOf:[{$ref:"#/$defs/Widget"},{type:string},{type:array,items:{type:number}}]}` |
 | Branch constraints carried through | `{oneOf:[{type:string,minLength:3},{type:integer,minimum:0}]}` |
 | An array branch's own bounds | `{oneOf:[{type:array,items:{type:number},minItems:1,uniqueItems:true},{type:string}]}` |
+| Array-of-models branch (element converter both directions) | `{oneOf:[{type:array,items:{$ref:"#/$defs/Address"}},{type:string}]}` |
 | A closed value set on a branch | `{oneOf:[{type:string,enum:[auto,manual]},{type:integer,minimum:0}]}` |
 | An asserted (non-materializing) `format` on a branch | `{oneOf:[{type:string,format:uuid},{type:integer}]}` |
 | Named `$defs` union reused by `$ref` | `{$defs:{Foo:{oneOf:[…]}}, properties:{f:{$ref:"#/$defs/Foo"}}}` |
@@ -824,6 +849,9 @@ of the declared union type, tests every branch and raises
 | Inline structured object branch with no derivable name | a branch inside a *nested inline object's* property, whose enclosing shape is itself not materialized |
 | Discriminator `const` not `required` in a branch | `{oneOf:[{Cat with kind required},{Dog with kind optional}]}` |
 | Non-distinct discriminator values | `{oneOf:[{kind:{type:string,const:"x"}…},{kind:{type:string,const:"x"}…}]}` |
+| Discriminator values distinct only in spelling | `{oneOf:[{kind:{const:1}…},{kind:{const:1.0}…}]}` — one value by [[const]] equality |
+| Non-annotation, non-`default` sibling of `oneOf` (sum type) | `{oneOf:[{type:string},{type:integer}], type:object, properties:{ignored:{…}}}`; `…, const:"x"`; `…, minLength:3` — move the keyword into the branch |
+| The same sibling on a [[nullability]] wrapper | `{oneOf:[{type:string},{type:"null"}], enum:[a,b]}`; `…, maxLength:8` — move the keyword to the non-null branch |
 | Ambiguous discriminator (2+ qualifying properties) | two object branches sharing both `kind` and `variant` as required-`const` |
 | A materialized temporal `format` on a sum-type branch (deferred) | `{oneOf:[{type:string,format:"date-time"},{type:integer}]}` |
 | A materialized `contentEncoding` on a sum-type branch (deferred) | `{oneOf:[{type:string,contentEncoding:base64},{type:integer}]}` |
@@ -874,6 +902,12 @@ of the declared union type, tests every branch and raises
   (`shapes[1]`, `choices.primary`) and the rest still checked (**P11**).
 - Serialize of an array of union members: each member's own branch
   constraints re-run before emit (**P12**).
+- An **array-of-models** branch, both directions: parse maps each element
+  through the referenced model's converter and re-paths its violations under
+  the member's index; serialize does the mirror image, so the emitted wire holds
+  JSON objects — never the in-memory element values — and an element violating
+  its model's constraints is reported at `member[i].field` rather than passing
+  through unchecked.
 - A failing union combined with a failing sibling field → **both**
   reported in one shot (**P11**).
 
@@ -895,7 +929,11 @@ of the declared union type, tests every branch and raises
 - **[[type]]**: every branch must declare one recognized `type` (or `$ref`
   to a typed def); it supplies the JSON kind that is the selector. A
   branch's own [[type]] siblings (formats, numeric/string constraints)
-  validate normally once the branch is selected.
+  validate normally once the branch is selected. The union **node** declares no
+  `type` of its own; one written there is a load reject (above), and [[type]]'s
+  leaf-`type` and object-without-shape guards must stay armed for a node that
+  carries `oneOf` — a sibling the union rejects must not be able to switch them
+  off.
 - **[[ref]]**: a branch may be a `$ref` to a named typed definition; the
   resolved type supplies the kind, and (in Go/Java) that named type
   implements the union marker / interface directly rather than being

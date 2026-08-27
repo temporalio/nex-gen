@@ -42,9 +42,10 @@ reject):
   common shape in imported OpenAPI 3.0 documents, so the diagnostic is
   explicit rather than a generic "not a number".
 - Value neither number nor boolean → reject.
-- On an `integer` field the bound MUST be integer-valued (`5.0` ok, `5.5`
-  reject) — see [[maximum]].
-- On a `number` field any finite numeric bound is accepted.
+- Over an `integer` position the bound MUST be integer-valued (`5.0` ok,
+  `5.5` reject), keyed on the *effective* kind of the bounded value — see
+  [[maximum]].
+- Over a `number` position any finite numeric bound is accepted.
 - **`exclusiveMaximum` and `maximum` both present → reject (redundant)** —
   both are upper bounds, one always dominates; keep exactly one (**P7.1**,
   the [[maximum]] rule). Not to be confused with the lower+upper interval
@@ -67,7 +68,7 @@ comparison changed to `≥` as the failing test (`v ≥ exclusiveMaximum` → a
 
 | Language | Strategy |
 |---|---|
-| Go | The `if v >= exclMax { push(Violation{Reason: fmt.Sprintf("must be < %v, got %v", exclMax, v)}) }` predicate lives in the shared `Validate`, which the generated `UnmarshalJSON` calls after decoding; violations collect into one `PayloadValidationError` application failure. |
+| Go | The `if v >= exclMax { push(Violation{Reason: fmt.Sprintf("must be < %v, got %v", exclMax, v)}) }` predicate lives in the shared `Validate`, applied identically on both directions' paths (**P12.2**); violations collect into one `PayloadValidationError` application failure. |
 | TypeScript | ``if (v >= exclMax) push(Violation{path, reason: `must be < ${exclMax}, got ${v}`})``. |
 | Python | `if v >= exclMax: violations.append(Violation(path=…, reason=f"must be < {exclMax}, got {v}"))` in the transfer type converter, after `_parse_spec_integer` normalizes an integer field's wire value (see [[type]]). |
 | Java | Collecting deserializer (PRINCIPLES Java §5) checks `v >= exclMax` via the [[type]] `SpecNumbers` helper, pushing a `Violation{path, "must be < " + exclMax + ", got " + v}` into the `PayloadValidationError` application failure. |

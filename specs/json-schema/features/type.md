@@ -65,6 +65,30 @@ Loader behavior:
   is almost always a schema bug. A legitimate `{"type":"null"}` appears as
   a branch of a [[oneOf]]: in the two-branch form it is [[nullability]], and
   among 3+ kinds it is a nullable sum type.
+- **Literal-kind compatibility is directional.** A numeric literal supplied
+  by [[const]] / [[enum]] / [[default]] inhabits `number` whatever its
+  fractional part, but inhabits `integer` **only when it is integral**.
+  `{"type":"integer", "const":1.5}`, `{"type":"integer", "enum":[1,1.5]}`
+  and `{"type":"integer", "default":1.5}` are rejects;
+  `{"type":"number", "const":1}` is accepted. `integer` ⊂ `number` and never
+  the converse, so a compatibility test that admits either kind against the
+  other is wrong in one direction. The rule is about the literal and the kind,
+  not about how the two met, so it governs a literal that reaches the node
+  through an [[allOf]] merge exactly as it governs one authored on the node —
+  see [[allOf]], which applies it to a merged kind.
+- **The `±(2^53−1)` integer cap binds at load, not only at runtime.** A
+  literal or bound that puts an `integer` position's accepted set wholly
+  outside the cap empties it, and an empty accepted set is a reject:
+  `{"type":"integer", "const":9007199254740992}` and
+  `{"type":"integer", "minimum":9007199254740992}` both reject. A bound in
+  the *redundant* direction (a `maximum` above `+(2^53−1)`) is dead range
+  and stays allowed — see [[maximum]].
+- **Every reject listed here applies at every position a schema node can
+  occupy** — a property, an [[items]] schema, a [[oneOf]] branch, a typed
+  [[additionalProperties]], a [[contains]] matcher, and a `$defs` bucket
+  authored on any of those. A `$defs` entry is held to the same rules
+  wherever its bucket sits; there is no position in which a subschema is
+  carried through unvalidated.
 
 ## Type mapping
 
@@ -82,7 +106,7 @@ field; Python uses `T | None`).
 | `"integer"` | `int64`             | `number`             | `int`             | `long` |
 | `"number"`  | `float64`           | `number`             | `float`           | `double` |
 | `"boolean"` | `bool`              | `boolean`            | `bool`            | `boolean` |
-| `"object"`  | struct from [[properties]] | interface from [[properties]] (**not classes**) | `@dataclasses.dataclass` from [[properties]]; inline object shapes are hoisted and named, while only a free-form `oneOf` object branch stays `dict[str, typing.Any]` | POJO class (Java 8; **not records** — see PRINCIPLES Java §1) |
+| `"object"`  | struct from [[properties]] | interface from [[properties]] (**not classes**); a free-form `oneOf` object branch stays `Record<string, unknown>` | `@dataclasses.dataclass` from [[properties]]; inline object shapes are hoisted and named, while a free-form `oneOf` object branch stays `dict[str, typing.Any]` | POJO class (Java 8; **not records** — see PRINCIPLES Java §1) |
 | `"array"`   | `[]T` (T from [[items]])   | `T[]`                | `list[T]`         | `List<T>` |
 | `"null"`    | only as a [[oneOf]] branch † | only as a [[oneOf]] branch † | only as a [[oneOf]] branch † | only as a [[oneOf]] branch † |
 
@@ -108,6 +132,27 @@ Notes:
   and `5e0` are equivalent, as are positive and negative zero. Each target may
   use its idiomatic JSON serializer; Java therefore continues to emit an
   integral `double` with its normal `.0` spelling.
+- **The binary64 domain is a *declared domain*, and `type` owns it.** It is
+  **P1** exception (c): the accepted value set is narrowed, so a decimal token
+  that is not exactly representable is admitted as its **nearest finite
+  binary64 value** and a token outside the domain is **rejected** — both
+  identically in all four targets. Declared once here and enforced uniformly
+  everywhere, it is a **P6** subset decision, not a per-target capability
+  floor: it is not "the least capable target's range", and a target whose
+  native numeric type is *wider* (Python's unbounded `int`) narrows to the
+  declared domain rather than keeping the extra precision. The `±(2^53−1)`
+  `integer` range is the same kind of decision and stands on the same clause.
+  Two things the licence does **not** cover: **validation semantics are never
+  excepted**, so a value outside the domain must be refused everywhere rather
+  than accepted in one target; and a value outside the domain must be refused
+  *loudly and at the right stage* — silently emitting it, or letting a
+  satisfiability check that cannot see the domain pass it, is a defect, not a
+  bounded loss.
+- **A `number` node's carrier never depends on a literal's spelling.** An
+  integral [[const]] / [[enum]] / [[default]] on a `number` node still lowers to
+  the target's binary64 carrier (`float64` / `number` / `float` / `double`),
+  never to the `integer` carrier. Only the node's declared `type` — or, for a
+  [[nullability]] wrapper, the non-null branch's — selects the carrier.
 
 ## Validator mapping
 
@@ -218,8 +263,8 @@ Strategy per language:
       if (!n.isNumber()) {                        // rejects "1", true, etc.
           errs.add(new Violation(path, "expected integer"));  return null;
       }
-      if (!isFiniteNode(n)) {
-          errs.add(new Violation(path, "expected finite integer")); return null;
+      if (!isFiniteNode(n)) {                     // co-emitted helper; `1e400`
+          errs.add(new Violation(path, "not an integer"));     return null;
       }
       BigDecimal d = n.decimalValue();            // exact; no double rounding
       if (d.stripTrailingZeros().scale() > 0) {   // "1.0"/"1e2" ok, "1.5" rejected
@@ -300,6 +345,14 @@ Loader must produce a clear, located diagnostic for each.
 | Unknown type name | `"int"`, `"float"`, `"date"`, `"any"`, `"bigint"`, `"String"`, `"INTEGER"` |
 | Wrong outer type | `5`, `null`, `true`, `{"type":"string"}` |
 | Nested / malformed | `[["string"]]` |
+| Object shape keyword on `type: "array"` (P7.1) | `{"type":"array", "properties":{…}}`, `{"type":"array", "additionalProperties":false}` — never accepted-and-ignored. The mirror (`items` on `type: "object"`) is [[items]]'. |
+| Fractional literal on `integer` (directional rule) | `{"type":"integer","const":1.5}`, `{"type":"integer","enum":[1,1.5]}`, `{"type":"integer","default":1.5}` |
+| `integer` accepted set emptied by the cap | `{"type":"integer","const":9007199254740992}`, `{"type":"integer","minimum":9007199254740992}` |
+| Sibling on a `oneOf` node | `{"oneOf":[…], "type":"object"}`, `{"oneOf":[…], "properties":{…}}`, `{"oneOf":[…], "additionalProperties":false}` (see [[oneOf]]) |
+
+Each row is also owed a negative test at a **nested** position — inside
+[[items]], inside a [[oneOf]] branch, and inside a `$defs` bucket authored on a
+non-model node — since the reject is positional-invariant.
 
 ### Runtime fixtures per accepted type (validator tests)
 
@@ -338,12 +391,18 @@ For each accepted `type`, fuzz over:
   to **any non-integral decimal token that rounds to an integral binary64 value
   within the cap**. The `[2^52, 2^53)` band makes the effect systematic because
   every binary64 value there is integral, but sufficiently fine fractional
-  parts can round away at smaller magnitudes too. This is a **documented
-  limitation of the two parse-boundary targets**, not a licence to loosen Go
-  and Java. This limitation has the same root cause as the untyped-extras
-  precision note in
-  [[additionalProperties]] — the byte boundary sits outside the
-  converter (PRINCIPLES TypeScript §4, Python §3).
+  parts can round away at smaller magnitudes too.
+
+  **Status: open.** This is a four-target *accept-set* divergence, and **P1**
+  licenses none — the binary64 domain restriction above narrows the accepted
+  set identically everywhere, whereas this splits it: Go and Java reject where
+  TypeScript and Python accept. It is a known hole, not a sanctioned loss, and
+  the conformance suite carries it as a tolerated divergence rather than as
+  intended behavior. Closing it means giving the two parse-boundary targets the
+  decimal text (the byte boundary sits outside the converter — PRINCIPLES
+  TypeScript §4, Python §3, the same root cause as the untyped-extras precision
+  note in [[additionalProperties]]); it never means loosening Go and Java to
+  match, which would be the artificial common-denominator floor P1 forbids.
 
 ## Interactions
 
@@ -364,16 +423,42 @@ For each accepted `type`, fuzz over:
   as one of exactly two (the [[nullability]] pattern) it makes the field
   nullable; a `null` branch among 3+ kinds is a nullable union ([[oneOf]]).
   `integer`+`number` branches together are rejected (unsatisfiable
-  overlap).
+  overlap). Two further rules this spec owns:
+  - **A union node carries no `type`, and a `type` sibling on it is a
+    reject**, not a hint — as are `properties` and `additionalProperties`
+    ([[oneOf]] states the general sibling rule).
+  - **The guards above apply to the keywords a node itself carries, and a
+    `oneOf` beside them does not disarm either one.** A union node may
+    legitimately carry *no* `type` — that is the typeless-schema exemption in
+    the Support decision, where the shape comes from the branches. What the
+    exemption does not do is excuse a `type`, `properties` or
+    `additionalProperties` the author *did* write on that node from the rules
+    this spec applies to it everywhere else. So a shapeless
+    `{"type":"object"}` is refused beside a `oneOf` exactly as it is refused
+    bare and as a `oneOf` **branch**. Adding a keyword must never *widen*
+    what loads; a keyword that is itself ignored and also suppresses an
+    unrelated reject is the compounded form of the silent-acceptance P7.1
+    forbids.
+  - **Discriminator distinctness is decided by value, never by
+    representation.** Where [[oneOf]] requires the branches'
+    discriminator [[const]]s to be pairwise-distinct, two numeric literals
+    are distinct only if they denote **different numbers**. `1` and `1.0`
+    are the same number (the identity rule above), so branches tagged
+    `const: 1` and `const: 1.0` are *not* distinct and the union rejects.
+    This is the same equality the emitted dispatch uses — it selects a
+    branch by numeric value, so a distinctness test that compared JSON
+    spellings would admit a union whose second branch no dispatch can ever
+    reach.
 - **[[properties]] / [[items]]**: only meaningful when `type` is `"object"`
   / `"array"`. Cross-product mismatches are generator-time errors.
   Object-shape decisions live in [[properties]] / [[additionalProperties]];
   in summary, **typed structs are open by default** (per JSON Schema
   spec and **P13** — accept and preserve extras into a catch-all),
   closed behavior requires explicit `additionalProperties: false`.
-- **[[format]]**: format hints layer onto `type:"string"` (mostly); a
-  format may pick a more specific emitted type (`time.Time` in Go for
-  `format:"date-time"`) while staying gated by the underlying string type.
+- **[[format]]**: supplies no type of its own — a materialized temporal
+  replaces the field's `string` with a native construct. The applicability
+  gate is **not** this spec's: that a `format` on a non-string `type` is a
+  load reject (**P7.1**) is specified and tested in [[format]].
 - **[[required]]** + [[nullability]] own optional/nullable wrapping;
   `type` only contributes the inner type.
 
@@ -394,7 +479,8 @@ no current toolchain emits it.
 - [[enum]], [[const]] — other any-instance-type assertions.
 - [[multipleOf]], [[minimum]], [[maximum]], [[exclusiveMinimum]],
   [[exclusiveMaximum]] — numeric assertions gated by `type`.
-- [[format]] — string refinements layered on `type:"string"`.
+- [[format]] — string refinements over `type:"string"`; owns the
+  non-string-`type` applicability reject.
 - [[oneOf]] — unions of branches with pairwise-disjoint JSON kinds
   (each branch's `type` is the selector); the nullability
   `oneOf:[{T},{null}]` pattern is the degenerate two-branch case (see

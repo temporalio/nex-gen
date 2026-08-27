@@ -77,7 +77,7 @@ The defining choices (citing [[PRINCIPLES.md]]):
   the hand-emitted-validator ethos.
 - **Own the check, don't delegate (P1/P10).** As with [[format]], the
   validity check is a **generator-owned** pinned regex over the wire
-  string (through the [[pattern]] RE2-safe gate) rather than a decoder's
+  string (inside the [[pattern]] RE2-safe subset) rather than a decoder's
   own error behavior — several base64 decoders are *lenient* (Python
   `b64decode` without `validate=True` silently drops non-alphabet bytes;
   a naive hand-rolled decoder would skip them too), which would let
@@ -218,7 +218,12 @@ canonical base64/base64url per the node's encoding), the one place
 [[maxLength]] / [[minLength]] / [[pattern]] is **not** subsumed by the
 type, though — the canonical base64 can still be too long or off-pattern —
 so that predicate re-runs over the canonicalized wire string **before
-emit** (**P12**), as those specs describe.
+emit** (**P12**), as those specs describe. The canonical wire string is
+projected **once per member** and shared by every predicate on that node,
+including a closed-value comparison ([[const]] / [[enum]]), which compares on
+that same string. Deriving it independently per predicate makes the emitted
+code depend on how many predicates a node happens to carry — which is how a
+[[minLength]]`:0`, a bound the spec declares inert, can break a build.
 
 ## Property-testing matrix
 
@@ -271,12 +276,19 @@ emit** (**P12**), as those specs describe.
   a media type therefore rejects on the label, not here — see
   [[contentMediaType]]. This is why materialized bytes are unlabeled
   binary in v1.
-- **[[pattern]]**: reuses its RE2-safe gate, compile-once mechanism,
-  ASCII-class rule, and end-anchor normalization. Both may appear — the
-  **wire string** must satisfy both.
-- **[[format]]**: a materializing temporal format cannot share a node with
-  `contentEncoding`; both need to own the same in-memory slot. Reject the
-  combination at load time rather than silently discarding either adapter.
+- **[[pattern]]**: the pinned encoding patterns stay inside its RE2-safe
+  subset and use its compile-once mechanism, ASCII-class rule, and end-anchor
+  normalization. Both may appear — the **wire string** must satisfy both.
+- **[[format]]**: a **materializing** temporal format cannot share a node with
+  `contentEncoding` — both would own the same in-memory slot, and the grammars
+  are disjoint anyway (an RFC 3339 form contains `-` and `:`, which no base64
+  alphabet admits). **Reject the combination at load**, with a fix-it naming the
+  conflict, rather than silently discarding either adapter. A
+  **non-materializing** (string-shaped) format is **accepted** beside
+  `contentEncoding` and its check applies to the **encoded wire string** in
+  *every* target, aggregating with the encoding's check: dropping it in one
+  target is an accept-set divergence, and being redundant with the base64 shape
+  in most cases does not license omitting it in one.
 - **[[minLength]] / [[maxLength]]**: independent string assertions over
   the **encoded wire string** (not the decoded byte length); not
   cross-checked against the base64 shape.
@@ -284,12 +296,30 @@ emit** (**P12**), as those specs describe.
   be valid for the declared encoding at load and is stored / echoed in
   canonical form, mirroring [[format]].
 - **[[nullability]]**: orthogonal — a `null` skips the check and is not
-  materialized; a present value is checked and decoded.
+  materialized; a present value is checked and decoded. A [[const]] / [[enum]]
+  on the **wrapper** does not narrow the emitted field to the literal's own
+  type: the null branch survives, the field stays nullable, and the closed
+  value applies to the non-null branch. Collapsing the wrapper to the literal
+  emits a field an explicit wire `null` cannot inhabit — in a statically-typed
+  target, one that does not compile — and it drops the branch a `null` needs
+  while the schema still admits it.
 - **[[oneOf]]**: **deferred** on a non-object branch of a sum type — the
   synthesized `<Union><Kind>` wrapper has no bytes construct to hold, so it is
   rejected rather than materialized in one target and left an unvalidated
   `string` in the others ([[oneOf]] §Deferred). The [[nullability]] `oneOf`
   wrapper is not a sum type and materializes normally.
+- **[[uniqueItems]]**: **supported** on a `contentEncoding` element. Because
+  only the canonical wire form is accepted, a byte value has exactly one
+  spelling, so the encoded strings partition the elements exactly as the decoded
+  byte values do. That support is **contingent on** the strictness above:
+  admitting unpadded, URL-safe-under-`base64`, or non-canonical trailing bits
+  would give one byte value several spellings and bring the element under
+  [[uniqueItems]]' deferral.
+- **[[contains]]**: `contentEncoding` on a `contains` **matcher** rejects; on
+  the **element** it is supported, and the matcher measures the encoded wire
+  string in both directions. **Status: open** — moving the assertion onto
+  [[items]] is the legal position but compiles only once each target renders an
+  element's encoded wire string, which is not the case in every target today.
 - **[[required]]**: orthogonal — presence vs value shape.
 
 ## Ecosystem variance
@@ -298,8 +328,8 @@ emit** (**P12**), as those specs describe.
 |---|---|
 | JSON Schema 2020-12 | Annotation by default; we opt into assertion + materialization for `base64` / `base64url`, reject the rest. Native keyword, no rewrite. |
 | OpenAPI 3.1 | Adopts 2020-12 — `contentEncoding` native, same names. The OAS 3.0 `type:"string", format:"byte"` (base64) / `format:"binary"` idioms are **not** JSON Schema formats — rejected as unknown [[format]]s; author should use `contentEncoding:"base64"`. |
-| OpenAPI 3.0 | Human porting note: no `contentEncoding`; base64 is spelled `format:"byte"`. OpenAPI 3.0 is not an accepted input dialect; after conversion, use `contentEncoding:"base64"`. |
-| draft-07 | Human porting note: the keyword existed there with the same names, but a document that declares draft-07 rejects on the dialect pin before this keyword is inspected. |
+| OpenAPI 3.0 | Human porting note: no `contentEncoding`; base64 is spelled `format:"byte"`, which is not a JSON Schema format. A document *declaring* the OAS 3.0 dialect is not an accepted input, but the spelling itself reaches the loader in a `$schema`-less fragment and rejects as an unknown [[format]] — and that diagnostic must name `contentEncoding:"base64"` as the in-subset alternative, since it is the one migration hint an OAS-3.0 author most needs. Not for `format:"binary"`: that means raw octets, so the same hint would silently change the wire. |
+| draft-07 | Human porting note: the keyword existed there with the same names. A document that declares draft-07 rejects on the dialect pin before this keyword is inspected; in a `$schema`-less fragment the keyword is read as here — `base64` / `base64url` assert and materialize, every other encoding rejects. |
 
 ## Open questions
 
@@ -320,8 +350,8 @@ emit** (**P12**), as those specs describe.
   defer the rest" spec that this one mirrors.
 - [[type]] — supplies the base `string`; gates applicability; the
   materialized field type is the native bytes construct.
-- [[pattern]] — the regex keyword whose RE2-safe gate, compile-once
-  mechanism, and anchor normalization the base64 check reuses.
+- [[pattern]] — the regex keyword whose RE2-safe subset the base64 check stays
+  inside, and whose compile-once mechanism and anchor normalization it uses.
 - [[contentMediaType]] — rejected; owns the "no place to emit a media
   type in the model" rationale that also blocks labeled base64 blobs.
 - [[contentSchema]] — rejected; the embedded-document keyword.

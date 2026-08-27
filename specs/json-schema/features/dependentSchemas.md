@@ -65,6 +65,9 @@ the line [[dependentRequired]] stays behind.
 
 Loader behavior:
 - Any `dependentSchemas` present → reject with a located diagnostic.
+- An authored empty `dependentSchemas: {}` is rejected too, as a dead keyword;
+  it constrains nothing, so the actionable remedy is to remove it rather than
+  either alternative below.
 - The diagnostic offers the coherent alternatives:
   1. **[[dependentRequired]]** — when the dependent subschema only makes
      other members *required* (`{"a": {required:["b"]}}` → `{"a":["b"]}`).

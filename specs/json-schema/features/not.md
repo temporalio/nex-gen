@@ -72,7 +72,10 @@ rejected as such:
 
 Loader behavior:
 - Any `not` present → reject with a located diagnostic (recurse into the
-  negated subschema for validity, but never lower it).
+  negated subschema for validity, but never lower it). This holds on a raw
+  [[allOf]] branch, and on the implicit conjunct of a `$ref`-with-siblings: the
+  location carries the branch index and the diagnostic is this one, never a
+  merge conflict over the keyword's value.
 - `not: {}` / `not: true` → reject as **unsatisfiable** (accepts no instance).
 - `not: false` → reject as a **no-op** (accepts every instance).
 - The diagnostic offers the coherent alternatives:

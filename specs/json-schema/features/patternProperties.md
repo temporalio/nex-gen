@@ -130,7 +130,7 @@ would add accepted + runtime rows.
 | JSON Schema 2020-12 | Reject (deferred — see Support decision). |
 | OpenAPI 3.1 | `patternProperties` present (3.1 adopts 2020-12) → reject. |
 | OpenAPI 3.0 | No `patternProperties` keyword — nothing to reject; users already lean on `additionalProperties`. |
-| Swagger 2.0 / draft-4 | Human porting note: a declared older dialect rejects on the `$schema` pin first; a schema-shaped document with no `$schema` reaches the keyword-level deferred rejection. |
+| Swagger 2.0 / draft-4 | `patternProperties` present → reject — though a *declared* older dialect rejects on the `$schema` pin first ([[input-files]]), so only a document with no `$schema` reaches this keyword's diagnostic. |
 
 ## See also
 

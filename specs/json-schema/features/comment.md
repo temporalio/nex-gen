@@ -66,6 +66,15 @@ Loader behavior:
   cannot clone the target into a new type or add a P15 identifier.
   *(Status: unimplemented — the fold gate admits only the four `x-<lang>-name`
   keywords, so today a `$comment` sibling does trigger the fold; see [[allOf]].)*
+- `$comment` on a [[nullability]] `null` branch → **reject**. This is the one
+  position the "any subschema" rule above does not reach: a `null` branch must
+  be exactly `{type: "null"}` with no siblings, an invariant [[nullability]]
+  owns and an inert annotation does not override.
+- `$comment` on a **document root** — a definitions-only root or a Nexus
+  envelope root — → **accepted and dropped**, exactly as [[description]] is
+  there. A root-level maintainer note is what an imported OpenAPI document
+  carries, and dropping it changes nothing; a reject at that position would
+  have to describe a model the author never wrote.
 
 ## Type mapping
 
@@ -89,12 +98,14 @@ lifetime ends at load, when it is dropped.
 | Comment on a property | `properties:{age:{$comment:"was int32 in v1", type:"integer"}}` → dropped |
 | Empty comment | `{$comment:"", type:"string"}` → accepted, dropped (no dead output) |
 | Comment sibling of a `$ref` | `{$ref:"#/$defs/User", $comment:"use-site note"}` → comment dropped, reference unchanged ([[ref]]) |
+| Comment at a document root | a definitions-only or Nexus envelope root carrying `$comment` → dropped |
 
 ### Rejected at load time (negative)
 
 | Reason | Example |
 |---|---|
-| Non-string value | `{$comment:42}`, `{$comment:{...}}`, `{$comment:["x"]}` |
+| Non-string value | `{$comment:42}`, `{$comment:{...}}`, `{$comment:["x"]}`, `{$comment:null}` |
+| On a nullability `null` branch | `{oneOf:[{type:"string"},{type:"null", $comment:"note"}]}` (see [[nullability]]) |
 
 ### Runtime fixtures
 
@@ -128,6 +139,7 @@ without the annotation, including beside a `$ref`.
   it *becomes* the doc comment, whereas `$comment` is dropped.
 - [[title]] — the summary-line annotation; also surfaced, unlike
   `$comment`.
-- [[ref]] — a `$comment` sibling of a `$ref` merges then drops.
+- [[ref]] — a `$comment` sibling of a `$ref` is dropped and leaves the
+  reference intact.
 - [[PRINCIPLES.md]] — **P2** (readable generated source), **P10/P12** (no
   runtime effect), **P13/P15/P1** (never an identifier).

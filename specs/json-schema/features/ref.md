@@ -80,21 +80,43 @@ fix-it:
   merged result is subject to `allOf`'s reject rules (e.g. a sibling that
   contradicts the target), and unresolvable/cyclic targets still reject
   here. Two sibling classes are **not** merged and leave the reference intact:
-  an `x-<lang>-name`, which renames the member (above); and the **purely inert
-  annotations** `$comment`, `examples` and `deprecated: false`, which are
-  dropped **before** the loader decides whether the reference needs an implicit
-  merge, so they can neither clone the target into a new type nor add a P15
-  identifier. See [[allOf]] for the same rule stated from the merge side.
+  an `x-<lang>-name`, which renames the member (above); and the **non-conjunct
+  annotations** `$comment`, `examples` and [[deprecated]] — the last at **either
+  value**, since it marks the member rather than asserting anything about the
+  referenced value — which are dropped **before** the loader decides whether the
+  reference needs an implicit merge, so they can neither clone the target into a
+  new type nor add a **P15** identifier. See [[allOf]] for the same rule stated
+  from the merge side, and [[deprecated]] for the member-marking rule.
   *(Status: unimplemented — the loader currently admits only the four
-  `x-<lang>-name` keywords here, so an inert annotation still triggers the fold.
-  The clause is the contract; the gate is the defect.)*
-- **`$id` anywhere** (root or nested) → reject. Fix-it: "remove `$id`;
-  refs resolve by file path + JSON pointer." (local-file-only — no URI resolution.)
+  `x-<lang>-name` keywords here, so a non-conjunct annotation still triggers the
+  fold. The clause is the contract; the gate is the defect.)*
+- **`$id` anywhere** → reject. Fix-it: "remove `$id`; refs resolve by file path
+  + JSON pointer." (local-file-only — no URI resolution.) The reject is
+  **position-independent**: a root `$id`, a nested one, one on any [[allOf]]
+  branch including a non-first conjunct, and one on the implicit conjunct a
+  `$ref`-with-siblings forms all reject alike. A merge must not drop it as
+  unrecognized on the branch it did not happen to read first.
 - **HTTP/URI ref**, `$anchor` fragment, `$dynamicRef`, `$dynamicAnchor`
   → reject (local-file-only / P6). These anchor and dynamic-reference
   keywords are owned by this spec — see Anchors & dynamic references below.
 - **Unresolvable target** (missing file, missing `$defs` entry) → reject.
   (`..` segments are resolved, not rejected — see Resolution.)
+- **`$defs` outside a model position** → reject. A `$defs` bucket belongs on a
+  document root, a `$defs` entry, or a nested `$defs` chain — the positions
+  whose entries become named models. Under an ordinary subschema (a property, an
+  `items`, a [[oneOf]] branch, an `additionalProperties` schema, a [[contains]]
+  matcher) it declares nothing any `$ref` can reach, so accepting it silently
+  discards whatever it holds — including keywords the subset rejects outright
+  and an invalid `type`, all of which reject one level up. Nor is such a bucket
+  inert: a cross-file `$ref` inside it still joins the input closure and renames
+  every emitted module. Fix-it: "move the definition to the document's
+  `$defs`."
+  *(Status: unimplemented — the raw grammar pass walks such a bucket, so a
+  misspelled keyword inside it still rejects, but no semantic validator reaches
+  it and the bucket itself is accepted.)*
+- **Absolute-path `$ref`**, and a `$ref` that raises the input root above the
+  **invocation root** → reject (see Resolution, where both carry a
+  `Status: unimplemented` note).
 
 ### Anchors & dynamic references — rejected
 
@@ -130,19 +152,39 @@ standalone applicators — and share one rationale:
   from the entry file(s)/directory the CLI/API is given, each resolved to
   its absolute path. Every reachable file becomes a per-input output
   module.
+- The closure follows a `$ref` **only where a `$ref` is a schema keyword.** A
+  dead `$defs` entry counts — it is generated API surface, so its dependencies
+  must be in the set — but a `$ref`-shaped key inside a *value* is data, not a
+  reference: an object with a `$ref` member appearing in [[examples]], a
+  [[default]], a [[const]] or an [[enum]] contributes **no** closure edge.
+  Treating it as one enlarges the input set, raises the input root and renames
+  every emitted module, which is the opposite of the inertness those keywords
+  promise.
 - The **input root** is the absolute path of the directory common to all
   resolved input files (their longest common-ancestor directory),
   computed **after** `..` normalization. Module names derive relative to the
   root (see [[generated-file-layout]]); because they are relative to the
   common ancestor they never contain `..`.
-- **The root is bounded below by the invocation root** — the file or directory
-  the CLI/API was given. A `$ref` that would raise the common ancestor **above**
-  it is a load reject, naming the reference and the directory it escaped to.
-  Without that bound a reference can lift the root to an ancestor of the
-  checkout, at which point the emitted module tree, Java package names and Go
-  file names encode the **absolute filesystem location of the working copy** —
-  so two developers generating the same schema get different package names, and
-  a committed artifact can never match a colleague's regeneration.
+- **The root is bounded below by the invocation root** — the common-ancestor
+  directory of the entry paths the CLI/API was given (the directory itself when
+  one directory is given; the containing directory when one file is). A `$ref`
+  that would raise the input root **above** the invocation root is a load
+  reject, naming the reference and the directory it escaped to. Without that
+  bound a reference can lift the root to an ancestor of the checkout, at which
+  point the emitted module tree, Java package names and Go file names encode the
+  **absolute filesystem location of the working copy** — so two developers
+  generating the same schema get different package names, and a committed
+  artifact can never match a colleague's regeneration. An upward `$ref` that
+  stays at or below the invocation root is fine and raises the input root as
+  usual, so the fix-it is to widen the invocation — name the ancestor directory,
+  or name the escaping target as a second entry path — which makes the root the
+  author's choice rather than a consequence of where the checkout sits. The
+  diagnostic names the `$ref` that escaped, never the entry file that did not
+  change, and never a directory outside the working copy (**P7.2**).
+  *(Status: unimplemented — the root is currently unbounded above, so an upward
+  `$ref` silently lifts it and the emitted layout can encode the checkout's
+  absolute path. The bound is the contract; [[generated-file-layout]] and
+  [[input-files]] defer to it.)*
 - **Reproducible** means exactly that: for a given invocation root, the emitted
   module names, package names and file names are a function of the input files'
   paths *relative to it* and of nothing else — not of where the checkout lives,
@@ -151,6 +193,8 @@ standalone applicators — and share one rationale:
 - An **absolute-path `$ref`** is rejected: the accepted-form table above admits
   only `<relative-path>`, and an absolute reference both escapes the invocation
   root and is unreproducible by construction.
+  *(Status: unimplemented — an absolute `$ref` currently resolves and is
+  followed.)*
 - **Dead `$defs`** (defined but never referenced) are still generated and
   exported — they are intended reusable API surface, not waste.
 
@@ -181,8 +225,8 @@ package-wide namespace** — Go flattens to a single package, and the TypeScript
 and Python barrels re-aggregate every module into one. Java and .NET resolve
 per module instead, so there the namespace is the module
 ([[generated-file-layout]]). A collision → **load reject, no mangling**;
-the escape hatch is `x-<lang>-name` (**P15**, scope
-widened from per-object to per-package). Consistent with [[properties]],
+the escape hatch is `x-<lang>-name` (**P15**, scope widened from per-object to
+per-package). Consistent with [[properties]],
 **collisions are evaluated per emitted target only** — a name set may be
 accepted for a Go-only run and rejected for a Java run, because
 normalization differs per language.
@@ -203,6 +247,25 @@ whose name equals the root type's is rejected where the shape is hoisted,
 with a diagnostic naming the position it was written in. A file with no
 root type (a definitions-only file or a Nexus document — see
 [[input-files]]) has no root name to collide with.
+
+**A sibling fold is a new declaration.** Every sibling of a `$ref` outside the
+two non-conjunct classes folds ([[allOf]]), and the merged node is a standalone
+type named from its **position** — the annotation text never supplies the name.
+So adding a [[title]] or [[description]] beside a `$ref`, an edit that changes
+neither the wire nor any validation, introduces a new package-level identifier
+that can collide. Because the identifier is synthesized rather than authored,
+**P7.2** applied here yields two obligations, and together they are what makes
+such an edit safe to make:
+
+- the reject must name the **position that synthesized** the identifier — the
+  annotated reference — and not only the two colliding names, so the author can
+  see which edit caused it;
+- **every remedy it offers must resolve the reject.** "Extract the target into
+  `$defs` and reference it" is no remedy when that is exactly what the author
+  already wrote, and `x-<lang>-name` is one only if applying it **at the site
+  the author edited** reaches the synthesized name (**P15**). Removing the
+  annotation always resolves it, so a diagnostic that cannot offer an
+  applicable override must offer that.
 
 ## Output layout
 
@@ -274,23 +337,32 @@ the recursion-pointer rule above applies to cyclic edges. Imports follow
 - **Java** — same-package references need no import in a single-input run;
   cross-file references import the target from its per-input sub-package.
 
-**Bare-`$ref`-root alias.** *(Status: unimplemented — a bare-`$ref` root
+**Bare-`$ref` alias.** *(Status: unimplemented — a bare-`$ref` root
 is currently loaded as "not a model": nothing is emitted for it in any
-language, and a `$ref` from another file to that root fails to resolve.
-The rules below are the intended design.)* A file root that is exactly
-`{"$ref": <target>}` emits an alias to the target where the language
-supports it:
+language, and a `$ref` from another file to that root fails to resolve. A
+bare-`$ref` `$defs` entry is collected as a model and emitted as an object with
+**no members**, which loses the target's whole shape and makes the four targets
+disagree on the same payload; that is not a licensed outcome under either
+reading below. The rules below are the intended design.)* A **schema that is
+exactly `{"$ref": <target>}`** — a file root or a `$defs` entry — is an
+**alias** for the target: every position that references the alias denotes the
+target's shape, including an operation's `input`/`output` ([[services]]), and no
+shapeless type is emitted. Where the language supports an alias declaration it
+is emitted as one:
 
 | Language | Emission |
 |---|---|
 | **Go** | `type A = Main` (alias; fully interchangeable) |
 | **TypeScript** | `export type A = Main` |
 | **Python** | `A = Main` (module-level alias) |
-| **Java** | **no alias** — every reference to the bare-ref root resolves directly to the target `Main`; no synthesized `A` |
+| **Java** | **no alias** — every reference to the bare-ref schema resolves directly to the target `Main`; no synthesized `A` |
 
 The Java asymmetry is cosmetic and *safe by construction*: since `A` is
 nothing but another name for `Main`, collapsing all references to `Main`
-yields one interchangeable type at every site. Subclassing
+yields one interchangeable type at every site — and it is what makes the
+operation-I/O gate sound: whatever proves the alias object-shaped is the
+target's shape, so the operation must be typed on the target, never on a
+distinct shapeless `A`. Subclassing
 (`A extends Main`) is **rejected** as the Java realization — it would
 require dropping `final` from value types, a duplicated per-class
 collecting deserializer, and would split reference sites into
@@ -322,15 +394,20 @@ helper is emitted — the named-type machinery already in place
 | Mutual cross-file cycle | `a.json#/X` ↔ `b.json#/Y` with a terminating edge → hoisted to `_recursive` (Py) |
 | Dead `$defs` | a `$defs` entry never referenced → still emitted/exported |
 | Bare-`$ref` root (**unimplemented**) | file root `{"$ref":"#/$defs/Main"}` → alias (Go/TS/Py), `Main` (Java) |
+| Bare-`$ref` `$defs` entry (**unimplemented**) | `$defs.Alias: {"$ref":"#/$defs/Target"}` → alias for `Target`, never an empty model |
 | `$ref` with siblings | `{"$ref":"#/$defs/X", "minProperties":1}` → implicit `allOf`, merged ([[allOf]]) |
+| `$ref` with a non-conjunct sibling | `{"$ref":"#/$defs/X", "$comment":"note"}`, `{"$ref":"#/$defs/X", "deprecated":true}` → reference kept, no synthesized type |
 
 ### Rejected at load time (negative)
 
 | Case | Reason |
 |---|---|
 | Pointer into non-`$defs` | `{"$ref": "#/properties/x/items"}` — not nameable (P7) |
-| `$id` present | root or nested `$id` — no URI resolution (local-file-only) |
+| `$id` present | any position — root, nested, or an [[allOf]] conjunct — no URI resolution (local-file-only) |
 | HTTP ref | `{"$ref": "https://example.com/s.json"}` — not local (local-file-only) |
+| Absolute-path ref (**unimplemented**) | `{"$ref": "/abs/other.json"}` — only `<relative-path>` is an accepted form |
+| Ref escaping the invocation root (**unimplemented**) | a `$ref` that raises the input root above the entry path — the layout would encode the checkout's location |
+| `$defs` outside a model position (**unimplemented**) | a `$defs` bucket under a property, `items`, `additionalProperties`, a [[oneOf]] branch or a [[contains]] matcher — unreachable by any `$ref` |
 | `$anchor` / `$dynamicRef` / `$dynamicAnchor` | not in subset (P6) — see Anchors & dynamic references |
 | Unresolvable | missing file or missing `$defs` entry |
 | Unsatisfiable cycle | every edge required + non-nullable + single-valued |
@@ -373,7 +450,7 @@ helper is emitted — the named-type machinery already in place
 
 | Source | Handling |
 |---|---|
-| draft-07 (`$ref` siblings ignored) | siblings are **merged** as an implicit `allOf` per 2020-12 ([[allOf]]), not dropped — a stricter, more faithful reading (the one cross-draft behavior change). A draft-07 author who intended the siblings as dead keys will see them take effect; remove them to restore the old meaning |
+| draft-07 (`$ref` siblings ignored) | siblings are **merged** as an implicit `allOf` per 2020-12 ([[allOf]]), not dropped — a stricter, more faithful reading (the one cross-draft behavior change), the two non-conjunct classes above excepted. A draft-07 author who intended the siblings as dead keys will see them take effect; remove them to restore the old meaning |
 | `definitions` (draft-07 keyword) | not recognized; require `$defs`. Diagnostic suggests renaming `definitions` → `$defs` |
 | `$id`-rebased refs (OpenAPI/JSON-Schema bundlers) | reject; the input must be a flat local-file tree resolvable by path + pointer |
 | `$anchor` / `$dynamicRef` | reject (P6); not in the subset |
@@ -394,6 +471,7 @@ helper is emitted — the named-type machinery already in place
 - [[services]] — operation `input`/`output` `$ref` and inline-type
   promotion.
 - [[PRINCIPLES.md]] — **P6** (strict subset), **P7/P7.1** (reject
-  loudly), **P14** (one file per input; merge recursion, not files),
+  loudly), **P7.2** (a reject names the cause and a remedy that works),
+  **P14** (one file per input; merge recursion, not files),
   local-file-only external refs, **P15** (one identifier namespace per
   scope).

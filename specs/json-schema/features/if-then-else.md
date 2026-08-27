@@ -74,7 +74,9 @@ diagnostic that it has no effect.
 
 Loader behavior:
 - Any `if` (with or without `then`/`else`) present → reject with a located
-  diagnostic.
+  diagnostic. This holds on a raw [[allOf]] branch, and on the implicit conjunct
+  of a `$ref`-with-siblings: the location carries the branch index and the
+  diagnostic is this one, never a merge conflict over the keyword's value.
 - A `then` or `else` present **without** an `if` → reject as a no-op
   keyword (it can never fire).
 - The diagnostic offers the coherent alternatives:

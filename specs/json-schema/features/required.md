@@ -50,7 +50,10 @@ Rationale (citing [[PRINCIPLES.md]]):
   "absent."
 
 Loader behavior:
-- `required` not an array → reject.
+- `required` not an array → reject. An explicit `null`, and the bare YAML key
+  `required:` that spells it, are **not** absence: reading them as absence turns
+  every member of the object optional and silently widens the wire contract, so
+  they take the same reject as any other non-array value.
 - Any element not a string → reject.
 - Duplicate elements → reject (spec says MUST be unique; a dup is a
   schema bug).
@@ -79,8 +82,11 @@ for the non-nullable case (mirrors [[nullability]]):
 | `"object"`  | Go `T` *(non-null)* · TS `x: T` · Py `T` · Java `T` *(non-null; `@NullMarked` default)* | Go `*T` · TS `x?: T` · Py `T \| None = None` · Java `@Nullable T` |
 | `"array"`   | Go `[]T` *(non-null)* · TS `x: T[]` · Py `list[T]` · Java `List<T>` *(non-null; `@NullMarked` default)* | Go `[]T` *(nil=absent)* · TS `x?: T[]` · Py `list[T] \| None = None` · Java `@Nullable List<T>` |
 
-Reference types (Go slices, TS/Java/Python reference values) can't carry
-"must be present" in the type system, so they lean on the validator. In
+Go value and slice types, and Java's advisory `@NullMarked` signal, can't carry
+"must be present" in the type system; TypeScript's `?` and Python's defaultless
+field do carry it. Every target still leans on the validator, since no static
+channel survives a cast, a mutation, an untyped caller or an unchecked runtime
+value. In
 Java the emitted package is `@NullMarked` (JSpecify), so a required
 reference type is non-null by default (no annotation) and an optional
 one is `@Nullable` — restoring at the type level the in-memory nullness
@@ -94,10 +100,10 @@ Per **P10**/**P11**. The "Required, non-nullable" row of
 
 | Language | Presence enforcement |
 |---|---|
-| Go | raw-object map lookup returning `*json.RawMessage`; `nil` → `Violation{Path:name, Reason:"required"}`, collected into one `PayloadValidationError` application failure. |
-| TypeScript | `raw.x === undefined \|\| raw.x === null` → push `Violation{path:name, reason:"required"}`, throw one `PayloadValidationError` application failure. |
+| Go | raw-object map lookup returning `*json.RawMessage`; `nil` → `Violation{Path:name, Reason:"required"}`, collected into one `PayloadValidationError` application failure. An explicit `null` on a non-nullable member is a distinct reason (`explicit null not allowed`). |
+| TypeScript | the member's **own**-key presence test over `raw` (an inherited `Object.prototype` member is not a wire value); absent or `null` → push `Violation{path:name, reason:"required"}`, throw one `PayloadValidationError` application failure. |
 | Python | in `from_transfer_type` (**PRINCIPLES Python §3**): an absent or `null` key for a required non-nullable member → `Violation(path=name, reason="required")`, appended and the field left unset, so its siblings are still checked; collected into the single `PayloadValidationError` application failure. |
-| Java | in the per-POJO collecting deserializer (PRINCIPLES Java §5): a missing or `null` tree node for a required member → `Violation{path:name, reason:"required"}`; the strict-vs-non-strict `null`-token logic (Java §4) runs as a helper here, not as a per-field binder. Collected into one `PayloadValidationError` application failure. |
+| Java | in the per-POJO collecting deserializer (PRINCIPLES Java §5): a missing tree node for a required member → `Violation{path:name, reason:"required"}`, and an explicit `null` on a non-nullable member the distinct `explicit null not allowed`, decided by a per-field branch over the node's `isNull()` (Java §4) rather than a per-field binder. Collected into one `PayloadValidationError` application failure. |
 
 Required + explicit `null`: for a required **non-nullable** member,
 rejected (may not be `null`) — same machinery as the
@@ -139,11 +145,12 @@ vs a missing raw-object/tree entry on the wire).
 ### Runtime fixtures (validator)
 
 - Required member present + valid → OK.
-- Required member absent → one `PayloadValidationError` application failure at `path:name` reading
-  `required property "<name>" is missing`.
+- Required member absent → one `PayloadValidationError` application failure at
+  `path:name`. The `path` names the member; the reason text is per-target
+  (**P11**) and is given in the validator-mapping table above.
 - Required **non-nullable** member present as `null` → rejected.
-- Required **nullable** member present as `null` → OK; absent → still
-  one `PayloadValidationError` application failure reading `required property "<name>" is missing`.
+- Required **nullable** member present as `null` → OK; absent → still one
+  `PayloadValidationError` application failure at `path:name`.
 - Multiple required members absent → all reported in one shot (P11).
 - Optional member absent → no error (contrast control).
 
@@ -161,8 +168,16 @@ vs a missing raw-object/tree entry on the wire).
 - **[[dependentRequired]]**: conditional requiredness layered on top —
   a member required only when another is present. Members named there
   stay optional at the type level (the requirement is runtime-only).
-- **[[minProperties]]**: a separate count assertion; `required` pins
-  *which* members, `minProperties` pins *how many*.
+- **[[default]]**: a `default` on a required member never applies — the member
+  is always on the wire — and is a load reject, owned by [[default]]. The reject
+  reads the member's own keyword node, and for a nullable member that node is
+  the [[nullability]] wrapper rather than the non-null branch, so `required` + a
+  wrapper `default` rejects exactly as `required` + a plain `default` does, and a
+  `default` moved onto a branch is a reject too rather than a way past this rule.
+- **[[minProperties]] / [[maxProperties]]**: separate count assertions;
+  `required` pins *which* members, the count keywords pin *how many*, and they
+  own the reconciliation between the two (a cap below the required count is a
+  load reject, specified there).
 
 ## Ecosystem variance
 
@@ -170,8 +185,8 @@ vs a missing raw-object/tree entry on the wire).
 |---|---|
 | JSON Schema 2020-12 | Native. |
 | OpenAPI 3.1 | Aligns with 2020-12. Native. |
-| OpenAPI 3.0 | `required` identical (array of names). Native. |
-| Swagger 2.0 / draft-4 | `required` identical (draft-4 onward is the array form). Native. |
+| OpenAPI 3.0 | `required` identical apart from the empty array, which 2020-12 permits and Wright-00 does not. Native. |
+| Swagger 2.0 / draft-4 | `required` identical (draft-4 onward is the array form), again apart from the empty array. Native. |
 
 draft-03's boolean `required` (on the property schema itself) is
 obsolete; no current toolchain emits it.

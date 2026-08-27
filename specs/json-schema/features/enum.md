@@ -27,7 +27,9 @@ Verbatim (2020-12 validation, §6.1.2):
 
 Distilled:
 - A **closed set** assertion: the instance must **equal one of** the array
-  elements (JSON equality — by type and value).
+  elements, under the same value-not-spelling JSON equality [[const]]
+  defines — so a member `1` is satisfied by the wire tokens `1`, `1.0` and
+  `1e0`, and it is that comparison that makes `enum: [1, 1.0]` a duplicate.
 - A single-element `enum` is functionally a [[const]]; see §6.1.3.
 - Elements may be any JSON type. In our subset only **scalar** enums
   (string / number / integer / boolean), **homogeneous** with the declared
@@ -86,7 +88,13 @@ Loader behavior:
   variance.)
 - Every member must be type-compatible with the declared [[type]]
   (**P7.1**); a **mixed-type** array (`enum: [1, "a", true]`) or a member
-  the type rejects → load reject. Each member is additionally run through
+  the type rejects → load reject. Numeric compatibility is **directional**
+  and owned by [[type]]: an integral member inhabits `integer` and `number`
+  alike, a fractional one inhabits `number` only, so
+  `{type:"integer", enum:[1, 1.5]}` rejects — including when the pairing
+  arrives through an [[allOf]] merge. An `integer` member outside the
+  `±(2^53−1)` cap likewise rejects, because it names a value the field can
+  never hold. Each member is additionally run through
   every *constraint* keyword present on the same node — [[pattern]],
   [[minLength]]/[[maxLength]], [[minimum]]/[[maximum]],
   [[exclusiveMinimum]]/[[exclusiveMaximum]], [[multipleOf]] — using that
@@ -101,6 +109,12 @@ Loader behavior:
   member means "nullable", which is owned by the [[nullability]] pattern
   (wrap a non-null enum), not encoded as an enum element. Diagnostic points
   at the nullability pattern. (Parallel to `const: null`.)
+- `enum` **on a [[oneOf]] node** — a sum type *or* a [[nullability]]
+  wrapper — → **reject**, with a fix-it naming the branch to move it to. A
+  union node carries no scalar `type`, so the compatibility gate above has
+  nothing to check the members against; a closed value set belongs on the
+  branch whose kind it closes. Same rule and same **P7.1** grounding as
+  [[const]]'s; see [[oneOf]] and [[nullability]].
 - **Composite members** (an element that is an **object or array**) →
   **temporarily unsupported**; reject at load with a "not yet supported"
   diagnostic — the deep structural-equality membership check is correct in
@@ -180,13 +194,15 @@ public final class Color {
 }
 ```
 
-For an object property that receives this value-class carrier, the private
-constructor makes the known constants the only obtainable instances, so a value
-outside the set **cannot be constructed** in-language. Array elements, map
-values, and — on the evidence available, though the union-variant leg is not
-reproduced — union variants retain their primitive Java type and rely on the
-runtime membership check. This is the shared carrier of [[const]] (one
-constant) and `enum` (several). Numeric and boolean value classes wrap
+Where a member receives this carrier, the private constructor makes the known
+constants the only obtainable instances, so a value outside the set **cannot be
+constructed** in-language. The carrier is emitted for an **object property**;
+an **array element** and a **typed-map value** keep the primitive Java type, so
+in those positions closedness rests on the runtime membership check alone, and
+narrowing the set surfaces there at runtime rather than as a compile break. A
+**union variant** is expected to behave as those two do; that leg is not
+established. This is the shared carrier of [[const]] (one constant) and `enum`
+(several). Numeric and boolean value classes wrap
 `long`/`double`/`boolean`, with `@JsonCreator` over the corresponding
 primitive. How the aggregating deserialize path validates (without the
 throw defeating aggregation) is in Validator mapping.
@@ -196,7 +212,10 @@ throw defeating aggregation) is in Validator mapping.
 and each literal are IEEE-754 binary64 from correctly-rounded
 decimal→double parsing, so the same decimal yields the identical bit
 pattern everywhere. `-0.0` equals `0.0`; `NaN`/`±Infinity` cannot appear;
-an integer-valued number member such as `1.0` is normalized to an integer.
+an integer-valued number member such as `1.0` **is the same value as** `1` —
+equality is over the mathematical number, not the authored spelling. That is a
+claim about the comparison rather than a rewriting step, and it leaves the
+carrier untouched: it stays the node's own `type` (see [[type]]).
 
 ### Naming and collisions (P15)
 
@@ -239,6 +258,17 @@ defers here: two members whose encodings fold to the same identifier
 be unstable across schema revisions, **P13**). Nesting shrinks the surface
 (a nested `Palette.Color` cannot clash with a top-level `Color`); **Go**
 stays flat and relies on the P15 backstop.
+
+**The pass runs over the value set that is emitted** — the resolved node,
+after an [[allOf]] merge, a `$ref` resolution or a [[nullability]]
+push-down — never over each authored `allOf` branch. Encodability and fold
+collisions are properties of the members a constant is actually emitted for,
+so `allOf: [{enum:["user","USER","guest"]}, {enum:["user","guest"]}]` loads:
+the merged set is `["user","guest"]`, which folds cleanly, and the `USER`
+member that would have collided is not in it. Rejecting the branch would
+refuse a schema whose emitted form has no collision at all. Shape checks that
+a merge could silently discard still run per branch — see [[allOf]], which
+owns the split. Same rule as [[const]]'s.
 
 ### Naming and encoding (value → identifier)
 
@@ -291,7 +321,7 @@ identical in both directions (a pure predicate over the decoded value — the
 
 | Language | Strategy |
 |---|---|
-| Go | A predicate in the shared `Validate`, called by `UnmarshalJSON` after decoding: `switch v { case ColorRed, ColorGreen, ColorBlue: default: … Violation{Path, Reason: fmt.Sprintf("must be one of [%s], got %q", set, v)} }`, collected into one `PayloadValidationError` application failure. The field is the defined type; the typed constants are both the compared set and the idiomatic setters. |
+| Go | A predicate in the shared `Validate`, applied identically on both directions' paths (**P12.2**: sharing is a requirement on the predicate, not on the call graph): `switch v { case ColorRed, ColorGreen, ColorBlue: default: … Violation{Path, Reason: fmt.Sprintf("must be one of [%s], got %q", set, v)} }`, collected into one `PayloadValidationError` application failure. The field is the defined type; the typed constants are both the compared set and the idiomatic setters. |
 | TypeScript | the emitted validator tests membership against the literal set with an inline inequality chain, throwing one `PayloadValidationError` application failure. The field's union type closes it in-language. |
 | Python | the transfer type converter (PRINCIPLES Python §3) tests membership against an inline tuple and appends a `Violation` into the single generated `PayloadValidationError` application failure. The field is the closed `Literal` (`float` enums are plain `float`, validated the same way). |
 | Java | the aggregating path is the per-POJO collecting deserializer (PRINCIPLES Java §5): a **non-throwing membership lookup** — known value → the constant, otherwise record a `Violation{path, "must be one of [...], got …"}` — so multiple bad fields collect into the single `PayloadValidationError` application failure. The value class's `@JsonCreator fromString` *throws* only on the **standalone/interop** path, where fail-fast is expected. Serialize needs no separate check: the value class can only hold a known constant. |
@@ -301,6 +331,14 @@ The reason string names the **expected set and the offending value**
 keyword. Go renders the set with no space after the comma; TypeScript and
 Python render `["red", "green", "blue"]` — a divergence in the set's
 rendering only, never in the accepted value set.
+
+**Co-authored assertions on the same node** follow [[const]]'s rule
+unchanged: a co-authored string or numeric assertion is **still emitted**
+even though the load gate has already validated every member against it —
+closedness changes the *carrier*, so where a target gives the value set its
+own named type the predicate is evaluated over that value's underlying
+primitive; and on a materialized [[format]]/[[contentEncoding]] node both
+checks read one canonical-wire projection per member.
 
 ### Serialize-side (P12)
 
@@ -324,11 +362,12 @@ membership check has teeth wherever an out-of-set value can be set in
 memory before emit: an optional+enum mutated to a wrong value, a Go
 zero-value/mutated field (`Color("")` is not a member), or any Python
 in-memory assignment (a dataclass validates nothing on construction,
-PRINCIPLES Python §1). In TS and Java the value cannot be out of set in
-memory when a union or property value-class carrier is emitted, so the check is
-effectively a deserialize-direction guard there. Java collection and map
-positions retain primitive carriers and therefore run the check in both
-directions.
+PRINCIPLES Python §1). Where a closing carrier *is* emitted — the TypeScript
+literal union, and the Java value class on an object property — the value
+cannot be out of set in memory, so the check is effectively a
+deserialize-direction guard. Java array-element and typed-map positions keep the
+primitive carrier (Type mapping), so there the check has teeth in both
+directions and is emitted on both.
 
 ## Property-testing matrix
 
@@ -341,7 +380,8 @@ directions.
 | Integer set | `{type:"integer", enum:[1,2,3]}` |
 | Boolean set (degenerate but legal) | `{type:"boolean", enum:[true,false]}` |
 | Float set (exact `==`) | `{type:"number", enum:[1.5,2.5]}` |
-| Integer-valued number members → integer | `{type:"number", enum:[1.0,2.0]}` (normalized to integers) |
+| Integer-valued number members | `{type:"number", enum:[1.0,2.0]}` → values `1`/`2`, names `Ratio1`/`Ratio2`, carrier still `number` |
+| Merge that removes a folding member | `{allOf:[{type:"string", enum:["user","USER","guest"]},{type:"string", enum:["user","guest"]}]}` → `["user","guest"]`; the fold check runs on the merged set |
 | Single-element → const | `{type:"string", enum:["v1"]}` (normalized to [[const]]) |
 | enum + default (member) | `{type:"string", enum:["a","b"], default:"a"}` (default is in the set) |
 | Case-folding members rescued by override | `{type:"string", enum:["user","USER"], x-go-enum-names:{"USER":"UserUpper"}, x-java-enum-names:{"USER":"USER_UPPER"}}` |
@@ -351,9 +391,13 @@ directions.
 | Reason | Example |
 |---|---|
 | Empty array (unsatisfiable) | `{type:"string", enum:[]}` |
-| Duplicate members | `{type:"string", enum:["a","a"]}` |
+| Duplicate members | `{type:"string", enum:["a","a"]}`, `{type:"number", enum:[1, 1.0]}` (one value, two spellings) |
 | Mixed member types (P7.1) | `{type:"string", enum:["a",1,true]}` |
 | Member type-incompatible with `type` (P7.1) | `{type:"integer", enum:[1,"x"]}` |
+| Fractional member on `integer` (directional, [[type]]) | `{type:"integer", enum:[1,1.5]}` |
+| `integer` member outside the `±(2^53−1)` cap | `{type:"integer", enum:[1,9007199254740992]}` |
+| `enum` on a [[oneOf]] node | `{oneOf:[{type:"string"},{type:"integer"}], enum:["x"]}`, `{oneOf:[{type:"string"},{type:"null"}], enum:["x"]}` — author it on the branch |
+| Disjoint closed sets over one position | `{type:"array", items:{type:"string", enum:["a","b"]}, contains:{type:"string", const:"z"}}` |
 | A member fails a sibling constraint | `{type:"string", minLength:3, enum:["ok","no"]}`, `{type:"integer", minimum:0, enum:[1,-2]}` |
 | With `const` (redundant) | `{type:"string", const:"a", enum:["a"]}` |
 | `null` member (use nullability) | `{type:"string", enum:["a",null]}` |
@@ -404,8 +448,11 @@ directions.
   exclusive). A `default` supplies which member applies on absence and
   **MUST itself be a member of the set** (load reject otherwise); `default`
   is off the wire (omit-unset) and materialized on read.
-- **[[nullability]]**: a `null` member is rejected; a nullable enum is the
-  [[nullability]] pattern wrapping a non-null enum. Otherwise orthogonal.
+- **[[nullability]]**: a `null` member is rejected. A nullable enum is the
+  nullability `oneOf` with the `enum` authored **on the non-null branch**;
+  the wrapper node must not carry it (Loader behavior). The two axes stay
+  orthogonal there: the branch's value set is closed and the field still
+  admits an explicit `null`, which the membership check never sees.
 - **[[pattern]] / [[minLength]] / [[maxLength]] / [[minimum]] /
   [[maximum]] / [[exclusiveMinimum]] / [[exclusiveMaximum]] /
   [[multipleOf]]**: every member is validated against each sibling
@@ -417,7 +464,19 @@ directions.
 - **[[oneOf]] / discriminated unions**: a per-branch discriminator is a
   single-value [[const]] (an equivalent single-value `enum` also qualifies);
   a multi-value `enum`-typed member narrows a value to a closed set but does
-  not by itself select a branch.
+  not by itself select a branch. Where a single-value `enum` is the
+  discriminator, the pairwise distinctness [[oneOf]] requires is decided by
+  **value equality** — `[1]` and `[1.0]` are one value, so those branches are
+  not distinct (see [[const]]). `enum` on the union node itself is a reject.
+- **[[items]] / [[contains]]**: two closed value sets over the same value
+  position must **intersect**. A closed-value element type and a
+  closed-value [[contains]] matcher whose sets are disjoint — `items` closed
+  to `["a","b"]` with a matcher requiring `"z"` — describe an array no value
+  can satisfy, so the schema is unsatisfiable and rejects at load. Left to
+  runtime it is a comparison between provably non-overlapping literal types,
+  which the closed carriers make a type error rather than a failing check.
+  Only **emptiness** rejects: a matcher that merely narrows the element's set
+  is satisfiable and accepted — [[contains]] owns that case.
 - **[[ref]]**: a `$defs`-named enum's synthesized type (Go defined type /
   Java value class) reuses the `$defs` name and enters the same
   per-package namespace (P15); recursion/anonymity follow the shared

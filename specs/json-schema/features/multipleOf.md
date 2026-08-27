@@ -75,6 +75,15 @@ Loader behavior:
   `floor(hi/m)*m ≥ lo` over the effective integer interval `[lo,hi]` (e.g.
   `{type:"integer", minimum:3, maximum:3, multipleOf:2}` → the only value
   `3` is not a multiple of `2` → reject).
+  **The check binds over the whole binary64 domain, not only over small
+  magnitudes.** It is decided with the same `fmod`-based primitive as the
+  runtime predicate, never by taking the fractional part of a
+  `bound / divisor` quotient: above `2^52` a double quotient has no
+  fractional part at all, so a rounding-to-integer step over it degenerates
+  into a no-op and every large bound reports "satisfiable". That is a third
+  divisibility semantics, disagreeing with all four runtimes.
+  `{type:"number", minimum:1e23, maximum:1e23, multipleOf:5}` is a reject —
+  `1e23` is not a multiple of `5` — exactly as its small-magnitude twin is.
 
 **Deferred, not excluded.** A future lowering could support fixed-precision
 fractional divisors via decimal scaling (multiply instance and divisor by
@@ -98,7 +107,7 @@ integer divisor `m`, identical in both directions (shared `Validate`,
 
 | Language | Strategy |
 |---|---|
-| Go | A predicate in the shared `Validate`, and an equivalent inline check on the decode path — `UnmarshalJSON` does **not** call `Validate`, in this or any other generated Go model. Integer field: `if v % m != 0 { push(Violation{Reason: fmt.Sprintf("must be a multiple of %v, got %v", m, v)}) }` (`int64`). Number field: same message when `math.Mod(v, m) != 0` (`float64`). Violations collect into one `PayloadValidationError` application failure. |
+| Go | A predicate in the shared `Validate`, applied identically on both directions' paths (**P12.2**: sharing is a requirement on the predicate, not on the call graph). Integer field: `if v % m != 0 { push(Violation{Reason: fmt.Sprintf("must be a multiple of %v, got %v", m, v)}) }` (`int64`). Number field: same message when `math.Mod(v, m) != 0` (`float64`). Violations collect into one `PayloadValidationError` application failure. |
 | TypeScript | ``if (v % m !== 0) push(Violation{path, reason: `must be a multiple of ${m}, got ${v}`})`` — `%` is IEEE `fmod`, and integer fields are safe integers so it is exact for both kinds. `m` is an emitted numeric constant. Throw one `PayloadValidationError` application failure. |
 | Python | An inline check in the transfer type converter (PRINCIPLES Python §3), emitted the same way TypeScript emits it rather than behind a runtime helper, appending `Violation(path, reason=f"must be a multiple of {m}, got {v}")`. **Integer field:** exact Python-`int` modulo, over the value `_parse_spec_integer` has already normalized. **Number field:** `math.fmod(v, m) != 0` — deliberately the same primitive as the other three rather than any *tolerant* native divisibility check, so the predicate is **bit-identical `fmod`** across targets (a tolerant check would only be safe because we reject the fractional divisors where the tolerance would bite; standardizing on `fmod` keeps the predicate provably identical instead). Aggregates into the single generated `PayloadValidationError` application failure. |
 | Java | The per-POJO collecting deserializer (PRINCIPLES Java §5) reads the field via the [[type]] `SpecNumbers` helper, then checks `v % m != 0` — `long % long` (integer field) or `double % double` (number field, IEEE `fmod`, matching the others) — pushing a `Violation{path, "must be a multiple of " + m + ", got " + v}` into the single `PayloadValidationError` application failure. Not `BigDecimal.remainder` (would risk decimal-vs-`fmod` divergence on the number path). |
@@ -139,6 +148,7 @@ than being written. No parse-adapter-only or encode-adapter-only logic.
 | Value not a number | `multipleOf:"2"`, `multipleOf:true` |
 | Type mismatch (P7.1) | `{type:"string", multipleOf:2}` |
 | Unsatisfiable with range | `{type:"integer", minimum:3, maximum:3, multipleOf:2}` |
+| Unsatisfiable with range, large magnitude | `{type:"number", minimum:1e23, maximum:1e23, multipleOf:5}` |
 
 ### Runtime fixtures (validator)
 

@@ -31,9 +31,13 @@ types. Citing [[PRINCIPLES.md]]: **P10** (enforced at the boundary),
 Loader behavior:
 - Value not a non-negative integer (per spec; honors the `1.0`-as-integer
   rule and the integer cap, see [[type]]) → reject.
-- The portable count ceiling from [[maxItems]] applies.
+- The portable count ceiling from [[maxItems]] applies, and so does the
+  `long`-literal obligation the ceiling does not discharge: a bound in
+  `[2^31, 2^53−1]` does not compile in Java unless the emitter suffixes the
+  literal.
 - The keyword requires `type: "object"`; a missing or different type rejects
-  at load time under **P7.1**.
+  at load time under **P7.1**. One diagnostic covers the four object-constraint
+  keywords.
 - `maxProperties: 0` → accepted (object must be empty). Note this is a
   near-equivalent of a closed empty object; prefer
   `additionalProperties:false` with no [[properties]] when *emptiness*
@@ -42,35 +46,34 @@ Loader behavior:
   (unsatisfiable). Diagnostic names both.
 - `maxProperties` less than the count of [[required]] members → reject
   (unsatisfiable: required forces more members than the cap allows).
-- **The count keywords own reconciliation against every keyword that bounds
-  the key space, not only [[required]].** If the schema forces more keys than
-  the cap allows, or caps the key space below the floor, it is uninhabitable and
-  rejects at load. The bounding keywords are: [[required]] (unconditional
-  presence); [[dependentRequired]] (conditional presence — take the largest
-  closure a single trigger forces); [[propertyNames]] whose key language is
-  finite (an `enum`, or a `maxLength: 0`); and `additionalProperties: false`
-  with a declared member set. This duty sits here, with the numeric bound,
-  because the count is what makes the combination decidable; the owning
-  keyword's own spec need not restate it.
+- **The cap is reconciled against every keyword that forces keys, not only
+  [[required]].** If the smallest key count the schema forces exceeds the cap,
+  the object is uninhabitable and rejects at load. Besides `required`'s
+  unconditional presence that is [[dependentRequired]]: take the largest closure
+  a single trigger forces, since the trigger plus its dependents must all be
+  present together. The count keywords own this duty because the count is what
+  makes the combination decidable, so the forcing keyword's own spec need not
+  restate it. The mirror duty — a floor against a capped key space — is in
+  [[minProperties]]. *(Status: unimplemented for the [[dependentRequired]]
+  closure — `dependentRequired: {a: [b, c]}` with `maxProperties: 2` currently
+  loads, though the `required: ["a","b","c"]` spelling of the same three keys is
+  refused.)*
 
-**Which object is counted, in both directions.** The count is always over the
-**wire object at the boundary being validated** — on parse the raw decoded
-object, on serialize the object the encoder is about to emit. It is never the
-count of non-`null` in-memory fields. This keeps the keyword a wire contract
-under **P1** and satisfies **P12**'s "identical in both directions": the same
-predicate over the same *kind* of operand at each boundary.
+**Which object is counted, in both directions.** The count is over the **wire
+object at the boundary being validated**: inbound, the raw decoded object before
+default population; outbound, the object the encoder will actually write. A
+member the encoder omits is not a wire key and does not count — that covers an
+unset default, and in TypeScript any value the encoder drops (`undefined`, a
+function, a `toJSON` returning `undefined`) or replaces (a `toJSON` returning
+another object, whose members *do* reach the wire and *do* count). **P12.2**
+names the failure mode directly: a predicate that counts wire keys on one side
+and in-memory fields on the other is not conformant, however the two sides share
+code.
 
-One consequence must be stated rather than discovered. Under P1's
-optional+nullable collapse an explicit `null` for an optional nullable member
-reads back as absent, so `{"a": null}` is a **one-key** object inbound and a
-**zero-key** object outbound. A schema with a count floor therefore accepts that
-payload on parse and rejects the model it just produced on re-serialize. That is
-a real consequence of the collapse, not an implementation defect, and it is the
-reason a count bound and an optional nullable member are a poor combination:
-authors who need the floor should make the member required, or non-nullable, or
-drop the bound. An implementation must not "fix" the asymmetry by counting
-in-memory fields on one side — that would make the keyword mean two different
-things and break the wire contract.
+The two counts can disagree where the [[nullability]] collapse omits a key the
+wire carried. That direction only ever *removes* keys, so it cannot push a
+parsed object over a **cap** — it is the floor that diverges, and the open
+status is recorded in [[minProperties]].
 
 ## Type mapping
 
@@ -89,8 +92,8 @@ declared-vs-extras split is a language-side artifact, not a wire fact).
 
 | Language | Strategy |
 |---|---|
-| Go | `UnmarshalJSON` applies the predicate to the raw wire-key count; `Validate` applies the same comparison and reason to the model-derived set of keys that serialize will emit. |
-| TypeScript | `fromTransferType` applies the predicate to `Object.keys(raw).length`; `toTransferType` applies it to the keys the outbound conversion will emit. The comparison is inlined in each converter. |
+| Go | `UnmarshalJSON` applies the predicate to the raw wire-key count; `Validate` applies the same comparison and reason to the key set `MarshalJSON` will write. |
+| TypeScript | `fromTransferType` applies the predicate to the wire object's own enumerable keys; `toTransferType` applies it to the keys the outbound conversion will actually emit. The comparison is inlined in each converter. |
 | Python | `from_transfer_type` counts `len(raw)` on the raw wire dict — one number over the wire object, taken before any default is materialized — and appends `Violation(path="", reason=f"must have at most {max} properties, got {n}")` when `n > max`, into the single generated `PayloadValidationError` application failure. |
 | Java | the per-POJO collecting deserializer (PRINCIPLES Java §5) counts distinct keys in the parsed tree (`> max`) — one number over the wire object, **not** populated POJO fields + catch-all map summed post-bind; a violation joins the single `PayloadValidationError` application failure. |
 
@@ -127,6 +130,7 @@ the wire object.
 | Missing/mismatched object type | `{maxProperties:3}`, `{type:"array", maxProperties:3}` |
 | `< minProperties` | `minProperties:5, maxProperties:2` |
 | `<` required count | `required:["a","b","c"], maxProperties:2` |
+| `<` the keys a dependency forces | `dependentRequired:{a:["b","c"]}, maxProperties:2` |
 
 ### Runtime fixtures (validator)
 
@@ -146,6 +150,9 @@ the wire object.
 - **[[additionalProperties]] `false`**: bounds the max member count to
   the declared set; a `maxProperties` larger than that count is
   redundant (allowed, not an error).
+- **[[dependentRequired]]**: a trigger forces its whole dependent set to be
+  present at once, so the cap is reconciled against the largest such closure —
+  per the loader-behavior rule above.
 - **`default`**: `default` is an annotation, not an assertion, and
   defaults are dropped on serialize (see [[default]]) — a default-filled key is
   never on the wire, so it does **not** count toward the cap. The count

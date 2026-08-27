@@ -7,8 +7,9 @@ Supplies a fallback value for an absent member. In the spec it is a pure
 **annotation** — it never affects validation pass/fail. We give it the
 **off-the-wire, materialized-on-read** operational semantics: set-ness tracked,
 omit-unset on serialize (no deep-equals), materialized **on read** via a
-generated `<Field>OrDefault()` accessor in Go, native getters in Java and
-Python, and a generated `DEFAULT_<FIELD>` constant in TypeScript.
+generated `<Field>OrDefault()` accessor in Go, a generated
+`get<Field>OrDefault()` accessor in Java, a generated property in Python,
+and a generated `DEFAULT_<FIELD>` constant in TypeScript.
 
 ## Spec summary
 
@@ -80,7 +81,9 @@ Loader behavior:
 - `default` on a **required** member → **reject**. A required member is
   always present, so the default is dead metadata; its presence signals
   author confusion (P7.1). Diagnostic: make the member optional, or drop
-  the `default`.
+  the `default`. For a nullable member the [[nullability]] wrapper **is**
+  the member's keyword node, so this reject — and every other rule here
+  that inspects the member's own keywords — applies to it unchanged.
 - `default` value **not valid against the member's own schema** →
   **reject**. The spec only *RECOMMENDS* validity; we enforce it (P7.1):
   a default that can never satisfy the field (`{type:"integer",
@@ -90,6 +93,11 @@ Loader behavior:
   numeric bounds, `multipleOf`, `format`, `contentEncoding`, and `enum`
   validate `default` literals in their own loader validators. This is the
   same cross-cutting obligation as [[const]] and [[enum]].
+  Kind compatibility is **directional**: an integral literal satisfies a
+  `number` member, and a **fractional** literal never satisfies an
+  `integer` one — P1 names `1.5` on an `integer` as a value every target
+  must refuse, so `{type:"integer", default:1.5}` is a load reject and not
+  a value the emitters are free to round.
 - `default` **and** [[const]] both present → reject (see [[const]]):
   `const` already fixes the value; opposite serialize behavior
   (always-emit vs omit-unset).
@@ -97,6 +105,29 @@ Loader behavior:
   Diagnostic reads "object/array defaults are not yet supported," not
   "forbidden" — the limit is provisional (see Support decision). The member's
   *type* may still be an object/array; it just cannot carry a `default`.
+- `default` on a **sum type** — a [[oneOf]] with two or more non-`null`
+  branches → **reject**: it names no branch, so nothing defines which
+  branch supplies it, and no target can lower it. Diagnostic: move the
+  `default` onto the branch that should supply it, or drop it. The reject
+  is a property of the **resolved** union, so it fires identically whether
+  the union is written inline or reached through a `$ref` ([[ref]]).
+- On a **nullable** member the `default` is authored on the
+  [[nullability]] **wrapper** and never on a branch; a branch `default` is
+  a **reject** ([[nullability]] owns the placement rule, with constraints
+  on the non-null branch and each node rejecting the other's keyword). The
+  wrapper's `default` is validated against the resolved non-null branch —
+  its `type`, `enum`, `format` and `contentEncoding` — by pushing the
+  literal down onto that branch and re-running the branch's own checks.
+- `default` in a **non-member** position — an [[items]] element schema, an
+  [[additionalProperties]] value schema, a [[contains]] matcher, a
+  [[propertyNames]] key schema → **reject**. The whole feature is
+  member-scoped: nothing outside a [[properties]] member has a set-ness
+  channel, an accessor or a constant to materialize into. A `default`
+  there is dead metadata signalling author confusion — the same P7.1
+  judgement as `default` on a required member, and not the inert-annotation
+  exception, since an author who writes a `default` is asking for a value
+  to be materialized. Diagnostic names the position and says the value is
+  never materialized.
 - `default: null` → **reject** as degenerate: on a non-nullable member it
   is invalid against the schema (caught by the validity check above); on a
   nullable member it is a no-op, since absence already surfaces as
@@ -117,14 +148,22 @@ member is **optional**, so it takes the optional form (`*T` / `x?: T` /
 `T | None` / boxed-or-`@Nullable`). The default value never appears
 in the field itself in any target. What `default` *does* add is the
 **read-side surfacing mechanism** and the generated default value itself,
-which differ per language:
+which differ per language.
+
+The surfacing mechanism's own type is the member's **emitted element
+type** — the one [[type]] + [[nullability]] already fixed, which for a
+nullable member is the `type` declared on the **non-null branch** — and is
+**never** inferred from the spelling of the default literal. So an
+integral literal on a `number` member surfaces as that member's
+floating-point type, not an integer one; the literal decides only its own
+rendering, never the accessor's, constant's or property's signature.
 
 | Language | Set-ness signal (omit-unset) | Read-side surfacing of the default |
 |---|---|---|
 | Python | private `_<field>: T | None` | **native property** — `@property def field(self) -> T` returns the private value when set and the scalar default otherwise. Its setter accepts `T`; `del model.field` invokes a property deleter that restores unset. Models with defaults receive a generated keyword-only constructor so `Model(field=...)` remains the public construction API. |
 | Java | `null` field, omitted by the generated serializer | **generated accessor** — the plain getter preserves the nullable set-ness signal; a separate `get<Field>OrDefault()` returns the field when set and the scalar default otherwise. |
 | TypeScript | `undefined` (the `?` field) | **advisory** — interfaces have no methods (PRINCIPLES TS §2), so the generator emits `export const DEFAULT_X = "anon"`. Consumers use `value.x === undefined ? DEFAULT_X : value.x` when `null` must remain distinct; `??` is sufficient only for non-nullable fields. |
-| Go | `*T` `nil` + `,omitempty` | **generated accessor** — a `func (m M) <Field>OrDefault() T` returns `*m.Field` when set and the default literal when `nil` (`func (u User) NicknameOrDefault() string { if u.Nickname != nil { return *u.Nickname }; return "anon" }`). The bare field stays `*T` (set-ness intact); the accessor is the materialize-on-read path. Emitted **only** for default-bearing fields. Modeled on proto3's `GetX()` — the same omit-default-on-wire + accessor-materializes-default pattern already familiar to Temporal users. Named `<Field>OrDefault` rather than `Get<Field>` to read as "the value, or its default" and to avoid implying a getter on every field. Alternative approaches considered: (a) advisory constant (`DEFAULT_X` + caller nil-checks) — pushes nil-checks to every call site; (b) populate on deserialize — destroys set-ness, forces deep-equals, breaks P9. |
+| Go | `*T` `nil` (the field also carries `,omitempty`) | **generated accessor** — a `func (m M) <Field>OrDefault() T` returns `*m.Field` when set and the default literal when `nil` (`func (u User) NicknameOrDefault() string { if u.Nickname != nil { return *u.Nickname }; return "anon" }`). The bare field stays `*T` (set-ness intact); the accessor is the materialize-on-read path. Emitted **only** for default-bearing fields. Modeled on proto3's `GetX()` — the same omit-default-on-wire + accessor-materializes-default pattern already familiar to Temporal users. Named `<Field>OrDefault` rather than `Get<Field>` to read as "the value, or its default" and to avoid implying a getter on every field. Alternative approaches considered: (a) advisory constant (`DEFAULT_X` + caller nil-checks) — pushes nil-checks to every call site; (b) populate on deserialize — destroys set-ness, forces deep-equals, breaks P9. |
 
 ### Naming and collisions (P15)
 
@@ -134,14 +173,15 @@ The read-side surfacing synthesizes **one new identifier in four targets**
 | Target | Synthesized identifier | Scope | Collision risk |
 |---|---|---|---|
 | Go | `<Field>OrDefault()` method | struct method-set | a **declared** member whose name maps to `<Field>OrDefault` (Go forbids a field and method of the same name — a **hard compile error**); another `<Field>OrDefault` from a sibling field |
-| TypeScript | `DEFAULT_<FIELD>` const | module | another `DEFAULT_<FIELD>` from a field that case-maps the same. [[const]] synthesizes no named *type* in TS (the type closes to an inline literal) but does emit a module-scope `<FIELD>_CONST` binding holding the wire value, which shares this scope — unexported, yet still a redeclaration error if it coincides |
+| TypeScript | `DEFAULT_<FIELD>` const | the **whole run** (P15 — the root barrel re-exports every module's top-level names into one namespace) | another `DEFAULT_<FIELD>` from a field that case-maps the same, **in any input file**, not only in the same one. [[const]] synthesizes no named *type* in TS (the type closes to an inline literal) but does emit a module-scope `<FIELD>_CONST` binding holding the wire value, which shares this scope — unexported, yet still a redeclaration error if it coincides |
 | Python | `_<field>` backing slot | class/member | a declared member overridden to that private identifier; another backing slot after member mapping |
 | Java | `get<Field>OrDefault()` method | POJO method namespace | the plain getter of a sibling member named `<field>OrDefault`; another default accessor after member mapping |
 
 The TypeScript constant is named `DEFAULT_<FIELD>`, or
 **`DEFAULT_<MODEL>_<FIELD>`** when that member identifier is not unique across
-the module's models. Python emits no `DEFAULT_*` binding: its private backing
-slot is exactly the emitted member identifier prefixed with `_`.
+the models in scope — which, per **P15**, is every model in the run, not just
+those in the same emitted file. Python emits no `DEFAULT_*` binding: its private
+backing slot is exactly the emitted member identifier prefixed with `_`.
 
 Per **P15** these participate in the single per-scope collision pass and
 **reject at load** on any coincidence — never auto-mangled (a
@@ -224,11 +264,15 @@ Three consequences that the count specs already encode:
 | Reason | Example |
 |---|---|
 | `default` on a required member | `required:["x"]` with `x:{type:"string", default:"a"}` |
-| Default `type`-mismatch (enforced now, P7.1) | `{type:"string", default:42}` |
+| Default `type`-mismatch (P7.1) | `{type:"string", default:42}` |
+| Fractional literal on an `integer` member | `{type:"integer", default:1.5}` (directional: `{type:"number", default:1}` is fine) |
 | Default fails a *constraint* | `{type:"integer", minimum:5, default:0}` |
 | **Object default (deferred)** | `{type:"object", properties:{…}, default:{a:1}}` |
 | **Array default (deferred)** | `{type:"array", items:{type:"string"}, default:["a"]}` |
 | `default: null` (degenerate) | `{oneOf:[{type:"string"},{type:"null"}], default:null}` |
+| `default` on a sum type (names no branch) | `{oneOf:[{type:"string"},{type:"integer"}], default:"x"}`, and the same union reached as `{$ref:"#/$defs/U", default:"x"}` |
+| `default` on a nullability **branch** | `{oneOf:[{type:"string", default:"x"},{type:"null"}]}` — put it on the wrapper |
+| `default` outside a `properties` member | `{type:"array", items:{type:"string", default:"x"}}`; likewise under `additionalProperties`, `contains`, `propertyNames` |
 | With `const` | `{type:"string", const:"v1", default:"v1"}` |
 | Synthesized-name collision (P15) | a field `nickname` with a `default` **and** a sibling member mapping to `NicknameOrDefault` (Go field/method clash); two `DEFAULT_<FIELD>` consts that case-map the same after qualification (TS); a Python sibling explicitly renamed to `_nickname` (private-backing clash) |
 
@@ -251,8 +295,14 @@ Three consequences that the count specs already encode:
 - **[[const]]**: mutually exclusive (load reject). Opposite serialize
   behavior: `const` always-emits an auto-populated value; `default`
   omit-unsets. See [[const]].
-- **[[nullability]]**: composable. For an optional+nullable member with a
-  default, **absence** materializes the default on read while an
+- **[[oneOf]]**: a `default` is admitted on the [[nullability]] wrapper
+  only. On a **sum type** (two or more non-`null` branches) it is a load
+  reject, through the inline spelling and through a `$ref` to a named union
+  alike, because the resolved shape is what decides.
+- **[[nullability]]**: composable, with the `default` on the **wrapper**
+  (a branch `default` rejects — see Loader behavior). For an
+  optional+nullable member with a default, **absence** materializes the
+  default on read while an
   **explicit `null`** pins `null` (faithful in TS via an explicit
   `=== undefined` read; `??` would collapse null;
   Go, Java and Python collapse absent-vs-`null` — see [[nullability]]
@@ -291,10 +341,12 @@ enforce that MUST; see Loader behavior.
   exclusive with `default`.
 - [[required]] — mutually exclusive with `default` (a required member is
   never absent).
-- [[nullability]] — composes; the default applies to absence, never
-  overrides explicit `null`.
+- [[nullability]] — composes; the default sits on the wrapper, applies to
+  absence, and never overrides explicit `null`.
+- [[oneOf]] — a `default` on a sum type names no branch and rejects.
 - [[minProperties]] / [[maxProperties]] — default-filled keys never count.
 - [[type]] — the default value must be valid for the declared type.
 - [[properties]] — hosts the member subschema and the set-ness machinery,
   and owns the case-mapping + collision/escape-hatch policy that governs
-  the synthesized `<Field>OrDefault` / `DEFAULT_<FIELD>` / `_<field>` names (P15).
+  the synthesized `<Field>OrDefault` / `get<Field>OrDefault` /
+  `DEFAULT_<FIELD>` / `_<field>` names (P15).

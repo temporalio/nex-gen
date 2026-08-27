@@ -4,8 +4,11 @@ Source: JSON Schema 2020-12, Validation vocabulary, §9.1
 "A Vocabulary for Basic Meta-Data Annotations → title and description".
 
 A short human-readable label for the schema it sits on. In the spec it is
-a **pure annotation** — it never affects validation, and it never affects
-the emitted *type*. We give it exactly one operational role: it becomes
+a **pure annotation** — it never affects validation, and its text never
+supplies a *name*. It is not, however, inert on the emitted shape
+everywhere: beside a `$ref` it is a merge conjunct, and the merge
+materializes a type (see Type mapping). We give it exactly one
+operational role: it becomes
 the **summary line of the generated doc comment** on the type or member it
 decorates (a Go `//` comment, a TS/Java block comment, a Python
 docstring). Crucially, and unlike much of the ecosystem,
@@ -76,7 +79,9 @@ The defining choices (citing [[PRINCIPLES.md]]):
 
 Loader behavior:
 - `title` value **not a string** → **reject** (P7.1; and the spec's own
-  MUST). `{title: 42}`, `{title: ["a"]}`.
+  MUST). `{title: 42}`, `{title: ["a"]}`, and `{title: null}` — an
+  explicit `null` is a non-string *value*, not an absent keyword, so it
+  rejects rather than being dropped.
 - `title` an **empty or whitespace-only** string → **reject** as
   degenerate: it renders an empty summary line, which is dead metadata and
   signals author confusion (P7.1). Drop it, or give it text.
@@ -98,9 +103,11 @@ Loader behavior:
 
 ## Type mapping
 
-**None.** `title` does not change the emitted type, and — the load-bearing
-negative — it does **not** contribute the type's or field's *name*
-(rationale in Support decision). The type comes from [[type]] +
+**None of its own**, and — the load-bearing negative — `title` does **not**
+contribute the type's or field's *name* (rationale in Support decision).
+Beside a `$ref` the merge does materialize a type, but the shape and the
+name are the merge's, never the title's (see the P15 note below). The type
+comes from [[type]] +
 [[nullability]]; the name comes from the `$defs` key / [[properties]]
 resolved policy / [[ref]]. `title`'s sole materialization is the
 **summary line of the doc comment**, which carries no type information:
@@ -141,10 +148,15 @@ RoomID string
   "comment should be of the form `<Name> …`" and staying greppable by
   identifier) while still surfacing the author's `title`.
 - **Redundancy guard:** if the `title` already begins with `<Name>`
-  (case-insensitively) — e.g. field `Email` with `title:"Email address"` —
-  the identifier is **not** doubled; the `title` is emitted as-is
-  (`// Email address`), since it is already name-led. This avoids the
-  `// Email Email address` stutter.
+  (case-insensitively) **as a whole word** — e.g. field `Email` with
+  `title:"Email address"` — the identifier is **not** doubled; the `title`
+  is emitted as-is (`// Email address`), since it is already name-led. This
+  avoids the `// Email Email address` stutter. The word boundary is
+  load-bearing: a bare character-prefix test would suppress the identifier
+  for field `id` with `title:"Identifier of the room"`, or for a type `U`
+  with any title starting in `U`, leaving a comment `golint`/`revive` flag
+  as not of the form `<Name> …` — which is the outcome this guard and
+  PRINCIPLES Go §1 both exist to prevent.
 - Because a `title` is a short **label** (a noun phrase), not necessarily
   a grammatical predicate, the name-led join reads as a caption rather
   than a full sentence — acceptable and still idiomatic (the convention
@@ -159,10 +171,17 @@ whole** (it governs whichever text — `title` or, absent a title,
 
 When both `title` and [[description]] are present, the doc comment is the
 summary line (`title`) then the body ([[description]]); when only `title`
-is present, the doc comment is just the summary line. On an ordinary
-declaration `title` synthesizes no identifier. Beside a `$ref`, the implicit
-merge may create a standalone use-site type whose position-derived name
-participates in P15; the title text itself never supplies that name.
+is present, the doc comment is just the summary line.
+
+On an ordinary declaration `title` synthesizes no identifier. **Beside a
+`$ref` it does**: `title` is not in the inert sibling class, so the
+sibling triggers the implicit merge, which materializes a standalone
+use-site type and its package-level identifiers ([[ref]], [[allOf]]).
+Those names come from the **position** — the enclosing type plus the
+member — never from the title text. So `title` **does** carry a P15
+collision surface at that one position, and adding a `title` purely as
+documentation can change the emitted namespace and turn a loading schema
+into a load reject. [[ref]] owns what that reject must say.
 
 ## Validator mapping
 
@@ -190,7 +209,7 @@ comment. There is nothing to check at runtime and nothing to test at the
 
 | Reason | Example |
 |---|---|
-| Non-string value | `{title:42}`, `{title:["a"]}` |
+| Non-string value | `{title:42}`, `{title:["a"]}`, `{title:null}` — `null` is a value, not an absence |
 | Empty / whitespace-only | `{title:""}`, `{title:"  "}` |
 | Multi-line (prose in a label) | `{title:"User\naccount"}` (use `description`) |
 

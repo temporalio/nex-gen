@@ -214,8 +214,10 @@ through role.
 
 Python `Any` and Java `JsonNode` don't share the `float64` hazard: the
 `json` module decodes an integer literal to an arbitrary-precision `int`,
-and Jackson hands the untyped member a `JsonNode` holding the exact
-token, so both re-emit `9007199254740993` unchanged and neither needs an
+and the generated exact-tree reader hands the untyped member a `JsonNode`
+holding the exact token — Jackson's own tree builder folds every floating token
+into a `double`, which is why that reader exists — so both re-emit
+`9007199254740993` unchanged and neither needs an
 equivalent workaround.
 
 ### TypeScript untyped extras: a bounded exception to P13.2
@@ -248,14 +250,16 @@ target requires modeling it as a `string`.
 ## Validator mapping
 
 Per **P10**/**P11**: extras are handled at the boundary and any closed-mode
-violation aggregates.
+violation aggregates. Every violation below sits at the offending extra's path,
+**rendered per P11.2** — an extra key is arbitrary text, so the spelling belongs
+to that clause and is not restated per target here.
 
 | Language | Open, untyped (preserve) | Open, typed `{type:T}` | Closed (reject extras) |
 |---|---|---|---|
-| Go | `UnmarshalJSON` routes unmatched keys into `AdditionalProperties`; `MarshalJSON` re-emits them | same routing, but each value goes through `T`'s runtime helper; failures → `Violation{Path:key}` | `UnmarshalJSON` emits `Violation{Path:key, Reason:"unknown field"}` per unmatched key, collected into one `PayloadValidationError` application failure |
-| TypeScript | deser lifts non-declared keys into the `additionalProperties` Record; reser spreads them back to top-level | same, but each value validated as `T` before going into `additionalProperties` (member stays fully typed `Record<string,T>`) | check parsed keys against the known set; push `Violation{path:key}` per extra, throw one `PayloadValidationError` application failure |
-| Python | `from_transfer_type` lifts non-declared keys into the `additional_properties` dict verbatim; `to_transfer_type` spreads them back to top-level | same, but each value is validated and materialized as `T` before going into `additional_properties` (member stays fully typed `dict[str, T]`) | check parsed keys against the declared set; append `Violation(path=key, reason="unknown field")` per extra, raise one `PayloadValidationError` application failure |
-| Java | the per-POJO collecting deserializer (Java §5) routes parsed-tree keys not in the declared set into the `additionalProperties` map; the matching serializer spreads them back | same routing, but each extra value is validated as `T` (bad keys → `Violation{path:key}`) | the collecting deserializer pushes a `Violation{path:key, "unknown field"}` per undeclared tree key into the single `PayloadValidationError` application failure — no fail-fast `ignoreUnknown=false`/`UnrecognizedPropertyException` |
+| Go | `UnmarshalJSON` routes unmatched keys into `AdditionalProperties`; `MarshalJSON` re-emits them | same routing, but each value goes through `T`'s runtime helper; failures → a `Violation` at the extra's path | `UnmarshalJSON` emits a `Violation` at the extra's path with `Reason:"unknown field"` per unmatched key, collected into one `PayloadValidationError` application failure |
+| TypeScript | deser lifts non-declared keys into the `additionalProperties` Record; reser spreads them back to top-level | same, but each value validated as `T` before going into `additionalProperties` (member stays fully typed `Record<string,T>`) | check parsed keys against the known set; push one `Violation` per extra, throw one `PayloadValidationError` application failure |
+| Python | `from_transfer_type` lifts non-declared keys into the `additional_properties` dict verbatim; `to_transfer_type` spreads them back to top-level | same, but each value is validated and materialized as `T` before going into `additional_properties` (member stays fully typed `dict[str, T]`) | check parsed keys against the declared set; append one `Violation` with `reason="unknown field"` per extra, raise one `PayloadValidationError` application failure |
+| Java | the per-POJO collecting deserializer (Java §5) routes parsed-tree keys not in the declared set into the `additionalProperties` map; the matching serializer spreads them back | same routing, but each extra value is validated as `T` (bad keys → a `Violation` at the extra's path) | the collecting deserializer pushes one `Violation` with `"unknown field"` per undeclared tree key into the single `PayloadValidationError` application failure — no fail-fast `ignoreUnknown=false`/`UnrecognizedPropertyException` |
 
 ### Per-member `T` validation
 
@@ -295,6 +299,12 @@ dropped from the map or rejected: Go `map[string]*T`, Java
 `Map<String, @Nullable T>`, TypeScript `Record<string, T | null>`, Python
 `T | None`. A present member still carries its own constraints.
 
+Wrapping the extras schema in the [[nullability]] wrapper does not change what
+the schema requires of the emitter: every package-level compiled-regex static
+the member's own assertions need is still emitted, and a nullable array is still
+`[]T` — including as a typed `additionalProperties` value — so the element
+traversal ranges over the value, never over `*value`.
+
 ### Serialize-side (P12)
 
 The catch-all is re-emitted by spreading its members back to top-level
@@ -302,9 +312,9 @@ JSON (Go `MarshalJSON` / TS reserializer / Java the per-POJO collecting
 serializer, Java §5 / Python `to_transfer_type`). Symmetry per mode:
 
 - **Open, untyped** — extras pass through **verbatim**; Go's
-  `json.RawMessage` element type guarantees byte-faithful re-emit (no
-  `float64` precision loss / key reordering — the same hazard as on
-  decode, see "Why `json.RawMessage`, not `any`" above).
+  `json.RawMessage` element type carries the decoded JSON value out again with
+  its number precision and lexeme intact (no `float64` degradation — the same
+  hazard as on decode, see "Why `json.RawMessage`, not `any`" above).
 - **Open, typed `{type:T}`** — each extra value is re-validated through
   `T`'s shared checks before emit, so a catch-all mutated to an invalid
   value fails serialization rather than emitting bad data.
@@ -315,6 +325,26 @@ Declared members serialize under their original wire names
 ([[properties]] case-mapping is reversed on the way out); extras keep
 their verbatim keys — the named-catch-all split keeps the two namespaces
 unambiguous in both directions.
+
+**The lift and the spread are key-preserving.** Every key the wire object owns
+and `properties` does not match appears in the catch-all, and every catch-all
+key appears back on the wire — an extra key is arbitrary data, not an
+identifier. **P13.2(b)**'s verbatim rule carries exactly one exception, the
+numeric one stated above for TypeScript; that exception is about a member's
+*value* and reaches no key, so no key may be dropped or renamed under it. In
+TypeScript the accumulator is therefore written and read by a mechanism the
+prototype chain cannot intercept: a key named `__proto__` is an own member of
+the parsed object and must stay one through the copy, rather than reassigning
+the accumulator's prototype and vanishing. Dropping a key is not only a
+fidelity loss — the key set is what [[minProperties]] / [[maxProperties]] count
+at each boundary, so a non-key-preserving copy also makes the two counts
+disagree, and validation semantics are never excepted (**P1**).
+
+**Violation paths for extra keys.** An extra key is the one path segment this
+subset lets a *payload* choose, and it may contain the characters the path
+grammar itself uses. It is therefore rendered per **P11.2** rather than spliced
+in raw; the grammar, its escaping and the current cross-target gap all belong to
+that clause.
 
 ## Property-testing matrix
 
@@ -343,6 +373,10 @@ unambiguous in both directions.
 ### Runtime fixtures (validator)
 
 - Open struct + extra key → preserved, present on re-serialize.
+- Open struct or map + a hostile extra key (`""`, `"0"`, `"a-b"`, `"toString"`,
+  `"constructor"`, `"__proto__"` — object- and string-valued) → every key
+  preserved and re-emitted, in all four targets; the same key set is what the
+  count keywords see at both boundaries.
 - Closed struct + extra key → one `Violation` per extra, aggregated with
   declared-field errors into a single `PayloadValidationError` application
   failure.
@@ -376,7 +410,9 @@ unambiguous in both directions.
   explicit resolutions [[type]] requires for `{type:object}` with no
   `properties`.
 - **[[minProperties]] / [[maxProperties]]**: count constraints apply to
-  the full member set including preserved extras.
+  the full member set including preserved extras, and to the same key set at
+  both boundaries. Closing the object caps that set at the declared count; the
+  count keywords own the resulting satisfiability check.
 - **[[required]]**: a closed struct still permits required members; it
   only forbids *unknown* ones.
 - **[[oneOf]]**: `additionalProperties: true` with no `properties` — the

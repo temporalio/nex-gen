@@ -187,44 +187,50 @@ sibling keyword recognized for that `type`:
 ]}
 ```
 
-### Which node owns a keyword — the wrapper or the branch
-
-The wrapper is a `oneOf`, so [[oneOf]]'s sibling rule governs it, and this spec
-fixes the one case [[oneOf]] leaves open. **Constraints belong on the non-null
-branch; `default` belongs on the wrapper.** Precisely:
-
-* **Every shape and constraint keyword** — `type`, [[format]],
-  [[contentEncoding]], [[const]]/[[enum]], [[pattern]], the string, numeric,
-  array and object bounds — is authored **on the non-null branch**. On the
-  wrapper it is a load reject, with a fix-it naming the branch. A wrapper-level
-  `const`/`enum` is the shape that currently produces four mutually incompatible
-  runtimes — Go and Java drop the closed check, Python emits a `Literal`
-  annotation it never enforces, and TypeScript enforces membership while losing
-  the `null` branch entirely, so it rejects a wire `null` the other three
-  accept — which is a **P1** accept-set divergence, not a cosmetic difference.
-
-* **[[default]] is authored on the wrapper**, never on a branch. The loader
-  pushes a wrapper default down into the resolved non-null branch and validates
-  it there against that branch's `type`, `enum`, `format` and
-  `contentEncoding`; that push-down is the specified behaviour. A `default` on a
-  **branch** is a load reject. Two reasons: all four backends silently discard
-  it, and — because the presence check reads the property node's keyword map,
-  which for a nullable member is the wrapper — a branch default also slips
-  [[default]]'s mandated "`default` on a **required** member → reject", which
-  the wrapper spelling correctly enforces.
-
-  A consequence for emitters, stated because it has been got wrong: the type a
-  wrapper `default` is lowered against is the **branch's**, not the wrapper's.
-  The wrapper carries no scalar `type`, so inferring one from the default
-  literal produces a value of the wrong type — an integral default under a
-  `number` branch must lower as the branch's floating-point type.
-
-* **Annotations and `x-<lang>-name`** may sit on either node and mean what
-  [[oneOf]] says they mean there.
-
 This two-branch form is the **degenerate type-token case** of the general
 `oneOf` rule (the `null` token is the selector); [[oneOf]] owns the
 general treatment, and this doc owns this specific shape.
+
+### Which node owns a keyword — the wrapper or the branch
+
+The wrapper is a `oneOf`, so [[oneOf]]'s sibling rule governs every keyword
+written on it; this doc settles the one case [[oneOf]] delegates here,
+[[default]]. **Constraints belong on the non-null branch; `default` belongs on
+the wrapper.**
+
+| Keyword | Node it is authored on | On the other node |
+|---|---|---|
+| `type`, [[format]], [[contentEncoding]], [[const]]/[[enum]], [[pattern]], and every string, numeric, array and object bound | the **non-null branch** | wrapper → **load reject**, fix-it naming the branch ([[oneOf]]) |
+| [[default]] | the **wrapper** | branch → **load reject**, fix-it naming the wrapper |
+| annotations ([[title]], [[description]], [[comment]], [[examples]], [[deprecated]]) and `x-<lang>-name` | the wrapper or the non-null branch | — (the `null` branch takes no siblings at all — see Pattern acceptance rules) |
+
+A wrapper `default` lowers against the **resolved non-null branch's** type, not
+against the JSON kind of the default literal — the wrapper carries no scalar
+`type` of its own ([[default]] owns the lowering rule). The loader validates a
+wrapper default against that branch's `type`, `enum`, `format` and
+`contentEncoding`.
+
+The wrapper does **not** shield a nullable member from a check that reads the
+**property node's** keyword map — for a nullable member that node is the
+wrapper, not the branch. So [[default]]'s "`default` on a **required** member →
+reject" applies to a nullable member exactly as to a plain one, and moving the
+`default` onto a branch is a reject rather than a way around it.
+
+### The wrapper does not change what the branch requires
+
+The wrapper is a presence/nullness marker, not a new schema: the non-null
+branch lowers exactly as it would unwrapped.
+
+- Every package-level artifact the branch's constraints need is still emitted —
+  in Go the compiled-regex statics a [[pattern]], [[format]] or
+  [[contentEncoding]] assertion needs, whether the assertion sits on the branch
+  itself or on the elements or [[contains]] matcher of a branch that is an
+  array. Dropping them because the member is nullable leaves the package
+  referring to an undeclared identifier.
+- Where the collapse removes the pointer, no emitted traversal may dereference
+  the member. A nullable array is `[]T` with no wrapper (above), including as a
+  typed [[additionalProperties]] value, so its element loop ranges over the
+  value and not over `*value`.
 
 ### Pattern acceptance rules
 
@@ -238,7 +244,9 @@ This doc recognizes a `oneOf` as the nullability pattern iff:
 
 Any other `oneOf` shape is [[oneOf]]'s domain — supported there when its
 branches are separable by a decidable selector (pairwise-disjoint JSON
-type kinds), otherwise rejected or deferred. A `null` branch among 3+
+type kinds), and **rejected** when they are not, since without a selector no
+deserializer can route the wire value. [[oneOf]] names the individual shapes it
+defers; a missing selector is not one of them. A `null` branch among 3+
 kinds is a **nullable union** — supported by [[oneOf]], reusing this doc's
 per-language nullable encoding over the union type (the `null` branch
 marks the field nullable; the non-null branches form the sum type).
@@ -330,6 +338,26 @@ against a generated marker instead of plain `None`.
 TypeScript enforces *and* preserves the distinction; Go, Java and Python
 enforce it at the boundary but collapse it in memory.
 
+**What the collapse is licensed for, and where that runs out.** P1 excepts the
+collapse from *value-level round-trip fidelity*, and only for Go, Java and
+Python — TypeScript is not in the exception because it does not collapse. P1
+excepts nothing from **validation semantics**. So where the collapse changes not
+what a value reads back as but whether it is *accepted at all*, the exception
+does not reach it, and the decision above does not settle it. The live case is a
+count bound over an object with an optional+nullable member: the member is
+present on the wire and counts, and absent in memory and does not, so the two
+directions disagree about the same payload — and they disagree *per target*,
+because TypeScript keeps the distinction the other three drop.
+
+*(Status: open — this is a project decision, not a consequence to be read off
+the note above. Two closures are named, and neither is adopted here: preserve
+presence in the three collapsing targets, which reverses the rejection of a
+presence channel above; or reject the combination of an optional+nullable member
+with a count bound at load. [[minProperties]] and [[maxProperties]] own the
+count side of the question. Whichever is chosen, the cross-target barrier has to
+exercise the payload **round-trip**, not the two directions independently, or it
+cannot see the divergence at all.)*
+
 ### Diagnostics
 
 Wire form → required generator output:
@@ -340,6 +368,9 @@ Wire form → required generator output:
 | `{type:"T", "nullable": true}` (OAS 3.0) | Reject. Diagnostic suggests `oneOf: [{type:"T"}, {type:"null"}]`. |
 | `oneOf` with `{type:"null"}` branch where field is in `required` | **Accept** — required+nullable (must be present, may be `null`). |
 | `oneOf` of 3+ branches with `{type:"null"}` among them | **Accept** — a nullable union ([[oneOf]]): the `null` branch marks the field nullable, the non-null branches (which must be pairwise-disjoint) form the sum type. |
+| A shape or constraint keyword on the **wrapper** | Reject. Fix-it names the non-null branch as the node that owns it. |
+| `default` on the **wrapper** | **Accept** — lowered against the resolved non-null branch's type. |
+| `default` on a **branch** | Reject. Fix-it names the wrapper as the node that owns it. |
 
 ## Validator implications
 
@@ -369,8 +400,8 @@ optional-non-nullable.
 | required | nullable | empty-value serialize action |
 |---|---|---|
 | optional | non-nullable | **omit** the key (emitting `null` is invalid; `Validate` also rejects an explicit in-memory `null` where the language can hold one) |
-| optional | nullable | **omit** (conservative) in Go/Java/Python; **faithful** in TS — omit if `undefined`, emit `null` if explicitly `null` |
-| required | non-nullable | cannot be empty — `Validate` rejects; always emit the value |
+| optional | nullable | **omit** (conservative) in Go/Java/Python; **faithful** in TS — omit if `undefined`, emit `null` if explicitly `null`. Unresolved where the enclosing object also carries a count bound — see the Collapse note |
+| required | non-nullable | cannot be empty — always emit the value. Where the language can hold an empty reference (Java `null`, Python `None`, TS `undefined`/`null`) `Validate` **rejects** it rather than omitting the key; a Go `nil` slice on a required array is written as `[]`, since Go has no non-nil empty-slice type (see [[items]]) |
 | required | nullable | **emit `key: null`** — omitting violates `required` |
 
 Per-language mechanism (all are *encode-adapter* concerns; the shared

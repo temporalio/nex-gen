@@ -14,7 +14,7 @@ assertion is the *opt-in* `format-assertion` vocabulary. We deliberately
 any target's native format validator — those are the single most divergent
 corner of JSON Schema across implementations, which is *why* the spec made
 assertion optional. Each supported format lowers to a **generator-owned**
-check: a pinned portable regex through the [[pattern]] RE2-safe gate, plus —
+check: a pinned portable regex inside the [[pattern]] RE2-safe subset, plus —
 where a regex alone is insufficient — a shared **length guard** or **calendar
 predicate**, all plain arithmetic.
 
@@ -25,11 +25,12 @@ Beyond validation, the temporal formats (`date-time`, `date`, `time`,
 `format` departs from a pure assertion: the field carries a language-native
 value, and the wire is produced by **re-serializing** it — with **no
 truncation** (offset and sub-second precision preserved to each type's
-resolution), `date-time` being the one format whose round-trip may lose
-information, and only at a target type's genuine limit. The shipped rules are
-executed by `tests/json_schema_corpus_runtime.rs` across Go, Java, Python, and
-default TypeScript; format rows additionally run the `typescript-date` and
-`typescript-temporal` profiles. The Rust gate consumes the same pinned data.
+resolution), `date-time` and `time` being the two formats whose round-trip may
+lose information, and only at a target type's genuine limit. The shipped rules
+are executed by `tests/json_schema_corpus_runtime.rs` across Go, Java, Python,
+and default TypeScript; format rows additionally run the `typescript-date` and
+`typescript-temporal` profiles. Where a rule is gate-checked, the Rust gate
+consumes the same pinned data.
 Prospective targets are design analysis, not part of this executable claim.
 
 ## Spec summary
@@ -104,8 +105,8 @@ what is missing is the machine-readable declaration of it.
     (`json-schema/corpora/format_email/`, 56 pairs, 7/7 agree).
 - **Pinned regex (syntax) + a shared calendar/range predicate, and
   materialized** (below): `date`, `date-time`, `time`, `duration` — RFC 3339
-  profile; the predicate enforces day-in-month, the Gregorian leap-year
-  rule, and the offset numeric range
+  profile; the pattern pins the offset's numeric range and the predicate
+  enforces the year floor, day-in-month and the Gregorian leap-year rule
   (`json-schema/corpora/format_conformance/`, 124 pairs, 7/7 agree).
 
 **Deferred (rejected at load, "not yet supported"):** `idn-email`,
@@ -119,7 +120,13 @@ over the *value*). Each is deferred, *not* a categorical **P6** exclusion.
 **Unknown / non-standard format** (`format: "phone"`, a typo, a custom
 string) → **reject** with a fix-it listing the supported names. An
 unrecognized format is the ambiguity **P7.1** rejects loudly, and
-`format-assertion` itself mandates failing on unknown formats.
+`format-assertion` itself mandates failing on unknown formats. Two names get a
+**named in-subset alternative** rather than the bare list, because they are the
+common spellings of a supported concept: `byte` names
+`contentEncoding: "base64"` ([[contentEncoding]]), and `int32`/`int64` name
+[[type]] `integer` with the matching bounds. `binary` deliberately gets no such
+hint — it means raw octets, so pointing an author at base64 would silently
+change the wire.
 
 **`format` on a non-string [[type]]** (`{type:"integer", format:"uuid"}`)
 → **reject** (**P7.1**). The spec would make it a vacuous no-op; a
@@ -129,7 +136,8 @@ statically meaningless keyword is a load reject here, exactly as
 Grounding ([[PRINCIPLES.md]]): **P1** (identical cross-language accept /
 reject **and** identical wire bytes — guaranteed by owning the check and the
 generator-owned serializer, proven by the corpora, never by a native validator;
-`date-time` is the one bounded exception where round-trip may be lossy, below),
+`date-time` and `time` are the bounded exceptions where round-trip may be lossy,
+below),
 **P2** (a typed field is the idiomatic, hand-written-feeling shape — the
 motivation for materialization), **P4** (only each stdlib's regex engine and
 temporal types — no new dependency), **P10** (enforced at the boundary),
@@ -166,8 +174,9 @@ these because we own the check:
 - **`date-time` offset is required** (`Z` or `±HH:MM`); a bare local
   `date-time` is invalid. `-00:00` is accepted. **`time` offset is optional**
   (RFC 3339 `partial-time`); an offset, when present, is range-checked.
-- **Offset range** is enforced by the predicate: hours `00–23`, minutes
-  `00–59`, so `+24:00` / `+01:60` are rejected.
+- **Offset range** is enforced by the pinned pattern's own alternation: hours
+  `00–23`, minutes `00–59`, so `+24:00` / `+01:60` are rejected. (The
+  serialize-side range check over a native offset is separate — below.)
 - **Case** — `T` / `Z` separators are accepted in either case (RFC 3339
   §5.6). Materialized nodes **uppercase on the parse path** before the native
   parse (Go / Python / Ruby native parsers reject lowercase; safe because the
@@ -211,8 +220,8 @@ type, the field stays a `string` **holding that same serialized form**, so it
 agrees byte-for-byte with the materializing languages.
 
 **`date-time` round-trip is a deliberate, bounded exception** — the sibling of
-the Go/Java optional+nullable collapse (a wire distinction the in-memory model
-cannot carry). Loss happens **only at a native type's genuine capacity limit**,
+the Go/Java/Python optional+nullable collapse (a wire distinction the in-memory
+model cannot carry). Loss happens **only at a native type's genuine capacity limit**,
 never as an artificial common-denominator floor, so a value round-trips
 **byte-identically across every target whose type can hold its offset and
 precision** and diverges only where a chosen type cannot. `date` and `duration`
@@ -220,14 +229,17 @@ round-trip losslessly. **`date-time` and `time` are the two formats whose
 round-trip may lose information** across ordinary targets — which target, and
 how much, is tabulated below.
 
-For `time` the only licensed loss is **Python's**: `datetime.time` resolves to
-microseconds, a genuine capacity limit of the native type, so finer input is
-truncated. **No other target may lose a digit of `time`.** Go, Java and
-TypeScript all carry `time` in a container that holds the serialized form
-verbatim — Java in a `String` — and the clause above applies to them without
-exception: a target that *can* represent a value must not be made to drop it, and
-narrowing to the least-capable target is the artificial common-denominator floor
-[[PRINCIPLES.md]] P1 forbids.
+For `time` the licensed losses are exactly the two that are a **materialized
+native type's** resolution: Python's `datetime.time` is microsecond and Go's
+`time.Time` is nanosecond, so finer input is truncated there. **Java and
+TypeScript may not lose a digit of `time`**: both hold it in a string carrier —
+Java in a `String`, TypeScript in a `string` in every mode — which materializes
+nothing and has no capacity limit of its own, so [[PRINCIPLES.md]] P1's
+exception **(b)** does not reach it. Routing a `String`-carried value through
+`java.time` for validation and rebuilding the string from the result imports
+that intermediary's nanosecond limit into a carrier that can hold more, which is
+the artificial common-denominator floor (b) forbids: a target that *can*
+represent a value must not be made to drop it.
 
 | Format | Go | Java | Python | TS (per `--date-time-types`) | Wire form |
 |---|---|---|---|---|---|
@@ -265,12 +277,12 @@ rules above.
 
 | Target | In-memory type | Round-trip |
 |---|---|---|
-| Go | `time.Time` | offset + **nanosecond** preserved — lossless |
-| Java | `OffsetDateTime` | offset + **nanosecond** preserved — lossless |
+| Go | `time.Time` | offset + **nanosecond** preserved; **sub-nanosecond truncated** (the type's resolution) |
+| Java | `OffsetDateTime` | offset + **nanosecond** preserved; **sub-nanosecond truncated** (the type's resolution) |
 | Python | `datetime` (aware) | offset preserved, **sub-microsecond truncated** (the type's resolution) |
-| TS `--date-time-types=string` (default) | `string` | serialized form stored — lossless |
+| TS `--date-time-types=string` (default) | `string` | serialized form stored — lossless at every width |
 | TS `--date-time-types=date` | `Date` | UTC instant at **millisecond** — offset folded to UTC, sub-ms lost |
-| TS `--date-time-types=temporal` | `Temporal.ZonedDateTime` | offset + **nanosecond** preserved — lossless |
+| TS `--date-time-types=temporal` | `Temporal.ZonedDateTime` | offset + **nanosecond** preserved; **sub-nanosecond truncated** |
 
 So `2021-06-15T12:30:45.123456789+02:00` keeps its offset and nanoseconds in Go
 / Java / TS `string` / TS `Temporal.ZonedDateTime`, loses the trailing `789` in
@@ -281,8 +293,9 @@ input up to **microsecond** precision with any offset round-trips
 **rounds** rather than truncates — `.123456789`→`.1234568` — so it would need
 its own row if promoted to a model target.)
 
-**`time` preserves the offset** and keeps sub-second precision at the selected
-representation's native resolution. RFC 3339 keeps the `time` offset
+**`time` preserves the offset** and keeps sub-second precision at its carrier's
+resolution — every accepted digit for the two string carriers, the native
+resolution for the two native ones. RFC 3339 keeps the `time` offset
 **optional**, and an offset-less value stays offset-less. Go's phantom
 `time.Time` and Python's aware/naive `time` carry either form. Java and
 TypeScript keep the canonicalized wire string because neither `java.time` nor
@@ -318,9 +331,10 @@ output; Go / Java / Python are unchanged, and choosing a lossy TS shape does
   instant at **millisecond** resolution that folds the offset and drops sub-ms
   precision. `date` / `time` / `duration` have no `Date` analog and stay
   `string`. The loss is confined to the TS `date-time` output.
-- **`temporal`** — the idiomatic TC39 **Temporal** type for each format, all
-  **lossless**: `date-time` → `Temporal.ZonedDateTime` (offset + nanosecond
-  preserved, matching Go / Java), `date` → `PlainDate`, `duration` →
+- **`temporal`** — the idiomatic TC39 **Temporal** type for each format,
+  lossless to each type's own resolution: `date-time` →
+  `Temporal.ZonedDateTime` (offset + nanosecond preserved, matching Go /
+  Java), `date` → `PlainDate`, `duration` →
   `Duration`. `time` stays a `string`, because Temporal has no offset-bearing
   time-only type and `PlainTime` would drop the offset — keeping the offset
   wins. The trade-off is portability — it needs a Temporal-capable runtime or
@@ -354,10 +368,10 @@ per-node (and available as a generator-wide mode).
 **Doc comment.** The materialized field's doc comment names the format and its
 round-trip behavior (`// format: date-time — offset & precision preserved;
 round-trip may lose precision beyond this type's resolution`) so any loss is
-visible in the generated source (**P2**). The only lossy TS mode is legacy
-`--date-time-types=date`, whose comment names the UTC-instant fold and
-millisecond resolution; `temporal` (`ZonedDateTime`) is lossless like the
-default.
+visible in the generated source (**P2**). The one TS mode whose loss is not
+merely its type's resolution is legacy `--date-time-types=date`, whose comment
+names the UTC-instant fold and millisecond resolution; `temporal`
+(`ZonedDateTime`) keeps the offset and nanoseconds, like the default.
 
 > **Status: unimplemented.** Generated field comments do not yet include this
 > format-specific round-trip text.
@@ -409,22 +423,24 @@ add back the `|60` seconds alternative; `duration` uses the full
 | Python | Parse: the `_parse_date_time` / `_parse_date` / `_parse_time` / `_parse_duration` runtime helpers, called from the transfer type converter (PRINCIPLES Python §3) — regex + calendar over the wire string, then `datetime.fromisoformat(s.upper())` **retaining the parsed offset** (`date-time`; `datetime`'s native microsecond resolution truncates any finer input — the one Python-side loss), `date.fromisoformat(s)` (`date`), `time.fromisoformat(s)` **retaining any offset** as an aware `time` (`time`), or parse `PT…` into a `timedelta` (`duration`). Each appends a `Violation` and returns `None` on failure so the rest of the object still validates. Encode: the matching generator-owned `_format_*` helper (offset preserved, fractional trimmed). The dataclass field is the plain `datetime.datetime` / `date` / `time` / `timedelta`, so no library's own coercion is in the path (native coercions typically accept a missing offset and normalize differently). |
 | Java | The per-POJO collecting deserializer (PRINCIPLES Java §5): regex + calendar over the `String`, then `OffsetDateTime.parse(s)` **retaining the offset and nanoseconds** (no `atOffset(UTC)`, no `truncatedTo`) (`date-time`), `LocalDate.parse` (`date`), a generator helper that validates `time` and stores it as a `String` **retaining every accepted digit** (it must not round-trip the value through `OffsetTime`/`LocalTime`, whose nanosecond resolution would truncate a `String` carrier that can hold more — see the `time` clause above), or checked component parsing plus `Duration.ofSeconds` for the `PT…` form. The `Serializer` emits the **generator-owned** string (offset preserved, fractional trimmed) — **not** `Duration.toString()` for `.NET` parity and **not** the BCL serializer (`.NET XmlConvert` rolls `PT24H`→`P1D`). |
 
-There is **no common truncation floor**, and the resolutions are a property of
-the *carrier*, not of the target:
+There is **no common truncation floor**, and the resolution is a property of the
+*carrier*, not of the target:
 
-* A **`string` carrier retains every accepted digit** — TypeScript in every mode
-  for `time`, and Java's `String` for `time`. A `String`-held value has no
-  resolution of its own, so nothing about it licenses a truncation.
-* A **native temporal carrier retains its type's genuine resolution** — Go
+* A **string carrier retains every accepted digit** — TypeScript's `string` in
+  every mode, and Java's `String` for `time`. It has no capacity limit, so a
+  validation step that borrows an intermediary's limit is a defect rather than a
+  bounded loss.
+* A **materialized native carrier retains its type's genuine resolution** — Go
   `time.Time`, Java `OffsetDateTime` and TypeScript `Temporal` are nanosecond;
   Python `datetime`/`time` are microsecond; the legacy TypeScript `Date` mode is
   millisecond.
 
-Only the second bullet is a licensed loss, and only at the type's real limit. The generator-owned
-serializer trims trailing-zero fractional digits so equal values agree
-byte-for-byte wherever the types are equally capable. Under `--date-time-types`,
-`Temporal.ZonedDateTime` keeps the offset (byte-identical with Go/Java); only
-the legacy TS `date` mode is a UTC-instant fold.
+Only the second is a licensed loss (P1 exception **(b)**), and only at the
+type's real limit. The
+generator-owned serializer trims trailing-zero fractional digits so equal values
+agree byte-for-byte wherever the carriers are equally capable. Under
+`--date-time-types`, `Temporal.ZonedDateTime` keeps the offset (byte-identical
+with Go/Java); only the legacy TS `date` mode is a UTC-instant fold.
 
 **Informative `reason` strings.** The `Violation` `reason` names the
 **format and the offending value** (`must be a valid date-time, got "…"`),
@@ -470,7 +486,11 @@ compiled constant; the load gate proves it compiles, so the emitted
     `new Date(NaN)` is constructible but cannot be serialized.
   - **Duration units** (`duration`): the grammar is time-only, so a native
     value carrying calendar components (`Temporal.Duration` with `years` /
-    `months` / `weeks`) is a violation.
+    `months` / `weeks`) is a violation. A native `days` component is **not**:
+    absent a reference date it denotes exactly 24 h, so it converts and emits
+    as `PT24H`. Only the three that cannot be converted without a calendar are
+    violations — unlike a *wire* `P1D`, which the narrowed grammar rejects
+    because the wire form must be unambiguous.
   - **Duration magnitude** (`duration`, Python / Java / TypeScript): a native
     value above the shared wire cap of 9,223,372,036 seconds is a violation.
 
@@ -480,16 +500,75 @@ compiled constant; the load gate proves it compiles, so the emitted
   re-run the pinned predicate over it before emit, exactly as for the
   string-shaped formats above.
 
+  **Each of these checks is a `Violation`, never an escaping throw.** Every one
+  of the unspellable states above is reachable through a native constructor or
+  accessor that *throws* in at least one target — `Temporal.Duration.total`
+  refuses a calendar duration, `Date.prototype.toISOString` refuses an invalid
+  `Date`, `datetime.utcoffset` refuses a `tzinfo` beyond ±24 h, a `java.time`
+  parser refuses an out-of-band offset. So the check must run **before** the
+  call that would throw, and any throw that remains possible is caught at the
+  member and pushed as a `Violation` on that member's path. An escaping
+  exception is not a louder version of a rejection: it loses the path and
+  discards every violation already aggregated for the payload, which is the
+  aggregate **P11** exists to deliver, and it leaves the two directions
+  reporting different violation sets (**P11.1**).
+
   Serialize then **re-serializes** typed → wire with
   offset and precision preserved to the type's resolution. A co-occurring
   [[minLength]] /
   [[maxLength]] / [[pattern]] is **not** subsumed by the type, though — the
   re-serialized wire string can still be too long or off-pattern — so that
-  predicate re-runs over it **before emit** (**P12**). The only parse-side guard
+  predicate re-runs over it **before emit** (**P12**). The wire string is
+  projected **once per member** and shared by every predicate on that node,
+  including a closed-value comparison ([[const]] / [[enum]]): two independent
+  projections are two operands (**P12.2**), and a second projection in one
+  scope is a redeclaration. Deriving it per predicate also makes the emitted
+  code depend on how many predicates a node happens to carry, which is how a
+  [[minLength]]`:0` — a bound the spec declares inert — can break a build. The
+  only parse-side guard
   beyond validation is a **duration overflow check** (the regex caps no digit
   count, so an adversarial `PT999999999999H` that overflows the native type
   pushes a `Violation`); the duration-magnitude serialize check above enforces
   the same cap for constructible in-memory values.
+
+## Containment between formats
+
+Two formats stand in a **containment** relation when every value the narrower
+one's pinned check accepts, the wider one's pinned check also accepts. This spec
+owns the relation; [[allOf]] consumes it (a merge of a containment pair narrows
+to the contained format, rather than rejecting the pair as a conflict).
+
+**The basis, not a lookup table.** Containment is a claim about the **accepted
+value sets of the pinned checks** — regex + length guard + calendar/range
+predicate — never about what the format *names* suggest. A pair enters the
+relation only when inclusion is established over those checks, by an argument
+over the wider check's alphabet and length bounds and then confirmed against the
+corpora. Adding a format, or tightening any pinned check, re-opens every pair it
+touches. **Overlap is not containment:** two formats that share values but each
+accept values the other refuses are a genuine conflict, and the merge must
+reject them.
+
+Established on that basis:
+
+| Relation | Why |
+|---|---|
+| `uri ⊂ uri-reference` | RFC 3986 defines `URI-reference = URI / relative-ref`, and the pinned `uri-reference` body carries the `uri` body as its first alternative |
+| `hostname ⊂ uri-reference` | a hostname's alphabet is `A-Za-z0-9`, `-` and `.` — all RFC 3986 unreserved — and contains no `:`, so every hostname is a legal relative-path reference |
+| `uuid ⊂ hostname`, `ipv4 ⊂ hostname`, `date ⊂ hostname` | each is a single LDH label (or dot-separated numeric labels), bounded at 36 / 15 / 10 code points, inside the 63-per-label and 253-total guards |
+| `duration ⊂ uri-reference`, and `uuid` / `ipv4` / `date` ⊂ `uri-reference` | by the alphabet argument above, and transitively through `hostname` |
+
+`email`, `date-time`, `time` and `ipv6` are in **no** containment relation with
+any supported format: `date-time`, `time` and `ipv6` all carry `:`, which a
+relative-path reference's first segment excludes and no hostname label admits,
+and `email`'s dot-atom alphabet includes `` ` ``, `{`, `|`, `}` and `^`, which
+RFC 3986 excludes — so `email` is not contained in `uri-reference` even though
+an ordinary address is.
+
+`duration` is **not** contained in `hostname`, which is the case that shows why
+the basis matters rather than the intuition: the pinned `duration` grammar bounds
+no digit run, so `PT` followed by seventy zeros and `1S` is an accepted duration
+(one second, well inside the overflow cap) and is a single 73-character label,
+which the 63-per-label guard refuses.
 
 ## Property-testing matrix
 
@@ -568,15 +647,22 @@ Representative cases:
 
 ## Interactions
 
-- **[[contentEncoding]]**: a materializing temporal `format` and
-  `contentEncoding` cannot share a node — both claim the same in-memory slot.
-  **Reject the combination at load.** This mirrors the rule in
-  [[contentEncoding]]; a one-sided statement would leave the question
-  unadjudicated, which is how a non-materializing `format` beside
-  `contentEncoding` came to be silently dropped in Go.
-- **[[pattern]]**: `format` reuses its RE2-safe gate, compile-once
-  mechanism, ASCII-class rule, and end-anchor normalization for every
-  regex-lowered format. Both may appear on one node — the value must satisfy
+- **[[contentEncoding]]**: a **materializing** temporal `format` and
+  `contentEncoding` cannot share a node — both claim the same in-memory slot,
+  and the two grammars are disjoint anyway (an RFC 3339 form contains `-` and
+  `:`, which no base64 alphabet admits). **Reject the combination at load**,
+  with a fix-it naming the conflict; the same rule is stated in
+  [[contentEncoding]]. A **non-materializing** (string-shaped) `format` beside
+  `contentEncoding` is **accepted**, and its check applies to the **encoded
+  wire string** in *every* target, aggregating with the encoding's own check.
+  Dropping it in one target is an accept-set divergence
+  (`{contentEncoding:"base64", format:"email"}` must reject `"aGk="`
+  everywhere), and the check being redundant with the encoding's pattern in
+  most cases does not license omitting it in one.
+- **[[pattern]]**: every regex-lowered format is held to that keyword's
+  RE2-safe subset — each pinned pattern passes its gate **unchanged** — and uses
+  the same compile-once mechanism, ASCII-class rule and end-anchor
+  normalization. Both keywords may appear on one node — the value must satisfy
   **both**, aggregated independently.
 - **[[type]]**: gates applicability — `format` is meaningful only for
   `string`; a mismatch is a load reject (**P7.1**). For a materialized
@@ -589,10 +675,15 @@ Representative cases:
   satisfy the format at load; on a **materialized** node it must also be
   **materializable** (a `const` `date-time` cannot be `:60`; a `const`
   `duration` must be time-only) and is stored/echoed in its **serialized**
-  form.
+  form — which is also the form every other assertion on the node is checked
+  against, so the literal is canonicalized **before** any of them run. A
+  **closed value set** does not remove the format check: where a target gives
+  the closed set its own named type, the pinned regex is still evaluated over
+  that value's underlying `string`.
 - **[[minLength]] / [[maxLength]]**: independent string assertions; not
   cross-checked against a format's implied length. On a materialized temporal
-  they constrain the *wire* string; the internal length guards
+  they constrain the **canonical** *wire* string at both boundaries (see
+  [[maxLength]]); the internal length guards
   (`hostname` / `email`) are separate.
 - **[[nullability]]**: orthogonal — a `null` skips the format check and is not
   materialized; a present value is checked (and materialized).
@@ -605,6 +696,20 @@ Representative cases:
   `string` in the others ([[oneOf]] §Deferred). The [[nullability]] `oneOf`
   wrapper is not a sum type and materializes normally.
 - **[[required]]**: orthogonal — presence vs value shape.
+- **[[allOf]]**: two branches may each declare a `format`. The **containment
+  relation** above decides the pair: a containment pair merges to the contained
+  format, and anything else — overlap without containment, or two unrelated
+  formats — is a conflict the merge rejects. Equal formats merge trivially.
+- **[[uniqueItems]]**: `uniqueItems: true` over an element carrying a
+  materializing temporal `format` is a **load reject** — the materialized value
+  cannot answer element-to-element JSON equality (see [[uniqueItems]]). A
+  non-materializing format leaves the element a `string` and is unaffected.
+- **[[contains]]**: a `contains` **matcher** may not carry a temporal `format`;
+  on an **element** it is supported, and the matcher measures the element's
+  canonical wire form in both directions. **Status: open** — moving a
+  materializing assertion onto [[items]] is the legal position but compiles
+  only once each target renders an element's canonical wire form, which is not
+  the case in every target today.
 
 ## Ecosystem variance
 
@@ -638,23 +743,29 @@ get divergent verdicts across the seven native URI parsers.
    grammar byte-identically in all six languages (design B) — a candidate
    representation for a node that needs Y/M/W, or the behavior behind the
    string opt-out's accessor. Deferred pending demand.
-3. **A `Temporal` type for `time`.** `time` is lossless everywhere (offset
-   preserved), but it is the one temporal that stays a `string` under
-   `--date-time-types=temporal`, because Temporal ships no offset-bearing
-   time-only type (`PlainTime` would drop the offset). If Temporal later adds
-   one — or if a schema's `time` is known offset-less — `PlainTime` could
-   materialize it. Ruby (prospective) likewise has no time-of-day type.
+3. **A `Temporal` type for `time`.** `time` is the one temporal that stays a
+   `string` under `--date-time-types=temporal`, because Temporal ships no
+   offset-bearing time-only type (`PlainTime` would drop the offset). If
+   Temporal later adds one — or if a schema's `time` is known offset-less —
+   `PlainTime` could materialize it, at the cost of the string carrier's
+   unlimited fractional precision. Ruby (prospective) likewise has no
+   time-of-day type.
 
 ## See also
 
-- [[pattern]] — the regex keyword whose RE2-safe gate, compile-once
-  mechanism, ASCII-class rule, and end-anchor normalization `format` reuses.
-- [[type]] — supplies the base `string`; gates applicability; a materialized
-  temporal replaces the field type with a native construct.
+- [[pattern]] — the regex keyword whose RE2-safe subset every pinned pattern
+  stays inside, and whose compile-once mechanism, ASCII-class rule and
+  end-anchor normalization `format` uses.
+- [[type]] — supplies the base `string`; a materialized temporal replaces the
+  field type with a native construct. The **applicability gate is owned here**:
+  the load reject for a `format` on a non-string `type` (**P7.1**) is this
+  spec's rule and this spec's test, not a rule [[type]] delegates back.
 - [[const]] / [[default]] / [[enum]] — supplied literals validated (and, when
   materialized, canonicalized) against the format at load.
 - [[minLength]] / [[maxLength]] — independent string assertions.
 - [[nullability]] — a `null` is neither validated nor materialized.
 - [[multipleOf]] — the sibling "support the portable subset, reject the
   hazardous form, deferred not excluded" decision posture.
+- [[allOf]] — consumes the containment relation defined here when merging two
+  branches that each declare a `format`.
 - [[maximum]] — the `reason`-string convention.

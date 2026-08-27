@@ -36,12 +36,15 @@ on emitted types.
 Loader behavior (mirror of [[maximum]] with `≥`):
 - Value not a number → reject.
 - `minimum` on a non-numeric [[type]] → reject (**P7.1**).
-- **On an `integer` field the bound MUST be integer-valued** — `minimum:0.0`
-  accepted (≡ `0`), `minimum:0.5` rejected with a fix-it (same
-  exact-comparison rationale as [[maximum]]).
-- On a `number` field any finite bound is accepted.
-- `minimum` below the [[type]] integer cap `−(2^53−1)` on an `integer`
-  field is redundant (cap already rejects) but allowed.
+- **Over an `integer` position the bound MUST be integer-valued** —
+  `minimum:0.0` accepted (≡ `0`), `minimum:0.5` rejected with a fix-it (same
+  exact-comparison rationale as [[maximum]], which also owns the rule that
+  the *effective* position kind governs when the bound's own node declares a
+  wider one).
+- Over a `number` position any finite bound is accepted.
+- `minimum` below the [[type]] integer cap `−(2^53−1)` over an `integer`
+  position is redundant (cap already rejects) but allowed; a `minimum`
+  *above* `+(2^53−1)` empties the accepted set and rejects ([[maximum]]).
 - **`minimum` and `exclusiveMinimum` both present on the same node →
   reject (redundant)** — both are lower bounds, one always dominates; keep
   exactly one (**P7.1**, mirror of the [[maximum]] rule). The lower+upper
@@ -66,7 +69,7 @@ comparison:
 
 | Language | Strategy |
 |---|---|
-| Go | `if v < min { push(Violation{Reason: fmt.Sprintf("must be >= %v, got %v", min, v)}) }` — a predicate in the shared `Validate`, which `UnmarshalJSON` calls after decoding, collecting into one `PayloadValidationError` application failure. Integer field compares `int64`; number field compares `float64`. |
+| Go | `if v < min { push(Violation{Reason: fmt.Sprintf("must be >= %v, got %v", min, v)}) }` — a predicate in the shared `Validate`, applied identically on both directions' paths (**P12.2**), collecting into one `PayloadValidationError` application failure. Integer field compares `int64`; number field compares `float64`. |
 | TypeScript | ``if (v < min) push(Violation{path, reason: `must be >= ${min}, got ${v}`})``, throw one `PayloadValidationError` application failure. |
 | Python | `if v < min: violations.append(Violation(path=…, reason=f"must be >= {min}, got {v}"))` in the transfer type converter, run after `_parse_spec_integer` normalizes an integer field's wire value (`0.0`→`0`, see [[type]]); aggregates into the single generated `PayloadValidationError` application failure. |
 | Java | The per-POJO collecting deserializer (PRINCIPLES Java §5) reads the node via the [[type]] `SpecNumbers` helper and checks `v < min` (`long`/`double`), pushing a `Violation{path, "must be >= " + min + ", got " + v}` into the single `PayloadValidationError` application failure. Not bean-validation `@Min`. |
@@ -99,7 +102,8 @@ than being written. See [[maximum]] serialize note (symmetric).
 |---|---|
 | Value not a number | `minimum:"0"`, `minimum:false` |
 | Type mismatch (P7.1) | `{type:"string", minimum:0}` |
-| Fractional bound on integer field | `{type:"integer", minimum:0.5}` |
+| Fractional bound over an integer position | `{type:"integer", minimum:0.5}`, `{type:"array", items:{type:"integer"}, contains:{type:"number", minimum:1.5}}` |
+| Range emptied by the integer cap | `{type:"integer", minimum:9007199254740992}` |
 | Redundant same-axis pair | `{type:"integer", minimum:0, exclusiveMinimum:2}`, `{type:"integer", minimum:0, exclusiveMinimum:0}` |
 | Unsatisfiable range | `{type:"integer", minimum:10, maximum:2}` |
 

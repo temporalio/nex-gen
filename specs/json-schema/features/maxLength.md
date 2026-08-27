@@ -68,7 +68,16 @@ Loader behavior:
   value (`maxLength:-1`), or a **fractional** value (`maxLength:5.5`).
   `maxLength:5.0` is accepted (≡ `5`, honoring the `1.0`-as-integer rule
   from [[type]]).
-- The portable count ceiling from [[maxItems]] applies.
+- A bound greater than `9007199254740991` (2^53−1) → reject. A length bound
+  must be exactly representable in every target, which is the same ceiling and
+  the same reason the count keywords use ([[maxItems]] / [[maxProperties]]);
+  the bound is emitted as a numeric literal into all four, and above 2^53−1 the
+  literal no longer denotes the authored integer.
+- **A bound in `[2^31, 2^53−1]` obliges Java to emit a `long` literal**
+  (`{n}L`), exactly as in [[maxItems]]. Java integer literals stop at 2^31−1,
+  so a bound above it emitted bare is a `javac` "integer number too large"
+  error — the bound loads and the generated package does not compile. The
+  ceiling above is *not* what makes that range safe.
 - `maxLength` on a non-string [[type]] (`{type:"integer", maxLength:5}`) →
   reject per **P7.1** (statically meaningless — the array-length analog is
   `maxItems`, the member-count analog is [[maxProperties]]).
@@ -128,32 +137,28 @@ parse-adapter-only or encode-adapter-only logic: the comparison is pure
 and direction-agnostic.
 
 **On a materialized node** ([[format]] temporal / [[contentEncoding]]
-bytes) the decoded value is not a `string`, so the bound is a predicate
-over the **canonical wire string** instead: on parse it checks the
-incoming wire string, and on serialize it checks the wire string the
-encode adapter re-serializes the native value to, **before emit** — so the
-teeth hold there too (an in-memory bytes value whose base64 exceeds
-`maxLength`, or a temporal whose canonical form does, fails serialize).
-Still one predicate, still identical in both directions; the wire string
-is simply projected from the native value on the encode side.
-**Which string, precisely — and it is *not* the incoming one.** "Canonical wire
-string" means the form the encode adapter produces for that value, and the
-assertion measures **that** form at both boundaries. On parse this means the
-predicate runs **after** the value has been parsed and re-canonicalized, not
-against the bytes as they arrived. The distinction is invisible for a format
-with a single spelling and decisive for one without: `PT90M` and `PT1H30M` are
-the same [[format]] `duration`, they canonicalize to `PT1H30M`, and they differ
-in length and in what a regex matches.
+bytes) the decoded value is not a `string`, so the bound is a predicate over
+the **canonical wire string** — the form the encode adapter produces for that
+value — at **both** boundaries: on parse the value is parsed and
+re-canonicalized *before* the count is taken, and on serialize the
+re-serialized wire string is counted **before emit**, so the teeth hold there
+too (an in-memory bytes value whose base64 exceeds `maxLength`, or a temporal
+whose canonical form does, fails serialize). Still one predicate, still
+identical in both directions. Counting the incoming form on parse and the
+canonical form on serialize would make that false: `PT90M` (5) and its canonical
+spelling `PT1H30M` (7) are one [[format]] `duration` value, so
+`{format:"duration", maxLength:5}` would admit a payload it then cannot
+re-emit — a **P1** accept-set defect. A **literal** ([[const]], [[enum]],
+[[default]]) on such a node is measured the same way: it is canonicalized
+first, so the length checked at load is the length of the constant the
+generator emits. Counting two different strings in the two directions is
+exactly the operand drift **P12.2** forbids, "even though both sides call the
+same helper".
 
-Measuring the incoming form on parse and the canonical form on serialize would
-make "identical in both directions" false — a payload could be admitted and then
-be unre-emittable, which is a **P1** accept-set defect, not a rounding of it.
-
-The same rule governs a **literal** ([[const]], [[enum]], [[default]]) on a
-materialized node: the literal is canonicalized first, and the assertion is
-checked against the canonical form. A load-time check that compares the authored
-spelling against the pattern while the emitted constant carries the canonical
-one can both accept an unsatisfiable schema and reject a satisfiable one.
+That same string is the closed-value comparison's operand too ([[const]] /
+[[enum]]), and it is projected **once per member**: two independent projections
+are two operands (**P12.2**), and a second projection in one scope is a
+redeclaration.
 
 ## Property-testing matrix
 
@@ -173,6 +178,7 @@ one can both accept an unsatisfiable schema and reject a satisfiable one.
 | Value not a number | `maxLength:"5"`, `maxLength:true`, `maxLength:null` |
 | Negative value | `maxLength:-1` |
 | Fractional value | `maxLength:5.5` |
+| Above the portable length ceiling | `maxLength:9007199254740992` |
 | Type mismatch (P7.1) | `{type:"integer", maxLength:5}`, `{type:"array", maxLength:3}` |
 | Unsatisfiable range | `{type:"string", minLength:10, maxLength:2}` |
 | Literal exceeds bound | `{type:"string", maxLength:2, const:"abc"}`, `{…, default:"abc"}`, `{…, enum:["ok","toolong"]}` |
@@ -210,7 +216,11 @@ one can both accept an unsatisfiable schema and reject a satisfiable one.
 - **[[const]] / [[default]] / [[enum]]**: a string literal supplied by one
   of these on the **same node** MUST satisfy `maxLength` at load (rule
   above) — the string-length half of the deferred literal-vs-constraint
-  obligation.
+  obligation. A **closed value set** does not remove the bound: where a target
+  gives the closed set its own named type, the count is taken over that
+  value's underlying `string`. Handing the named type to the code-point-count
+  primitive is a compile error, and dropping the check silently makes the
+  emitted validator depend on the load-time check having been exact.
 - **[[minProperties]] / [[maxProperties]]**: the *object member-count*
   analog; [[maxItems]] / [[minItems]] is the *array-length* analog. All
   are count assertions that share the "count the right thing, compare

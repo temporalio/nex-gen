@@ -8,19 +8,35 @@ first — the two file modes and the `nexusrpc` / `$schema` root rules —
 live in [[input-files]]. See [PRINCIPLES.md](PRINCIPLES.md) and
 `features/<keyword>.md` for detail.
 
+*(Status: open — the JSON Schema front end takes the emitted target through
+parse: inline-shape hoist naming, identifier validation and `x-<lang>-name`
+selection all happen there, so the loader is re-run once per target and its
+output already carries target-specific identifiers. Language-agnostic and
+run-once is the contract; the front end is the defect. Closing it means
+preserving every authored override through parse and selecting per target in a
+later pass.)*
+
 Parse begins from the explicitly supplied entry files. The loader follows local
 `$ref` edges to a fixpoint, canonicalizes and deduplicates the discovered files,
-then computes one common source root for the complete closure. Fragments are
-resolved as RFC 6901 JSON Pointers: every token is decoded independently
-(`~0`/`~1`), including pointers through nested `$defs`. A bare `#/` is not a
-synonym for the document root and is rejected.
+then computes one common source root for the complete closure, bounded by the
+invocation root ([[ref]]). Fragments are resolved as RFC 6901 JSON Pointers:
+every token is decoded independently (`~0`/`~1`), including pointers through
+nested `$defs`. A bare `#/` is not a synonym for the document root and is
+rejected. Decoding happens **once**, here: what a later pass or a backend
+receives is the decoded, module-qualified model name, and decoding it a second
+time silently destroys any name that legitimately contains `~0`/`~1` — along
+with every graph edge through it.
 
 Each source in that closure marks its exported type declarations: its file-root
 model when present, every referenced model in its `$defs` tree, and source-owned
 models synthesized for inline operation inputs or outputs. This neutral
-declaration metadata travels with the shared IR into reachability. Later shared
-passes do not identify JSON Schema declarations or infer a source's public
-surface from external-type kind.
+declaration metadata travels with the shared IR into reachability, and **no
+shared pass infers a source's public surface from external-type kind** —
+retention is driven by the declaration metadata alone. *(Status: open — the
+reachability and emitted-name passes do still branch on the JSON external-type
+kind for naming and traversal, so the stronger property, that no later shared
+pass identifies JSON Schema declarations at all, does not hold, and nothing
+mechanically stops a new pass from adding such a branch.)*
 
 ```mermaid
 flowchart TD
@@ -36,7 +52,7 @@ flowchart TD
       P --> R --> S --> G --> N
     end
 
-    IR[["Type model (IR)<br/>shape · optional vs nullable · normalized scalar matchers<br/>const/enum/default · deprecation metadata"]]
+    IR[["Type model (IR)<br/>shape · optional vs nullable · normalized schema (merged, hoisted, pattern-normalized)<br/>const/enum/default · deprecation metadata"]]
 
     subgraph GEN["GENERATOR — emit code per target"]
       direction LR
@@ -60,13 +76,17 @@ of closed/default literals all consume that normalized description. Backends
 still own syntax and native materialization, but they do not independently
 choose which accepted assertions apply.
 
-Every (de)serializer is three layers around one shared `Validate(model)`,
-identical in both directions.
+Every (de)serializer is three layers around one shared constraint layer. Sharing
+is a requirement on the **predicate**, not on the call graph, and what the two
+directions must share is the comparison *and its operand* — see **P12.2**, which
+owns the rule. A predicate that counts wire keys on one side and decoded members
+on the other is not shared however it is spelled, and it makes the aggregated
+violation set direction-dependent, which **P11.1** forbids.
 
 ```mermaid
 flowchart LR
     W1["wire JSON"] --> PA["Parse adapter<br/>spec-number parse, null rules,<br/>absence→required, unknown keys"]
-    PA --> VAL{{"Shared Validate(model)<br/>constraints · const/enum · counts"}}
+    PA --> VAL{{"Shared constraint layer<br/>constraints · const/enum · counts"}}
     VAL --> M["typed model"]
     M --> VAL
     VAL --> EA["Encode adapter<br/>omit vs emit-null, default omission"]

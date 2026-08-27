@@ -42,15 +42,31 @@ Loader behavior:
   `maximum:null`).
 - `maximum` on a non-numeric [[type]] (`{type:"string", maximum:5}`) →
   reject per **P7.1** (statically meaningless).
-- **On an `integer` field the bound MUST be integer-valued.** `maximum:5.0`
-  is accepted (≡ `5`, honoring the `1.0`-as-integer rule from [[type]]);
-  `maximum:5.5` is **rejected** with a fix-it ("use an integer bound, or
-  make the field `number`"). An integer bound lets all four languages
-  compare against one integer value with no float/round ambiguity.
-- On a `number` field any finite numeric bound is accepted.
+- **Over an `integer` position the bound MUST be integer-valued.**
+  `maximum:5.0` is accepted (≡ `5`, honoring the `1.0`-as-integer rule from
+  [[type]]); `maximum:5.5` is **rejected** with a fix-it ("use an integer
+  bound, or make the position `number`"). An integer bound lets all four
+  languages compare against one integer value with no float/round ambiguity.
+  **The rule is keyed on the kind of the value being bounded, not on the
+  node the bound is written on.** Where the two differ — a [[contains]]
+  matcher declaring `type: number` over `integer` [[items]], the widest such
+  case — the *effective* kind governs, so a fractional bound there is the
+  same reject as a fractional bound on an `integer` property. Resolving the
+  position's kind once at load is what makes it a reject at all: left to the
+  backends, each derives the position kind and the bound literal
+  independently, and a fractional bound then truncates in some targets and
+  survives in others — an accepted array element in one language and a
+  rejected one in another, which **P1** forbids outright.
+- Over a `number` position any finite numeric bound is accepted.
 - A `maximum` larger than the [[type]] integer cap `+(2^53−1)` (or
-  `minimum` below `−(2^53−1)`) on an `integer` field is **redundant** (the
-  cap already rejects) but **allowed** — not an error, just dead range.
+  `minimum` below `−(2^53−1)`) over an `integer` position is **redundant**
+  (the cap already rejects) but **allowed** — not an error, just dead range.
+- The **opposite direction empties the accepted set and is a reject**: a
+  `minimum` above `+(2^53−1)` or a `maximum` below `−(2^53−1)` over an
+  `integer` position admits no value the cap lets through, so the cap
+  participates in the satisfiability computation below as a bound in its own
+  right. (`{type:"integer", minimum:9007199254740992}` → reject; see
+  [[type]].)
 - **`maximum` and `exclusiveMaximum` both present on the same node →
   reject (redundant).** Both are upper bounds, so one always dominates
   (`v ≤ M ∧ v < X` reduces to whichever is tighter) — keeping both is
@@ -80,7 +96,7 @@ the **shared `Validate`** layer of **P12**).
 
 | Language | Strategy |
 |---|---|
-| Go | The comparison is a predicate in the shared `Validate(model)` (`if v > max { push(Violation{Path, Reason: fmt.Sprintf("must be <= %v, got %v", max, v)}) }`), which the generated `UnmarshalJSON` calls after decoding; violations collect into one `PayloadValidationError` application failure. Integer field: compare the decoded `int64` to the integer bound directly (exact). Number field: compare `float64` to the `float64` bound. |
+| Go | The comparison is a predicate in the shared `Validate(model)` (`if v > max { push(Violation{Path, Reason: fmt.Sprintf("must be <= %v, got %v", max, v)}) }`), applied identically on both directions' paths (**P12.2**: sharing is a requirement on the predicate, not on the call graph); violations collect into one `PayloadValidationError` application failure. Integer field: compare the decoded `int64` to the integer bound directly (exact). Number field: compare `float64` to the `float64` bound. |
 | TypeScript | ``if (v > max) push(Violation{path, reason: `must be <= ${max}, got ${v}`})``, throw one `PayloadValidationError` application failure. `number` covers both `integer` and `number` fields; `max` is an emitted numeric constant. |
 | Python | An explicit comparison in the transfer type converter (PRINCIPLES Python §3): `if v > max: violations.append(Violation(path=…, reason=f"must be <= {max}, got {v}"))`, aggregated into the single generated `PayloadValidationError` application failure. On an `integer` field it runs **after** `_parse_spec_integer` has normalized the wire value (`5.0`→`5`, see [[type]]), so the comparison is against a Python `int`. `max` is an inlined numeric literal. |
 | Java | The per-POJO collecting deserializer (PRINCIPLES Java §5) reads the field node via the [[type]] `SpecNumbers` helper, then checks `v > max` (integer field: `long` vs `long`; number field: `double` vs `double`), pushing a `Violation{path, "must be <= " + max + ", got " + v}` into the single `PayloadValidationError` application failure. **Not** bean-validation `@Max` — the check is hand-written in the collecting deserializer like every other constraint. |
@@ -96,9 +112,9 @@ runtime value. The rest of the numeric family
 ([[minimum]], [[exclusiveMaximum]], [[exclusiveMinimum]], [[multipleOf]])
 follows the same convention with its own operator/word.
 
-**Cross-language exactness (integer field).** An `integer` field's bound is
-itself integer-valued (loader rule above), so Go and Java compare the
-decoded `int64`/`long` against the integer bound directly — exact, no
+**Cross-language exactness (integer position).** An `integer` position's
+bound is itself integer-valued (loader rule above), so Go and Java compare
+the decoded `int64`/`long` against the integer bound directly — exact, no
 promotion. TypeScript has only IEEE doubles, so it necessarily performs the
 comparison in `double`; this still agrees value-for-value because both the
 capped value and the bound lie within `±(2^53−1)`, which is exactly
@@ -107,8 +123,9 @@ e.g. `(double)cap <= 5.5 == false`). Python normalizes the wire value to
 `int` via `_parse_spec_integer` before comparing, so it too compares
 exactly. This is the same
 cap guarantee the integer runtime helpers lean on in [[type]].
-(This is *why* an integer-field bound is required to be integer-valued: it
-keeps even the mixed integer/float comparison exact and unambiguous.)
+(This is *why* an integer-position bound is required to be integer-valued: it
+keeps even the mixed integer/float comparison exact and unambiguous, and it
+leaves no bound literal for a backend to round on its own.)
 
 ### Serialize-side (P12)
 
@@ -140,8 +157,10 @@ not here.
 |---|---|
 | Value not a number | `maximum:"5"`, `maximum:true`, `maximum:null` |
 | Type mismatch (P7.1) | `{type:"string", maximum:5}`, `{type:"boolean", maximum:1}` |
-| Fractional bound on integer field | `{type:"integer", maximum:5.5}` |
+| Fractional bound over an `integer` position | `{type:"integer", maximum:5.5}` |
+| …including where the bound's own node declares a wider kind | `{type:"array", items:{type:"integer"}, contains:{type:"number", minimum:1.5}}` |
 | Unsatisfiable range | `{type:"integer", minimum:10, maximum:2}` |
+| Range emptied by the integer cap | `{type:"integer", minimum:9007199254740992}`, `{type:"integer", maximum:-9007199254740992}` |
 | Empty range vs exclusive | `{type:"integer", minimum:5, exclusiveMaximum:5}` (see [[exclusiveMaximum]]) |
 | Redundant same-axis pair | `{type:"integer", maximum:10, exclusiveMaximum:12}`, `{type:"integer", maximum:10, exclusiveMaximum:10}` |
 
@@ -179,7 +198,10 @@ not here.
     `exclusiveMinimum:1, exclusiveMaximum:2` — nothing strictly between;
     each bound is individually well-formed but no value passes, so we
     reject at load instead). `minimum == maximum` on an integer is the
-    one-value case and is fine.
+    one-value case and is fine. The [[type]] cap `±(2^53−1)` is one of the
+    intersected half-lines: an authored bound may narrow the interval inside
+    the cap, but it can never widen it past the cap, so a bound that pushes
+    the interval wholly outside empties it and rejects.
 - **[[multipleOf]]**: with a range present, if no multiple of the divisor
   lies in the accepted interval the schema is unsatisfiable → reject
   (detail in [[multipleOf]]).

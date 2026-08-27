@@ -12,12 +12,14 @@ with **unanchored search** and **ASCII** class semantics. That
 configuration was validated against the **conformance corpus** of
 `(pattern, instance)` pairs run through all four runtime engines plus the
 Rust gate (`json-schema/corpora/pattern_conformance/`), which proved the compile
-gate + pinned flags alone is *not* enough — three further constructs
-(inline flags, `\s`/`\S`, and the `$` anchor) compile everywhere yet match
-differently. Each gets an explicit rule: inline flags are **rejected**, and
-`\s`/`\S` and `$` are **normalized** to a portable form in the emitted
-pattern (**Conformance-verified gate rules**, below). With those, all four
-agree value-for-value.
+gate + pinned flags alone is *not* enough: constructs that compile everywhere
+still match differently, and constructs the gate's own engine compiles still
+fail to compile in a target. The gate therefore carries an explicit rule per
+construct — some rejecting it, some **normalizing** the emitted pattern
+(**Conformance-verified gate rules**, below). Every corpus pair agrees
+value-for-value under those rules; **two gaps in the gate are open** (rules 7
+and 8), and corpus agreement is not by itself evidence that the gate is
+complete.
 
 ## Spec summary
 
@@ -48,10 +50,11 @@ pure-Rust **`regex` crate** (the generator's own engine) cannot compile —
 lookahead `(?=…)`/`(?!…)`, lookbehind, backreferences `\1`, and other
 backtracking-only Perl constructs — is **rejected at load** (deferred,
 *not* a categorical P6 exclusion). Additional syntax categories are rejected
-or normalized where the runtime engines diverge (the gate is below (its known holes are marked in rules 7 and 8)):
-inline flags are rejected; `.` / `\s` / `\S` and the `$` end-anchor are
-normalized; non-portable escapes, assertion spellings, class operations,
-named captures, and ambiguous unbounded repetitions are rejected. Applies only
+or normalized where the runtime engines diverge: inline flags are rejected;
+`.` / `\s` / `\S` and the `$` end-anchor are normalized; non-portable escapes,
+assertion spellings, class operations, named captures, and ambiguous unbounded
+repetitions are rejected. The full rule list is below, with its two open gaps
+marked (rules 7 and 8). Applies only
 to `string` fields. "RE2-safe" below names the
 **regular (no-backtracking) subset** — the algorithm family that Rust's
 `regex` and Go's `regexp` both implement — not a dependency on Go.
@@ -66,14 +69,15 @@ Rationale (citing [[PRINCIPLES.md]]):
   1. **Dialect.** The *regular* engines — Rust's `regex` crate (what the
      generator itself uses) and Go's `regexp` (RE2) — have **no
      backtracking** and reject lookaround/backreferences; ECMA-262, Python
-     `re`, and `java.util.regex` all **accept** them. The regular engines
-     are therefore the **strictest** — a pattern they compile is compilable
-     by the permissive three — so the **load-time gate compiles the pattern
-     with the Rust `regex` crate** (below; pure Rust, no Go toolchain), and
-     the rejected non-regular constructs are exactly the ones with no
-     portable linear-time semantics anyway. Rust `regex` and Go RE2 are the
-     same family and reject the identical construct set — verified
-     directly against each other.
+     `re`, and `java.util.regex` all **accept** them. So the **load-time gate
+     compiles the pattern with the Rust `regex` crate** (below; pure Rust, no
+     Go toolchain), which refuses exactly the non-regular constructs — the
+     ones with no portable linear-time semantics anyway. Compiling under the
+     gate's engine is **necessary but not sufficient**: its accepted language
+     is a *superset* of ECMA-262-with-`u`, Python `re`, and `java.util.regex`
+     in several directions — a quantifier stacked on a quantifier (`a{2}*`) and
+     a leading `]` inside a class are two — so each such direction needs its
+     own rule below, and the two that have none are the open gaps named there.
   2. **Anchoring.** The spec says regexes are *not* implicitly anchored,
      so we use each engine's **unanchored search**: Go `MatchString`, JS
      `RegExp.test`, Python `re.search`, Java `Matcher.find`. The footgun
@@ -89,7 +93,10 @@ Rationale (citing [[PRINCIPLES.md]]):
      `u` flag (fails on astral input) → emit with the **`u` flag**; Java
      `\d` becomes Unicode under `UNICODE_CHARACTER_CLASS` → use
      **default flags** (Java's `.` already matches a code point, and `\d`
-     is ASCII by default). Go RE2 is already ASCII-class + rune-`.`.
+     is ASCII by default). Go RE2 is already ASCII-class + rune-`.`. The `u`
+     flag settles the *width* of `.`; the engines also disagree on which line
+     terminators it excludes, which is why the emitted `.` is the explicit
+     class of gate rule 4.
 - **P4 (minimal runtime deps).** Every target's regex engine is in its
   standard library / language runtime (Go `regexp`, JS `RegExp`, Python
   `re`, `java.util.regex`) — no third-party dependency, unlike a shared
@@ -104,7 +111,9 @@ Rationale (citing [[PRINCIPLES.md]]):
 **Conformance-verified gate rules (beyond no-backtracking).** The
 `(pattern, instance)` corpus run through all four runtime engines + the
 Rust gate (`json-schema/corpora/pattern_conformance/`) showed the compile gate +
-pinned flags is **not** sufficient, so the gate applies these explicit rules:
+pinned flags is **not** sufficient. Each rule below was established by
+measuring the construct in all four engines — the corpus pins the ones whose
+divergence a `(pattern, instance)` pair can express — so the gate applies:
 1. **Inline flag groups `(?i)` / `(?flags:…)` → reject.** JS `RegExp`
    cannot compile them (they are not ECMA-262 syntax); Rust/Go/Python/Java
    all do — a pure compile-acceptance gap (`(?i)^cat$` fails only in JS).
@@ -150,12 +159,16 @@ pinned flags is **not** sufficient, so the gate applies these explicit rules:
    are excluded. The explicit class pins the project's one-code-point,
    not-newline rule and is the spelling used in diagnostics.
 5. **Non-portable escapes → reject.** Only the shared escape vocabulary is
-   admitted. In particular escaped punctuation such as `\-`, `\_`, `\"`,
-   `\ `, `\#`, `\&`, and `\~`; `\a`/`\v`; octal/`\0`; `\uFFFF`;
+   admitted: ECMA-262 `u` mode restricts an identity escape to
+   `^ $ \ . * + ? ( ) [ ] { } |` and `/`, plus `-` **inside** a character
+   class. So escaped punctuation such as `\_`, `\"`, `\ `, `\#`, `\&`, `\~`,
+   and `\-` outside a class; `\a`/`\v`; octal/`\0`; `\uFFFF`;
    `\UFFFFFFFF`; `\x{…}`; and Unicode property escapes `\p{…}` are rejected.
+   The portable spellings are the bare character, or `\xHH` for a control code.
 6. **Non-portable assertions and captures → reject.** `\A`, `\z`,
    `\b{start}`/`\b{end}`, `\<`/`\>`, and both named-capture syntaxes are
-   outside the shared grammar.
+   outside the shared grammar. `\b` / `\B` are portable and pass through
+   (`pattern` never reads a capture, so `(?:…)` is the portable group).
 7. **Ambiguous punctuation/classes → reject.** A lone `{`, `}`, or `]`
    **outside a character class**; POSIX classes; nested classes; and class set
    operations (`&&`, `--`, `~~`) are rejected rather than interpreted
@@ -173,10 +186,13 @@ pinned flags is **not** sufficient, so the gate applies these explicit rules:
    target-specific backtracking failures; it does not eliminate them, and
    nothing here licenses either escape.
 
-All of these compile under `regex::Regex::new`, so the gate additionally
-walks the pattern's `regex-syntax` **AST** — rejecting inline-flag groups,
-locating each `\s`/`\S` Perl node (with its `negated` flag, enclosing-class
-context, and byte span) to splice the rewrite, and locating the `$`
+All of these compile under the gate's own engine, so the gate additionally
+walks the pattern's `regex-syntax` **AST**: it applies every reject above
+(inline-flag groups, non-portable escapes and assertions, named captures, lone
+brackets, POSIX / nested / set-operator classes, ambiguous unbounded
+repetitions), locates each `\s`/`\S` Perl node (with its `negated` flag,
+enclosing-class context, and byte span) to splice the rewrite, locates each `.`
+for the class rewrite, and locates the `$`
 assertion for the anchor rewrite. The AST is escape-safe for free: an
 escaped `\$` or a literal `s` from `\\s` produces no assertion / Perl node
 and is left untouched. Still pure Rust, no Go toolchain.
@@ -189,19 +205,21 @@ manages it for the *value*.
 
 Loader behavior:
 - `pattern` not a string → reject.
-- `pattern` on a non-string [[type]] → reject (**P7.1**).
+- `pattern` on a non-string [[type]] → reject (**P7.1**). Where the `type` is
+  itself unsupported — an array `type` such as `["string","null"]` — **that**
+  reject takes precedence: the actionable fix is the `type` spelling, and a
+  `pattern` diagnostic sends the author to the wrong keyword.
 - **`pattern` does not compile under the Rust `regex` crate → reject** with
   a "not portable / not yet supported" diagnostic that names the construct
   (lookahead, lookbehind, backreference, …) and notes the generator
   supports the regular (no-backtracking) subset. This is the portability
   gate: the loader (pure Rust) compiles the pattern once with the `regex`
   crate — **no Go toolchain dependency** — and success ⟹ the regular
-  subset, which every target's runtime engine accepts. The gate then walks
-  the `regex-syntax` **AST** for the three conformance rules below. It never
-  runs a production match, so the `regex` crate's *own* default semantics
-  (e.g. Unicode-aware `\d` — it matches U+0663, verified) are irrelevant
-  here; runtime matching is pinned per target (ASCII classes, code-point
-  `.`, unanchored) in the Validator mapping.
+  subset. The gate then walks
+  the `regex-syntax` **AST** for the conformance rules above; compile success
+  alone does not establish portability. The gate itself runs no production
+  match — but the literal check below does, and it runs under the **pinned
+  runtime semantics**, not the gate engine's defaults.
 - **Inline flag group `(?i)` / `(?flags:…)` → reject** — not ECMA-262; JS
   cannot compile it (Conformance-verified gate rules).
 - **`\s` / `\S` → normalized** to `[\t\n\x0B\f\r ]` / `[^\t\n\x0B\f\r ]` in
@@ -212,21 +230,38 @@ Loader behavior:
 - **`$` end-anchor → normalized, not rejected** — emitted as `\Z` (Python)
   / `\z` (Java), kept as `$` (Go/JS), so it means end-of-input in every
   target (no trailing-`\n` exception).
+- **`.` → normalized** to `[^\n]` in the emitted pattern (gate rule 4), so the
+  emitted regex — and every diagnostic that quotes it — carries the explicit
+  class rather than the authored `.`.
+- **Non-portable escapes, assertion spellings, named captures, lone
+  `{`/`}`/`]`, POSIX / nested / set-operator classes, and ambiguous unbounded
+  repetitions → reject** (gate rules 5-8), each with a fix-it naming the
+  portable spelling.
 - **Empty pattern `""`** → matches every string (vacuous no-op) → accepted
   but constrains nothing (mirrors [[minLength]]`:0`).
 - A `const`/`default`/`enum` string literal on the **same node** that does
   **not** match the pattern → reject at load (e.g. `{type:"string",
   pattern:"^[a-z]+$", const:"AB"}`). The string-regex half of the deferred
   literal-vs-constraint obligation ([[const]] / [[default]]).
+  The literal is matched against the **gate-normalized** pattern under the
+  **same pinned semantics the emitted validators use** — ASCII `\d`/`\w`/`\s`,
+  code-point `.`, unanchored — so the loader's accept set is the runtime accept
+  set. Matching with an engine's Unicode-by-default classes instead does both
+  harms at once: `{pattern:"^\\w+$", default:"café"}` loads and emits a constant
+  every target's own validator rejects, and `{pattern:"^\\W+$", default:"é"}`
+  is refused though all four accept it. On a materialized node the literal is
+  **canonicalized before it is matched** (see Serialize-side).
 
-**Deferred, not excluded.** The remaining rejects are the conservative v1
-line, not a permanent boundary. A future release could **admit `(?i)`** via
-a case-fold rewrite or a real flag channel, admit the **backtracking
-constructs** where a portable rewrite exists / by shipping a shared engine,
-or admit **`\S` in a multi-member class** if a portable positive form is
-found — each gated on the conformance corpus agreeing. Tracked in the open
-question below; mirrors [[multipleOf]]'s fractional-divisor deferral and
-[[patternProperties]]' single-pattern carve-out.
+**Deferred, not excluded.** The rejects are the conservative v1 line, not a
+permanent boundary. A future release could **admit `(?i)`** via a case-fold
+rewrite or a real flag channel, admit the **backtracking constructs** where a
+portable rewrite exists / by shipping a shared engine, admit **`\S` in a
+multi-member class** if a portable positive form is found, or admit any of the
+rule 5-8 categories by rewriting them to their portable spelling at emit time
+(a POSIX class and an escaped punctuation character both have one) — each gated
+on the conformance corpus agreeing. Tracked in the open question below; mirrors
+[[multipleOf]]'s fractional-divisor deferral and [[patternProperties]]'
+single-pattern carve-out.
 
 ## Type mapping
 
@@ -259,15 +294,36 @@ with them.
 "AB1"`), per the [[maximum]] convention. The pattern is an emitted
 compile-time constant; the value is interpolated at runtime.
 
+**The emitted pattern is a string literal in the target's own escape
+grammar.** The pattern text can contain any code point the schema author wrote,
+including a non-printable one (a no-break space, a combining mark, a soft
+hyphen). Each target's literal is spelled with that target's escapes — Go and
+Python have no `\u{…}` form, so a non-printable code point must be emitted
+either verbatim or as an escape the target accepts, never in a Rust-flavored
+one. An unspellable escape does not produce a wrong verdict; it produces a
+package that does not compile.
+
+**A runtime throw is a `Violation`.** No check on this path may let an
+exception escape the field handler. A regex engine that throws rather than
+returning a verdict — Java's matcher recursing on a deeply-backtracking pattern
+throws an `Error`, not an exception — must be caught at the member and pushed as
+a `Violation` on that member's path. An escaping throw loses the path *and*
+every violation already aggregated for the payload, which is the aggregate
+**P11** exists to deliver, and it leaves the two directions reporting different
+violation sets (**P11.1**).
+
 **Why compile-once.** Recompiling a regex per (de)serialize call is a
 needless cost (P2 favors ergonomics/idiom, and a package-level compiled
 pattern *is* the idiom in all four); the load-time gate is what lets the
-emitted `MustCompile`/`Pattern.compile` be unconditional — its job is to
-turn any runtime compile failure into a load-time reject. The one
-gate-accepted-but-runtime-uncompilable case the corpus found (JS and inline
-flags) is now a gate reject, so every emitted pattern compiles in its
-target; the corpus (`json-schema/corpora/pattern_conformance/`) stays as the
-regression guard against any future-discovered edge.
+emitted `MustCompile`/`Pattern.compile` be unguarded — its job is to
+turn any runtime compile failure into a load-time reject. An admitted pattern
+that a target's engine then refuses is therefore a **gate defect**, never a
+licensed exception. Two such patterns are open (gate rules 7 and 8): a leading
+`]` inside a class, which a JS `RegExp` refuses at module load, and a
+quantifier stacked on an exact-count quantifier, which Go's `MustCompile`
+refuses at package init. The corpus
+(`json-schema/corpora/pattern_conformance/`) is the regression guard, and it
+reaches neither.
 
 ### Serialize-side (P12)
 
@@ -284,28 +340,28 @@ direction-agnostic.
 
 **On a materialized node** ([[format]] temporal / [[contentEncoding]]
 bytes) the decoded value is not a `string`, so the regex matches the
-**canonical wire string** instead: the incoming wire string on parse, and
-the encode adapter's re-serialized wire string on serialize, **before
-emit**. Still one predicate, identical in both directions; the wire string
-is projected from the native value on the encode side.
-**Which string, precisely — and it is *not* the incoming one.** "Canonical wire
-string" means the form the encode adapter produces for that value, and the
-assertion measures **that** form at both boundaries. On parse this means the
-predicate runs **after** the value has been parsed and re-canonicalized, not
-against the bytes as they arrived. The distinction is invisible for a format
-with a single spelling and decisive for one without: `PT90M` and `PT1H30M` are
-the same [[format]] `duration`, they canonicalize to `PT1H30M`, and they differ
-in length and in what a regex matches.
+**canonical wire string** — the form the encode adapter produces for that value
+— at **both** boundaries: on parse the value is parsed and re-canonicalized
+*before* the predicate runs, and on serialize the re-serialized wire string is
+matched **before emit**. Still one predicate, identical in both directions.
+Matching the incoming form on parse and the canonical form on serialize would
+make that false: `PT90M` and `PT1H30M` are one [[format]] `duration` value whose
+canonical spelling is `PT1H30M`, so a payload could be admitted and then be
+unre-emittable — a **P1** accept-set defect, not a rounding of one, and the
+operand drift **P12.2** names outright.
 
-Measuring the incoming form on parse and the canonical form on serialize would
-make "identical in both directions" false — a payload could be admitted and then
-be unre-emittable, which is a **P1** accept-set defect, not a rounding of it.
+That same string is the closed-value comparison's operand too ([[const]] /
+[[enum]]), and it is projected **once per member**: two independent projections
+are two operands (**P12.2**), and a second projection in one scope is a
+redeclaration.
 
-The same rule governs a **literal** ([[const]], [[enum]], [[default]]) on a
-materialized node: the literal is canonicalized first, and the assertion is
-checked against the canonical form. A load-time check that compares the authored
-spelling against the pattern while the emitted constant carries the canonical
-one can both accept an unsatisfiable schema and reject a satisfiable one.
+A **literal** ([[const]], [[enum]], [[default]]) on such a node is measured
+against the same string: the loader canonicalizes it **before** the pattern
+check, so the spelling checked is the spelling the emitted constant carries.
+Checking the authored spelling instead is wrong in both directions — it accepts
+`{format:"duration", pattern:"^PT90M$", const:"PT90M"}`, whose emitted constant
+`PT1H30M` its own emitted pattern rejects, and it refuses
+`{format:"duration", pattern:"^PT1H30M$", const:"PT90M"}`, which is satisfiable.
 
 ## Property-testing matrix
 
@@ -331,10 +387,10 @@ one can both accept an unsatisfiable schema and reject a satisfiable one.
 | Non-portable: backreference | `{type:"string", pattern:"(a)\\1"}` |
 | Inline flag group (JS can't compile) | `{type:"string", pattern:"(?i)^cat$"}` |
 | `\S` in a multi-member class (open complement) | `{type:"string", pattern:"[\\S.]"}`, `{…, pattern:"[\\S\\d]"}` |
-| Non-portable escape | escaped punctuation, octal, Unicode-property, or engine-specific escape syntax |
-| Non-portable assertion/capture | `\Acat`, `(?<word>cat)` |
-| Class operation / POSIX class | `[a-z&&[^x]]`, `[[:alpha:]]` |
-| Ambiguous unbounded repetition (D7) | `^([a-z]+)+$` |
+| Non-portable escape | `{…, pattern:"^\\d{3}\\-\\d{4}$"}` (escaped `-`), `{…, pattern:"^\\p{L}+$"}` |
+| Non-portable assertion/capture | `{…, pattern:"\\Acat"}`, `{…, pattern:"(?<word>cat)"}` |
+| Class operation / POSIX class | `{…, pattern:"[a-z&&[^x]]"}`, `{…, pattern:"[[:alpha:]]"}` |
+| Ambiguous unbounded repetition (D7) | `{…, pattern:"^([a-z]+)+$"}`, `{…, pattern:"^(\\w+\\s*)+$"}` |
 | Literal fails pattern | `{type:"string", pattern:"^[a-z]+$", const:"AB"}`, `{…, default:"9"}` |
 
 ### Runtime fixtures (validator)
@@ -375,16 +431,22 @@ Fixtures outside the corpus (validator integration, not pure matching):
   regex still checks the wire string.
 - **[[const]] / [[default]] / [[enum]]**: a supplied string literal MUST
   match `pattern` at load (rule above) — the regex half of the deferred
-  literal-vs-constraint obligation.
+  literal-vs-constraint obligation. A **closed value set** on the same node
+  does not remove the match: where a target gives the closed set its own named
+  type, the predicate is evaluated over that value's underlying `string`.
+  Handing the named type to the regex primitive is a compile error, and
+  dropping the predicate silently makes the emitted validator depend on the
+  load-time check having been exact.
 - **[[patternProperties]]**: the *key-space* regex keyword (temporarily
   unsupported). It faces the **same** RE2-vs-ECMA-262 dialect gap this
   keyword manages for values — see [[patternProperties]], which points
   here for the confined, managed case.
 - **[[format]]**: the named-shape string keyword. Its regex-lowered
   formats (`uuid`, `ipv4`, `ipv6`, and the syntactic pass of the temporal
-  formats) reuse this keyword's RE2-safe gate and compile-once mechanism;
-  temporal formats add a shared calendar predicate on top. Both may appear
-  on one node — the value must satisfy both.
+  formats) are held to this keyword's RE2-safe subset — each pinned pattern
+  passes this gate **unchanged** — and use the same compile-once mechanism and
+  per-target end-anchor rewrite; temporal formats add a shared calendar
+  predicate on top. Both may appear on one node — the value must satisfy both.
 
 ## Ecosystem variance
 
@@ -392,17 +454,22 @@ Fixtures outside the corpus (validator integration, not pure matching):
 |---|---|
 | JSON Schema 2020-12 | Native (ECMA-262 dialect). Portable subset accepted; non-portable constructs rejected (deferred). |
 | OpenAPI 3.1 | Adopts 2020-12 — same. |
-| OpenAPI 3.0 / draft-4 | `pattern` present since draft-4, same ECMA-262 intent. Patterns using backtracking constructs (lookaround/backreferences) or inline flags need a rewrite to the regular subset or await wider support; `\s`/`\S` and `$` are handled automatically by normalization. |
+| OpenAPI 3.0 / draft-4 | `pattern` present since draft-4, same ECMA-262 intent. The rewrite an imported pattern needs is wider than the backtracking constructs: escaped punctuation (`\d{3}\-\d{4}`), Unicode-property escapes (`\p{L}`), POSIX classes (`[[:alpha:]]`), the `[\s\S]` "any character" idiom and ambiguous unbounded repetitions (`(\w+\s*)+`) are all common in authored schemas and all reject. `\s`/`\S`, `.` and `$` are handled automatically by normalization. |
 | Swagger 2.0 | Same as OAS 3.0. |
 
-The cross-engine divergences enumerated here are handled; rules 7 and 8 name the ones that are not — the compile gate
-+ `regex-syntax` AST checks **reject** the non-portable constructs
-(lookaround/backref, inline flags, and the narrow `\S`-in-multi-member-class
-case) and **normalize** `\s`/`\S` (→ explicit ASCII class) and `$` (→ per-
-target end-anchor), which is what makes the four runtimes agree
-value-for-value. The **residual risk** is not `\b` or the `.`-newline corner — both are covered by the corpus (`wordbound-*`, `notwordbound`, `dot-no-newline`, `dot-carriage-return`, `dot-next-line`, `dot-line-separator`, `dot-paragraph-separator`), and `.` is now rewritten to `[^\n]` by rule 4 above. The edges actually open are: **lone-surrogate wire strings**, and any divergence that only appears past the corpus's length ceiling — **no corpus instance exceeds 31 characters**, so an input-length-dependent difference such as a backtracking blow-up on a quantified alternation is structurally invisible to it.`-newline corner). Every accepted row the
-corpus does contain is executed in all four current runtimes; every rejected
-row is rechecked by the Rust loader gate. New acceptance edges belong in that
+The cross-engine divergences enumerated in the gate rules are handled: the
+compile gate + `regex-syntax` AST checks **reject** the non-portable
+constructs and **normalize** `\s`/`\S` (→ explicit ASCII class), `.`
+(→ `[^\n]`) and `$` (→ per-target end-anchor), which is what makes the four
+runtimes agree value-for-value on every corpus pair. Rules 7 and 8 name the
+divergences that are **not** handled. Beyond those, the open edges are
+**lone-surrogate wire strings** and any divergence that appears only past the
+corpus's length ceiling — **no corpus instance exceeds 31 characters**, so an
+input-length-dependent difference such as a backtracking blow-up on a
+quantified alternation is structurally invisible to it. `\b` and the
+`.`-newline corner are *not* among them; both are covered. Every accepted row
+the corpus contains is executed in all four current runtimes; every rejected
+row is rechecked by the loader gate. New acceptance edges belong in that
 corpus before the gate is widened.
 
 ### Prospective targets (.NET, Ruby)
@@ -417,26 +484,33 @@ findings (record them here so the recipe survives to implementation time):
 | **.NET** | `System.Text.RegularExpressions` | `Regex.IsMatch(v, p, RegexOptions.ECMAScript)` — `IsMatch` is unanchored; **`ECMAScript`** makes `\d\w\s` ASCII (Unicode by default otherwise). `$`→**`\z`** (its `\Z` is the *lenient* one, reverse of Java). **Astral `.` is a divergence:** .NET `.` matches one UTF-16 unit and there is **no `u`-flag equivalent**, so `^a.b$` misses `"a😀b"` — the emitter must rewrite each `.`→`(?:[\uD800-\uDBFF][\uDC00-\uDFFF]|.)` (verified 70/72 → 72/72 with the rewrite). This is the same problem JS has, solved by an explicit rewrite instead of a flag. |
 | **Ruby** | Onigmo (`Regexp`) | `re.match?(v)` — unanchored. `\d`/`\w`/`\s` are ASCII by default (good), and `.` is a code point (good). But `^`/`$` are **always line anchors** (no non-multiline mode), so normalize **`^`→`\A`, `$`→`\z`** (never `\Z` — that is the lenient one). And `\b` is **Unicode** even though `\w` is ASCII (an Onigmo quirk), so **inject a leading `(?a)`** ASCII-mode flag into the emitted pattern to force ASCII `\b` (verified 0 divergences with both transforms). `\s`/`\S` normalization and the `$`/`\S`-class rules carry over unchanged. |
 
-Neither needs a new *gate* rule — the existing rejects (backtracking, inline
-flags, `\S`-in-multi-member-class) already cover them, and both accept the
-`\s`/`\S`- and `$`-normalized output. The `.NET` astral-`.` rewrite and the
+Neither needs a new *gate* rule — the existing rejects already cover them, and
+both accept the normalized output. The `.NET` astral rewrite and the
 Ruby `(?a)`-inject + `^`/`$`→`\A`/`\z` are additions to those targets'
 *emitters*, mirroring how each current target already applies its own
-per-engine flag/anchor treatment.
+per-engine flag/anchor treatment. Note the astral rewrite must target the
+**negated class** the gate emits, not `.`: no `.` survives normalization, so a
+recipe written against `.` would never fire.
 
 ## Open questions
 
-1. **Widen the accepted subset.** The v1 gate still rejects backtracking
-   constructs (lookaround/backreferences), inline flag groups, and `\S`
-   inside a multi-member class. Each is a candidate for later admission via
-   a semantics-preserving rewrite — `(?i)` → case-fold expansion or a real
-   flag channel, backtracking → a portable rewrite where one exists or a
-   shared engine, multi-member `[\S…]` → a positive form if one is found —
+1. **Widen the accepted subset.** The v1 gate rejects backtracking
+   constructs (lookaround/backreferences), inline flag groups, `\S`
+   inside a multi-member class, and the rule 5-8 categories. Each is a
+   candidate for later admission via a semantics-preserving rewrite — `(?i)` →
+   case-fold expansion or a real flag channel, backtracking → a portable
+   rewrite where one exists or a shared engine, multi-member `[\S…]` → a
+   positive form if one is found, an escaped punctuation character or a POSIX
+   class → its explicit spelling at emit time —
    each gated on the conformance corpus (`json-schema/corpora/pattern_conformance/`)
    still agreeing across all targets (incl. the prospective .NET/Ruby).
    Revisit on demand (mirrors [[multipleOf]]'s fractional-divisor and
-   [[patternProperties]]' single-pattern carve-outs). `\s`/`\S` and `$` were
-   on this list and are now **resolved** by normalization.
+   [[patternProperties]]' single-pattern carve-outs). `\s`/`\S`, `.` and `$`
+   were on this list and are now **resolved** by normalization.
+2. **Close the two open gate rules.** A leading `]` inside a character class
+   and a quantifier stacked on an exact-count quantifier are both admitted and
+   both break a target (rules 7 and 8). Neither is a subset-widening question:
+   the accept set the gate is meant to have already excludes them.
 
 ## See also
 

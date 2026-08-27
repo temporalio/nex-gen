@@ -35,9 +35,10 @@ Loader behavior ([[minimum]] rules with `>`, plus the boolean reject):
   and `{minimum:N, exclusiveMinimum:false}` as `{minimum:N}` (see
   [[exclusiveMaximum]] for the mirror rationale).
 - Value neither number nor boolean → reject.
-- On an `integer` field the bound MUST be integer-valued (`0.0` ok, `0.5`
-  reject) — see [[maximum]].
-- On a `number` field any finite numeric bound is accepted.
+- Over an `integer` position the bound MUST be integer-valued (`0.0` ok,
+  `0.5` reject), keyed on the *effective* kind of the bounded value — see
+  [[maximum]].
+- Over a `number` position any finite numeric bound is accepted.
 - **`exclusiveMinimum` and `minimum` both present → reject (redundant)** —
   both are lower bounds, one always dominates; keep exactly one (**P7.1**,
   the [[maximum]] rule). The lower+upper interval `exclusiveMinimum` +
@@ -60,7 +61,7 @@ failing test (`v ≤ exclusiveMinimum` → a `Violation` reading
 
 | Language | Strategy |
 |---|---|
-| Go | `if v <= exclMin { push(Violation{Reason: fmt.Sprintf("must be > %v, got %v", exclMin, v)}) }` — a predicate in the shared `Validate`, which `UnmarshalJSON` calls after decoding, collecting into one `PayloadValidationError` application failure. |
+| Go | `if v <= exclMin { push(Violation{Reason: fmt.Sprintf("must be > %v, got %v", exclMin, v)}) }` — a predicate in the shared `Validate`, applied identically on both directions' paths (**P12.2**), collecting into one `PayloadValidationError` application failure. |
 | TypeScript | ``if (v <= exclMin) push(Violation{path, reason: `must be > ${exclMin}, got ${v}`})``. |
 | Python | `if v <= exclMin: violations.append(Violation(path=…, reason=f"must be > {exclMin}, got {v}"))` in the transfer type converter, after `_parse_spec_integer` normalizes an integer field's wire value (see [[type]]). |
 | Java | Collecting deserializer (PRINCIPLES Java §5) checks `v <= exclMin` via the `SpecNumbers` helper, pushing a `Violation{path, "must be > " + exclMin + ", got " + v}` into the `PayloadValidationError` application failure. |

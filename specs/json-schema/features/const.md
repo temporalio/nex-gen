@@ -28,7 +28,16 @@ Verbatim (2020-12 validation, §6.1.3):
 
 Distilled:
 - A single-value assertion: the instance must **equal** the keyword's
-  value (JSON equality — by type and value).
+  value — JSON equality, which compares **values and not their written
+  form**. For the three scalar kinds that matters: a string compares by
+  code points, a boolean by itself, and a **number by its mathematical
+  value**, so a `const: 1` is satisfied by the wire tokens `1`, `1.0` and
+  `1e0` alike, and `-0.0` equals `0.0` ([[type]]'s identity rule). A
+  numeric `const` names one number, never one spelling of it; anywhere the
+  generator has to decide whether two `const` values are *the same value* —
+  the [[oneOf]] discriminator's pairwise distinctness above all — this is
+  the comparison it owes, and comparing JSON representations instead would
+  treat one value as two.
 - Equivalent to `enum: [<value>]`; see [[enum]].
 - Value may be any JSON type. In our subset only **scalar** consts
   (string / number / integer / boolean) are supported; `null` and
@@ -77,9 +86,15 @@ Rationale (citing [[PRINCIPLES.md]]):
 Loader behavior:
 - `const` value type-incompatible with the declared [[type]] → reject
   per **P7.1** (`{type:"integer", const:"x"}` is statically
-  unsatisfiable). The const value must validate against the **rest** of
-  the field's own schema too (e.g. `{type:"string", minLength:5,
-  const:"ab"}` → reject — the fixed value can never satisfy the field).
+  unsatisfiable). Numeric compatibility is **directional** and owned by
+  [[type]]: an integral value inhabits `integer` and `number` alike, a
+  fractional one inhabits `number` only, so `{type:"integer", const:1.5}`
+  rejects — including when the pairing arrives through an [[allOf]] merge.
+  An `integer` value outside the `±(2^53−1)` cap likewise rejects, because
+  it names a value the field can never hold. The const value must validate
+  against the **rest** of the field's own schema too (e.g.
+  `{type:"string", minLength:5, const:"ab"}` → reject — the fixed value can
+  never satisfy the field).
   The const value is run through every *constraint* keyword present on the
   same node — [[pattern]], [[minLength]]/[[maxLength]],
   [[minimum]]/[[maximum]], [[exclusiveMinimum]]/[[exclusiveMaximum]],
@@ -100,6 +115,15 @@ Loader behavior:
   information — the same degenerate case as a standalone `{type:"null"}`
   (see [[type]]). If the intent is "nullable", use the [[nullability]]
   pattern; if "absent", omit the field.
+- `const` **on a [[oneOf]] node** — a sum type *or* a [[nullability]]
+  wrapper — → **reject**, with a fix-it naming the branch to move it to. A
+  union node carries no scalar `type`, so the compatibility gate above has
+  nothing to check the value against; a closed value set belongs on the
+  branch whose kind it closes. This is [[oneOf]]'s sibling rule and
+  [[nullability]]'s wrapper-versus-branch rule applied to `const`, and it is
+  a **P7.1** obligation rather than a style preference: authored on the union
+  node the value set is neither uniformly enforced nor uniformly dropped, so
+  one schema names a different accepted value set in each target.
 - Composite const (`const` whose value is an **object or array**) →
   **temporarily unsupported**; reject at load with a "not yet supported"
   diagnostic (not a categorical P6 exclusion — the deep structural-equality
@@ -182,10 +206,14 @@ public final class UserEventKind {
 }
 ```
 
-The private constructor makes the known constant the only obtainable
-instance, so a wrong value **cannot be constructed** in-language — a
-compile-time guarantee. The value class is the shared carrier of `const`
-(one constant) and [[enum]] (several). Numeric and boolean value classes
+Where a member receives this carrier, the private constructor makes the
+known constant the only obtainable instance, so a wrong value **cannot be
+constructed** in-language. The carrier is emitted for an **object
+property**; an **array element** and a **typed-map value** keep the
+primitive Java type, so in those positions closedness rests on the runtime
+equality check alone ([[enum]] states the same scope for the multi-value
+form). The value class is the shared carrier of `const` (one constant) and
+[[enum]] (several). Numeric and boolean value classes
 wrap `long`/`double`/`boolean`, with `@JsonCreator` over the corresponding
 primitive. How the aggregating deserialize path validates (without the
 throw defeating aggregation) is in Validator mapping.
@@ -200,7 +228,11 @@ and on every architecture (the path only parses and compares, never
 computes). The loader carries the value through its shortest
 round-trippable decimal, so every target re-parses to the same double.
 `-0.0` equals `0.0`; `NaN`/`±Infinity` cannot appear (not JSON literals);
-an integer-valued number such as `1.0` is normalized to an integer const.
+an integer-valued number such as `1.0` **is the same value as** `1` —
+equality is over the mathematical number, never the authored spelling. That
+is a claim about the comparison, not about a rewriting step, and it leaves
+the carrier alone: on a `type: number` node the constant and the field stay
+the target's binary64 type (see [[type]]).
 A float const asserts *exact* equality to one specific double, so it is
 intended for values transmitted as authored — not values arrived at by
 upstream computation.
@@ -250,6 +282,17 @@ schema revisions (P13). The class-body surface where **many** constants
 can case-map together (`"user"` + `"USER"` → both `USER`) is exercised by
 [[enum]].
 
+**The pass runs over the schema that is emitted.** Naming derivation,
+encodability and collision are properties of the value set the generator
+actually emits a constant for, so they are decided **once**, on the resolved
+node — after an [[allOf]] merge and after a `$ref` resolution. An authored
+`allOf` branch is an input to that
+merge and not an emitted namespace of its own: a branch value that would
+encode to a colliding or illegal token, but that the merge removes, is not a
+collision, and rejecting it would refuse a schema whose emitted form is
+clean. Shape checks that a merge could silently discard still run per branch
+— see [[allOf]], which owns the split.
+
 ### Naming and encoding (value → identifier)
 
 Go and Java name the value constant after the **value** — Go
@@ -270,13 +313,20 @@ Rules:
   `V_NEG_3`; `-3.14` → `RatioNeg3_14`.
 - **Numbers** encode from the shortest round-trippable decimal; the `.`
   becomes `_` and is **kept** (so `3_14` stays distinct from `314`). A
-  magnitude that canonicalizes to exponent form encodes `e` as `E` and its
-  exponent sign via `Neg` (`1e-7` → `Ratio1ENeg7`). The decimal comes from the
+  magnitude that canonicalizes to exponent form encodes `e` as `E`, drops a
+  positive exponent sign, and encodes a negative one via `Neg` (`1e-7` →
+  `Ratio1ENeg7`, `1e+20` → `Ratio1E20`). The decimal comes from the
   **value**, not the authored spelling: P1 makes `1`, `1.0` and `1e0` one
   number, so an integral value collapses to its integer form and all three
   spellings name one constant (`Score1` / `V_1`). Re-spelling a `const` is a
   no-op on the wire and must not rename a constant out from under callers
-  (P13).
+  (P13). **This holds at every magnitude.** There is no threshold above which
+  the authored spelling is used instead — falling back to it past `2^53` would
+  both reintroduce the instability the canonical decimal exists to remove
+  (`1e+20` and `100000000000000000000` are one number and must name one
+  constant) and let characters that are legal in a JSON number but not in an
+  identifier — `+` above all — reach the emitted token, where Go and Java do
+  not even parse.
 - **Java leading-letter guarantee.** Java constants are class-scoped with
   no type prefix, and Stage 3 rejects an identifier beginning with a
   digit. A token that does not start with an ASCII letter (every numeric,
@@ -336,10 +386,35 @@ value — the **shared `Validate`** layer of **P12**).
 
 | Language | Strategy |
 |---|---|
-| Go | A predicate in the shared `Validate`, which `UnmarshalJSON` calls after decoding: `if v != UserEventKindUser { … Violation{Path, Reason: fmt.Sprintf("must equal %q, got %q", UserEventKindUser, v)} }`, collected into one `PayloadValidationError` application failure. The field is the defined type; the typed constant is both the compared value and the idiomatic setter (`UserEvent{Kind: UserEventKindUser}`). |
+| Go | A predicate in the shared `Validate`, applied identically on both directions' paths (**P12.2**: sharing is a requirement on the predicate, not on the call graph, so reaching it through `Validate` or emitting the same check inline is an emission choice): `if v != UserEventKindUser { … Violation{Path, Reason: fmt.Sprintf("must equal %q, got %q", UserEventKindUser, v)} }`, collected into one `PayloadValidationError` application failure. The field is the defined type; the typed constant is both the compared value and the idiomatic setter (`UserEvent{Kind: UserEventKindUser}`). |
 | TypeScript | the shared `Validate` predicate compares against the literal: ``if (v !== "user") push(Violation{path, reason: `must equal "user", got ${JSON.stringify(v)}`})``, throwing one `PayloadValidationError` application failure. The field's literal type closes it in-language. |
 | Python | the transfer type converter (PRINCIPLES Python §3) compares against the literal — `v != "user"` → `Violation(path=…, reason='must equal "user", got <json>')`, the same reason string TypeScript emits — aggregated into the single generated `PayloadValidationError` application failure. The field is the closed `Literal` (`float` consts are plain `float`, validated the same way). |
 | Java | the aggregating path is the per-POJO collecting deserializer (PRINCIPLES Java §5), which does a **non-throwing membership lookup** — known value → the constant, otherwise record a `Violation{path, "must equal \"user\", got …"}` — so multiple bad fields all collect into the single `PayloadValidationError` application failure, consistent with every other §5 constraint helper. The value class's `@JsonCreator fromString` *throws* only on the **standalone/interop** path, where fail-fast is expected. Serialize needs no separate check: the value class can only hold a known constant. |
+
+### Co-authored assertions on the same node
+
+A closed value set may sit beside a string or numeric assertion
+([[minLength]]/[[maxLength]], [[pattern]], [[format]],
+[[minimum]]/[[maximum]], [[multipleOf]], …). The load gate has already run
+every such keyword's own validator over the fixed value (see Loader
+behavior), so the assertion cannot fail for an admissible value — and it is
+nonetheless **still emitted**. **Closedness changes the carrier, never the
+assertion.** Where a target gives the closed set its own named type — Go's
+defined type, Java's value class — the co-emitted predicate is evaluated over
+that value's **underlying primitive**, converting at the call site. Handing
+the named type straight to a primitive that takes the underlying type does
+not compile, and dropping the predicate instead would make the emitted
+validator depend on the load-time check having been exact.
+[[maxLength]]/[[minLength]], [[pattern]] and [[format]] state this same rule
+from their side; it is one rule, not four.
+
+On a **materialized** node — a temporal [[format]] or a [[contentEncoding]] —
+both the assertion and the closed-value comparison measure the **canonical**
+wire string rather than the authored literal. That string is projected **once
+per member** and both predicates read that one projection. Two independent
+projections are two operands, which is exactly the drift **P12.2** forbids,
+and a second projection in the same scope is also a redeclaration in the
+targets that emit straight-line code.
 
 ### Serialize-side (P12)
 
@@ -369,9 +444,12 @@ in:
 The serialize equality check has teeth only where a wrong value can be
 set in memory before emit: an optional+const set to a wrong value, a Go
 zero-value/mutated field, or any Python in-memory assignment (a dataclass
-validates nothing on construction, PRINCIPLES Python §1). In TS and
-Java required+const the value cannot be wrong in memory (type / `final`),
-so the check is effectively a deserialize-direction guard there.
+validates nothing on construction, PRINCIPLES Python §1). Where a closing
+carrier *is* emitted — the TypeScript literal, and the Java value class on
+a required+const object property (`final`) — the value cannot be wrong in
+memory, so the check is effectively a deserialize-direction guard. Java
+array-element and typed-map positions keep the primitive carrier (Type
+mapping), so there it has teeth in both directions.
 
 ## Property-testing matrix
 
@@ -385,7 +463,7 @@ so the check is effectively a deserialize-direction guard there.
 | Boolean const | `{type:"boolean", const:true}` |
 | Float const (exact `==`) | `{type:"number", const:3.14}` → `Ratio3_14` |
 | Negative float const | `{type:"number", const:-3.14}` → `RatioNeg3_14` |
-| Integer-valued number → integer const | `{type:"number", const:1.0}` (normalized to integer `1`) |
+| Integer-valued number const | `{type:"number", const:1.0}` → value `1`, name `Ratio1`, carrier still `number` |
 | Un-encodable value rescued by override | `{type:"string", const:"-", x-go-const-name:"Dash", x-java-const-name:"DASH"}` → Go `Dash`, Java `DASH` (empty token would otherwise reject; TS/Python inert) |
 
 ### Rejected at load time (negative)
@@ -393,6 +471,9 @@ so the check is effectively a deserialize-direction guard there.
 | Reason | Example |
 |---|---|
 | Type-incompatible (P7.1) | `{type:"integer", const:"x"}` |
+| Fractional value on `integer` (directional, [[type]]) | `{type:"integer", const:1.5}` |
+| `integer` value outside the `±(2^53−1)` cap | `{type:"integer", const:9007199254740992}` |
+| `const` on a [[oneOf]] node | `{oneOf:[{type:"string"},{type:"integer"}], const:"x"}`, `{oneOf:[{type:"string"},{type:"null"}], const:"x"}` — author it on the branch |
 | Fails own subschema's constraint | `{type:"string", minLength:5, const:"ab"}`, `{type:"integer", minimum:5, const:2}`, `{type:"string", pattern:"^[a-z]+$", const:"A1"}` |
 | With `default` | `{type:"string", const:"v1", default:"v1"}` |
 | With `enum` (redundant) | `{type:"string", enum:["a"], const:"a"}` |
@@ -456,16 +537,33 @@ so the check is effectively a deserialize-direction guard there.
   reuses it (unchanged) as the selector. Because the discriminator type is
   **closed** (**P13.1**), bumping a branch's `const` value is a deliberate
   breaking change to that branch, surfaced at compile time — the intended,
-  loud outcome for a changed contract.
+  loud outcome for a changed contract. The pairwise distinctness [[oneOf]]
+  requires of those discriminators is decided by **value equality**, the same
+  equality this spec's Float-exactness rule and [[type]]'s identity rule
+  define: `const: 1` and `const: 1.0` are one value, so two branches carrying
+  them are not distinct and the union rejects. Comparing JSON
+  *representations* instead would admit that union while the emitted dispatch
+  — which selects numerically — could never reach its second branch. A `const`
+  on the union node itself is a reject (Loader behavior); the discriminator
+  lives inside each branch.
+- **[[items]] / [[contains]]**: two closed value sets over the same value
+  position must **intersect** — a closed-value element type and a
+  closed-value [[contains]] matcher with disjoint sets describe an array no
+  value can satisfy, so the schema is unsatisfiable and rejects at load. Only
+  emptiness rejects; a matcher that narrows the element's set is accepted
+  ([[contains]] owns that case, [[enum]] the multi-value form of this one).
 - **[[minProperties]] / [[maxProperties]]**: an **object-level** const
   would pin the exact member set, making the count statically decidable
   (noted in both specs) — but object-level const is deferred (see Loader
   behavior above), so that interaction is dormant in v1. A
   **property-level** const only constrains a value if present; it affects
   the count only when paired with [[required]].
-- **[[nullability]]**: orthogonal. `const: null` is rejected (degenerate);
-  a nullable field that must equal a non-null const is just that scalar
-  const (nullability adds nothing). 
+- **[[nullability]]**: `const: null` is rejected (degenerate). A nullable
+  member with a fixed value is the nullability `oneOf` with the `const`
+  authored **on the non-null branch**; the wrapper node must not carry it
+  (Loader behavior). The two axes stay orthogonal there: the branch's value
+  set is closed and the field still admits an explicit `null`, which the
+  closed check never sees.
 
 ## Ecosystem variance
 
