@@ -3689,6 +3689,8 @@ fn validate_object_constraints(path: &Path, schema: &Schema, context: &str) -> R
         ));
     }
 
+    let mut property_names_capacity = None;
+
     // `propertyNames` — partial: map-shaped objects only (an object with
     // `additionalProperties` and NO `properties`).
     if let Some(property_names) = schema.extra.get("propertyNames") {
@@ -3785,6 +3787,7 @@ fn validate_object_constraints(path: &Path, schema: &Schema, context: &str) -> R
                     ));
                 }
             }
+            property_names_capacity = Some(values.len() as u64);
         }
         // A materializing `format` cannot assert a *key*: the key is a map key in
         // every target, so there is nothing to materialize into. Go emitted the
@@ -3802,9 +3805,24 @@ fn validate_object_constraints(path: &Path, schema: &Schema, context: &str) -> R
         // was normalized during the recursive normalize pass above.
         validate_string_constraints(path, &subschema, &format!("{context}.propertyNames"))?;
         validate_format(path, &subschema, &format!("{context}.propertyNames"))?;
+
+        // `maxLength: 0` leaves at most the empty string as a possible key.
+        // Together with an enum, use the tighter enumerable cap.
+        if subschema.extra.get("maxLength").and_then(Value::as_f64) == Some(0.0) {
+            property_names_capacity = Some(property_names_capacity.unwrap_or(1).min(1));
+        }
+    }
+
+    if let (Some(min), Some(capacity)) = (min_properties, property_names_capacity)
+        && min > capacity
+    {
+        return reject(format!(
+            "{context}: `minProperties` ({min}) exceeds the finite `propertyNames` key-space capacity ({capacity}); no object can satisfy the floor"
+        ));
     }
 
     // `dependentRequired` — map of trigger → dependents that must also be present.
+    let mut dependency_graph = BTreeMap::<String, Vec<String>>::new();
     if let Some(dependent_required) = schema.extra.get("dependentRequired") {
         let Value::Object(map) = dependent_required else {
             return reject(format!(
@@ -3857,6 +3875,34 @@ fn validate_object_constraints(path: &Path, schema: &Schema, context: &str) -> R
                         "{context}: `dependentRequired.{trigger}` dependent `{dep}` is already in `required` (the dependency is vacuous); remove it from `dependentRequired`"
                     ));
                 }
+            }
+            dependency_graph.insert(trigger.clone(), dep_names);
+        }
+    }
+
+    // A present trigger forces its entire transitive dependency closure. If
+    // any one such closure is larger than `maxProperties`, the schema admits
+    // that trigger syntactically but can never validate an object containing
+    // it, so reject the statically uninhabitable combination.
+    if let Some(max) = max_properties {
+        for trigger in dependency_graph.keys() {
+            let mut closure = BTreeSet::from([trigger.clone()]);
+            let mut pending = vec![trigger.clone()];
+            while let Some(member) = pending.pop() {
+                if let Some(dependents) = dependency_graph.get(&member) {
+                    for dependent in dependents {
+                        if closure.insert(dependent.clone()) {
+                            pending.push(dependent.clone());
+                        }
+                    }
+                }
+            }
+            if closure.len() as u64 > max {
+                return reject(format!(
+                    "{context}: `maxProperties` ({max}) is below the {}-member closure forced by `dependentRequired` trigger `{trigger}` ({}); the object can never satisfy the cap",
+                    closure.len(),
+                    closure.into_iter().collect::<Vec<_>>().join(", ")
+                ));
             }
         }
     }
@@ -11198,6 +11244,35 @@ properties:
     }
 
     #[test]
+    fn rejects_min_properties_above_finite_property_names_capacity() {
+        for (matcher, capacity, floor) in [
+            ("{ type: string, enum: [a, b] }", 2, 3),
+            ("{ type: string, maxLength: 0 }", 1, 2),
+            ("{ type: string, maxLength: 0.0 }", 1, 2),
+            ("{ type: string, enum: [''], maxLength: 0 }", 1, 2),
+        ] {
+            let error = numeric_reject(&format!(
+                "type: object\nadditionalProperties: true\nminProperties: {floor}\npropertyNames: {matcher}"
+            ));
+            assert!(error.contains("finite `propertyNames`"), "{error}");
+            assert!(error.contains(&format!("capacity ({capacity})")), "{error}");
+        }
+    }
+
+    #[test]
+    fn accepts_min_properties_at_finite_property_names_capacity_and_pattern_only_space() {
+        numeric_accept(
+            "type: object\nadditionalProperties: true\nminProperties: 2\npropertyNames: { type: string, enum: [a, b] }",
+        );
+        numeric_accept(
+            "type: object\nadditionalProperties: true\nminProperties: 1\npropertyNames: { type: string, maxLength: 0 }",
+        );
+        numeric_accept(
+            "type: object\nadditionalProperties: true\nminProperties: 999\npropertyNames: { type: string, pattern: '^x' }",
+        );
+    }
+
+    #[test]
     fn rejects_property_names_alongside_properties() {
         let error = numeric_reject(
             "type: object\nproperties: { id: { type: string } }\npropertyNames: { type: string, maxLength: 8 }",
@@ -11323,6 +11398,31 @@ $defs:
             "type: object\nproperties: { a: {type: string}, b: {type: string}, c: {type: string} }\nrequired: [a, b, c]\nmaxProperties: 2",
         );
         assert!(error.contains("is below the"), "{error}");
+    }
+
+    #[test]
+    fn rejects_max_properties_below_dependent_required_closure() {
+        for dependent_required in [
+            "{ a: [b, c] }",
+            "{ a: [b], b: [c] }",
+            "{ a: [b], b: [c], c: [a] }",
+        ] {
+            let error = numeric_reject(&format!(
+                "type: object\nproperties: {{ a: {{type: string}}, b: {{type: string}}, c: {{type: string}} }}\nmaxProperties: 2\ndependentRequired: {dependent_required}"
+            ));
+            assert!(error.contains("3-member closure"), "{error}");
+            assert!(error.contains("maxProperties"), "{error}");
+        }
+    }
+
+    #[test]
+    fn accepts_dependent_required_closures_within_max_properties() {
+        numeric_accept(
+            "type: object\nproperties: { a: {type: string}, b: {type: string}, c: {type: string} }\nmaxProperties: 3\ndependentRequired: { a: [b], b: [c] }",
+        );
+        numeric_accept(
+            "type: object\nproperties: { a: {type: string}, b: {type: string}, c: {type: string}, d: {type: string} }\nmaxProperties: 2\ndependentRequired: { a: [b], c: [d] }",
+        );
     }
 
     #[test]
