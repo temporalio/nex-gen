@@ -1471,6 +1471,21 @@ impl JavaType {
         }
     }
 
+    /// Writes a nullable TYPE_USE annotation on this carrier. A materialized
+    /// date-time is a nested class, for which Java requires the annotation on
+    /// the nested name (`Outer.@Nullable Inner`). Collections deliberately do
+    /// not recurse here: collection presence and element nullability are
+    /// independent schema axes.
+    fn nullable_declaration(&self, declaration: String) -> String {
+        match self {
+            JavaType::Temporal(crate::json_schema::format::TemporalKind::DateTime) => {
+                "TemporalSupport.@Nullable DateTime".to_string()
+            }
+            JavaType::Bytes(_) => "byte @Nullable []".to_string(),
+            _ => format!("@Nullable {declaration}"),
+        }
+    }
+
     fn collect_refs(&self, refs: &mut BTreeSet<(String, String)>) {
         match self {
             JavaType::Ref { package, class, .. } => {
@@ -1997,28 +2012,10 @@ impl FieldPlan {
 
     fn declared_type(&self) -> String {
         if self.nullable_annotation() && !self.is_primitive() {
-            // A `byte[]` takes the array-level TYPE_USE annotation (`byte
-            // @Nullable []`); `@Nullable byte[]` would (wrongly) annotate the
-            // primitive element type.
-            if matches!(self.ty, JavaType::Bytes(_)) {
-                return "byte @Nullable []".to_string();
-            }
-            nullable_type_use(self.field_type())
+            self.ty.nullable_declaration(self.field_type())
         } else {
             self.field_type()
         }
-    }
-}
-
-/// Writes a nullable TYPE_USE annotation on the actual carrier rather than on
-/// the qualifier of a nested class. Java rejects `@Nullable Outer.Inner` as an
-/// annotation of the scoping construct; the legal spelling is
-/// `Outer.@Nullable Inner`.
-fn nullable_type_use(declaration: String) -> String {
-    if let Some((qualifier, nested)) = declaration.rsplit_once('.') {
-        format!("{qualifier}.@Nullable {nested}")
-    } else {
-        format!("@Nullable {declaration}")
     }
 }
 
@@ -4831,13 +4828,7 @@ fn element_declaration(ty: &JavaType, nullable: bool) -> String {
     if !nullable {
         return ty.boxed_name();
     }
-    // A `byte[]` takes the array-level annotation (`byte @Nullable []`);
-    // `@Nullable byte[]` would (wrongly) annotate the primitive component type,
-    // as for a field of that type (see `FieldPlan::declared_type`).
-    if matches!(ty, JavaType::Bytes(_)) {
-        return "byte @Nullable []".to_string();
-    }
-    nullable_type_use(ty.boxed_name())
+    ty.nullable_declaration(ty.boxed_name())
 }
 
 fn render_parse_element(
