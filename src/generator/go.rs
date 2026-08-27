@@ -689,10 +689,11 @@ fn generate_single_leaf(
                     .to_string(),
             });
         }
+        let tree_models = collect_tree_json_models(&[leaf]);
         insert_generated_file(
             &mut generated.files,
-            PathBuf::from("definitions.go"),
-            json::render_definitions_file(&package_name),
+            definitions_path,
+            json::render_definitions_file(&package_name, &tree_models)?,
         )?;
     }
     Ok(generated)
@@ -759,7 +760,7 @@ fn generate_branch_tree(
         insert_generated_file(
             &mut files,
             PathBuf::from("definitions.go"),
-            json::render_definitions_file(&package_name),
+            json::render_definitions_file(&package_name, &tree_models)?,
         )?;
     }
 

@@ -825,6 +825,9 @@ fn go_json_examples_render_expected_language_features() {
             let generated = actual
                 .get(&generated_file)
                 .unwrap_or_else(|| panic!("{} should be generated", generated_file.display()));
+            let definitions = actual
+                .get(&PathBuf::from("definitions.go"))
+                .expect("JSON generation emits package definitions");
             if native_api {
                 match example_id {
                     "chat" => {
@@ -938,7 +941,9 @@ fn go_json_examples_render_expected_language_features() {
                         assert!(generated.contains("type Temporal struct"));
                         assert!(generated.contains("CreatedAt time.Time"));
                         assert!(generated.contains("Timeout time.Duration"));
-                        assert!(generated.contains("func formatDuration(d time.Duration) string"));
+                        assert!(
+                            definitions.contains("func formatDuration(d time.Duration) string")
+                        );
                         assert!(!generated.contains("Service = struct"));
                         assert!(!generated.contains("ServiceClient"));
                     }
@@ -2145,9 +2150,10 @@ fn go_json_validates_non_object_union_branch_constraints() {
     })
     .unwrap();
     let rendered = fs::read_to_string(output_path.join("bc.go")).unwrap();
+    let definitions = fs::read_to_string(output_path.join("definitions.go")).unwrap();
 
     // The string branch: length, then the pattern through its own compiled var.
-    assert!(rendered.contains(
+    assert!(definitions.contains(
         "var _nexgenJsonSchemaPattern5e5b612d7a5d2b24 = regexp.MustCompile(\"^[a-z]+$\")"
     ));
     assert!(rendered.contains("must have length >= 3, got %d"));
@@ -2248,12 +2254,13 @@ properties:
     })
     .unwrap();
     let rendered = fs::read_to_string(output_path.join("output.go")).unwrap();
+    let definitions = fs::read_to_string(output_path.join("definitions.go")).unwrap();
 
     assert!(rendered.contains("utf8.RuneCountInString(e) >= 5"));
     // The matcher's regexes compile once at package init, never per element
     // inside the scan loop (`pattern.md`'s compile-once rule).
     assert!(
-        rendered.contains(
+        definitions.contains(
             "var _nexgenJsonSchemaPattern5e6170695c2e = regexp.MustCompile(\"^api\\\\.\")"
         )
     );
@@ -3916,7 +3923,7 @@ properties:
     })
     .unwrap();
 
-    let rendered = fs::read_to_string(output_path.join("collision.go")).unwrap();
+    let rendered = fs::read_to_string(output_path.join("definitions.go")).unwrap();
     assert_eq!(
         rendered
             .matches("ContentEncoding = regexp.MustCompile")
@@ -3938,6 +3945,134 @@ properties:
         .status()
         .unwrap();
     assert!(build_status.success());
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+/// Semantic predicates belong to the flattened package, not to an input leaf:
+/// two files using the same format/encoding/pattern must share one declaration.
+#[test]
+fn go_json_semantic_helpers_emit_once_across_flattened_inputs() {
+    let temp_dir = unique_output_path("go-json-package-semantic-helpers");
+    let input_dir = temp_dir.join("input");
+    fs::create_dir_all(&input_dir).unwrap();
+    for (file, title) in [("one.yaml", "One"), ("two.yaml", "Two")] {
+        fs::write(
+            input_dir.join(file),
+            format!(
+                r#"$schema: https://json-schema.org/draft/2020-12/schema
+title: {title}
+type: object
+properties:
+  email: {{ type: string, format: email }}
+  token: {{ type: string, pattern: "^[a-z]+$" }}
+  bytes: {{ type: string, contentEncoding: base64 }}
+"#,
+            ),
+        )
+        .unwrap();
+    }
+    let output_path = temp_dir.join("out");
+    generate_to_file(&GenerateRequest {
+        language: nexgen::language::Language::Go,
+        input_paths: vec![input_dir],
+        support_paths: Vec::new(),
+        descriptor_paths: Vec::new(),
+        output_path: output_path.clone(),
+        format: false,
+        generate_native_api: false,
+        java_package_name: None,
+        ts_date_time_types: Default::default(),
+    })
+    .unwrap();
+
+    let definitions = fs::read_to_string(output_path.join("definitions.go")).unwrap();
+    assert_eq!(
+        definitions
+            .matches("EmailFormat = regexp.MustCompile")
+            .count(),
+        1
+    );
+    assert_eq!(
+        definitions
+            .matches("Base64ContentEncoding = regexp.MustCompile")
+            .count(),
+        1
+    );
+    assert_eq!(
+        definitions.matches("var _nexgenJsonSchemaPattern").count(),
+        1
+    );
+    assert!(
+        !fs::read_to_string(output_path.join("one.go"))
+            .unwrap()
+            .contains("regexp.MustCompile")
+    );
+    assert!(
+        !fs::read_to_string(output_path.join("two.go"))
+            .unwrap()
+            .contains("regexp.MustCompile")
+    );
+
+    assert!(
+        Command::new("gofmt")
+            .args(["-w", output_path.to_str().unwrap()])
+            .status()
+            .unwrap()
+            .success()
+    );
+    assert!(
+        Command::new("go")
+            .args(["test", "./..."])
+            .env("GO111MODULE", "on")
+            .current_dir(&output_path)
+            .status()
+            .unwrap()
+            .success()
+    );
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+#[test]
+fn go_json_semantic_helper_names_participate_in_p15() {
+    let temp_dir = unique_output_path("go-json-semantic-helper-p15");
+    fs::create_dir_all(&temp_dir).unwrap();
+    for (case, helper, constraint) in [
+        ("format", "_nexgenJsonSchemaEmailFormat", "format: email"),
+        (
+            "encoding",
+            "_nexgenJsonSchemaBase64ContentEncoding",
+            "contentEncoding: base64",
+        ),
+        (
+            "pattern",
+            "_nexgenJsonSchemaPattern5e5b612d7a5d2b24",
+            "pattern: '^[a-z]+$'",
+        ),
+    ] {
+        let input_path = temp_dir.join(format!("{case}.yaml"));
+        fs::write(
+            &input_path,
+            format!(
+                "$schema: https://json-schema.org/draft/2020-12/schema\ntitle: Collision\nx-go-name: {helper}\ntype: object\nproperties:\n  value: {{ type: string, {constraint} }}\n"
+            ),
+        )
+        .unwrap();
+        let error = generate_to_file(&GenerateRequest {
+            language: nexgen::language::Language::Go,
+            input_paths: vec![input_path],
+            support_paths: Vec::new(),
+            descriptor_paths: Vec::new(),
+            output_path: temp_dir.join(format!("out-{case}")),
+            format: false,
+            generate_native_api: false,
+            java_package_name: None,
+            ts_date_time_types: Default::default(),
+        })
+        .expect_err("the authored type collides with a package semantic helper")
+        .to_string();
+        assert!(error.contains(helper), "{case}: {error}");
+        assert!(error.contains("x-go-name"), "{case}: {error}");
+    }
     fs::remove_dir_all(temp_dir).unwrap();
 }
 
