@@ -317,9 +317,8 @@ code depend on how many predicates a node happens to carry — which is how a
   [[uniqueItems]]' deferral.
 - **[[contains]]**: `contentEncoding` on a `contains` **matcher** rejects; on
   the **element** it is supported, and the matcher measures the encoded wire
-  string in both directions. **Status: open** — moving the assertion onto
-  [[items]] is the legal position but compiles only once each target renders an
-  element's encoded wire string, which is not the case in every target today.
+  string in both directions. Every target renders that canonical element
+  projection before applying the matcher.
 - **[[required]]**: orthogonal — presence vs value shape.
 
 ## Ecosystem variance

@@ -20,7 +20,7 @@ predicate**, all plain arithmetic.
 
 Beyond validation, the temporal formats (`date-time`, `date`, `time`,
 `duration`) are **materialized** as idiomatic typed model fields (Go
-`time.Time`, Java `OffsetDateTime`, Python `datetime`, …) rather than a bare
+`time.Time`, Java `TemporalSupport.DateTime`, Python `datetime`, …) rather than a bare
 `string` — see **Materialization (type mapping)**. That is the one place
 `format` departs from a pure assertion: the field carries a language-native
 value, and the wire is produced by **re-serializing** it — with **no
@@ -243,7 +243,7 @@ represent a value must not be made to drop it.
 
 | Format | Go | Java | Python | TS (per `--date-time-types`) | Wire form |
 |---|---|---|---|---|---|
-| `date-time` | `time.Time` | `OffsetDateTime` | `datetime` (aware) | `string` / `Date` / `Temporal.ZonedDateTime` | RFC 3339, **original offset & sub-second precision preserved** (per-target loss below) |
+| `date-time` | `time.Time` | generated `TemporalSupport.DateTime` (`LocalDateTime` + owned offset seconds) | `datetime` (aware) | `string` / `Date` / `Temporal.ZonedDateTime` | RFC 3339, **original offset & sub-second precision preserved** (per-target loss below) |
 | `date` | `time.Time`† | `LocalDate` | `date` | `string` / `Temporal.PlainDate` | `YYYY-MM-DD` (lossless) |
 | `time` | `time.Time`† | `String` (validated and canonicalized) | `time` (aware / naive) | `string` (all modes) | `HH:MM:SS[.f…]` + **offset preserved when present** |
 | `duration` | `time.Duration` | `Duration` | `timedelta` | `string` / `Temporal.Duration` | `PTnHnMnS` (time-only; omit zero components; `PT0S` for zero) |
@@ -278,7 +278,7 @@ rules above.
 | Target | In-memory type | Round-trip |
 |---|---|---|
 | Go | `time.Time` | offset + **nanosecond** preserved; **sub-nanosecond truncated** (the type's resolution) |
-| Java | `OffsetDateTime` | offset + **nanosecond** preserved; **sub-nanosecond truncated** (the type's resolution) |
+| Java | `TemporalSupport.DateTime` | full ±23:59 offset + **nanosecond** preserved; **sub-nanosecond truncated** (`LocalDateTime` resolution) |
 | Python | `datetime` (aware) | offset preserved, **sub-microsecond truncated** (the type's resolution) |
 | TS `--date-time-types=string` (default) | `string` | serialized form stored — lossless at every width |
 | TS `--date-time-types=date` | `Date` | UTC instant at **millisecond** — offset folded to UTC, sub-ms lost |
@@ -421,7 +421,7 @@ add back the `|60` seconds alternative; `duration` uses the full
 | Go | Parse adapter: run the pinned regex + `validRFC3339(...)` over the wire string, pushing a `Violation` on failure; else `t, _ := time.Parse(time.RFC3339Nano, strings.ToUpper(s))` → store `t` **as parsed** (offset and nanoseconds retained; no `UTC()`, no truncation) for `date-time`, or `time.Parse("2006-01-02", s)` (`date`); `duration` parses the `PT…` components into a `time.Duration`. Encode adapter: `t.Format(time.RFC3339Nano)` (offset preserved, `Z` for zero offset, trailing-zero fractional trimmed). `regexp.MustCompile` compiled once at init. |
 | TypeScript | Parse adapter: pinned regex (`/…/u`) + calendar/range check, then per `--date-time-types`: **`string`** (default) store the generator-serialized string for every temporal; **`date`** `new Date(s)` for `date-time` (others string); **`temporal`** `Temporal.ZonedDateTime.from` (`date-time`, in the wire's offset zone) / `PlainDate.from` (`date`) / `Duration.from` (`duration`), with `time` staying a string. Encode adapter: **`string`** emit the stored string; **`date`** `date-time` → `.toISOString()` (UTC, ms, 3 digits); **`temporal`** `ZonedDateTime.toString({ timeZoneName: 'never' })` (offset kept, then `+00:00`→`Z`), `PlainDate.toString()`, and for `Duration` a generator-owned formatter over `value.total({unit: 'seconds'})` so component-equivalent values canonicalize. |
 | Python | Parse: the `_parse_date_time` / `_parse_date` / `_parse_time` / `_parse_duration` runtime helpers, called from the transfer type converter (PRINCIPLES Python §3) — regex + calendar over the wire string, then `datetime.fromisoformat(s.upper())` **retaining the parsed offset** (`date-time`; `datetime`'s native microsecond resolution truncates any finer input — the one Python-side loss), `date.fromisoformat(s)` (`date`), `time.fromisoformat(s)` **retaining any offset** as an aware `time` (`time`), or parse `PT…` into a `timedelta` (`duration`). Each appends a `Violation` and returns `None` on failure so the rest of the object still validates. Encode: the matching generator-owned `_format_*` helper (offset preserved, fractional trimmed). The dataclass field is the plain `datetime.datetime` / `date` / `time` / `timedelta`, so no library's own coercion is in the path (native coercions typically accept a missing offset and normalize differently). |
-| Java | The per-POJO collecting deserializer (PRINCIPLES Java §5): regex + calendar over the `String`, then `OffsetDateTime.parse(s)` **retaining the offset and nanoseconds** (no `atOffset(UTC)`, no `truncatedTo`) (`date-time`), `LocalDate.parse` (`date`), a generator helper that validates `time` and stores it as a `String` **retaining every accepted digit** (it must not round-trip the value through `OffsetTime`/`LocalTime`, whose nanosecond resolution would truncate a `String` carrier that can hold more — see the `time` clause above), or checked component parsing plus `Duration.ofSeconds` for the `PT…` form. The `Serializer` emits the **generator-owned** string (offset preserved, fractional trimmed) — **not** `Duration.toString()` for `.NET` parity and **not** the BCL serializer (`.NET XmlConvert` rolls `PT24H`→`P1D`). |
+| Java | The per-POJO collecting deserializer (PRINCIPLES Java §5): regex + calendar over the `String`, then owned offset parsing into `TemporalSupport.DateTime` (`LocalDateTime` plus offset seconds, retaining the full ±23:59 range and nanoseconds) (`date-time`), `LocalDate.parse` (`date`), generator-owned string arithmetic for `time` that retains every accepted fractional digit and offset, or checked component parsing plus `Duration.ofSeconds` for the `PT…` form. The `Serializer` emits the **generator-owned** string (offset preserved, fractional trimmed) — **not** `Duration.toString()` for `.NET` parity and **not** the BCL serializer (`.NET XmlConvert` rolls `PT24H`→`P1D`). |
 
 There is **no common truncation floor**, and the resolution is a property of the
 *carrier*, not of the target:
@@ -431,7 +431,8 @@ There is **no common truncation floor**, and the resolution is a property of the
   validation step that borrows an intermediary's limit is a defect rather than a
   bounded loss.
 * A **materialized native carrier retains its type's genuine resolution** — Go
-  `time.Time`, Java `OffsetDateTime` and TypeScript `Temporal` are nanosecond;
+  `time.Time`, Java's `LocalDateTime`-backed carrier and TypeScript `Temporal`
+  are nanosecond;
   Python `datetime`/`time` are microsecond; the legacy TypeScript `Date` mode is
   millisecond.
 
@@ -706,10 +707,8 @@ Representative cases:
   non-materializing format leaves the element a `string` and is unaffected.
 - **[[contains]]**: a `contains` **matcher** may not carry a temporal `format`;
   on an **element** it is supported, and the matcher measures the element's
-  canonical wire form in both directions. **Status: open** — moving a
-  materializing assertion onto [[items]] is the legal position but compiles
-  only once each target renders an element's canonical wire form, which is not
-  the case in every target today.
+  canonical wire form in both directions. Every target renders that canonical
+  element projection before applying the matcher.
 
 ## Ecosystem variance
 
