@@ -661,6 +661,132 @@ fn java_json_emits_runtime_support_for_nested_materialized_values() {
 }
 
 #[test]
+fn java_json_description_does_not_select_datetime_runtime_imports() {
+    let temp_dir = unique_output_path("java-json-datetime-prose");
+    fs::create_dir_all(&temp_dir).unwrap();
+    let input_path = temp_dir.join("prose.yaml");
+    fs::write(
+        &input_path,
+        r#"$schema: https://json-schema.org/draft/2020-12/schema
+title: Prose
+description: DateTime is mentioned only as ordinary documentation.
+type: object
+properties:
+  note:
+    type: string
+    description: Another DateTime prose mention.
+"#,
+    )
+    .unwrap();
+    let output_path = temp_dir.join("prose");
+    generate_to_file(&GenerateRequest {
+        language: nexgen::language::Language::Java,
+        input_paths: vec![input_path],
+        support_paths: Vec::new(),
+        descriptor_paths: Vec::new(),
+        output_path: output_path.clone(),
+        format: false,
+        generate_native_api: false,
+        java_package_name: Some("example.prose".to_string()),
+        ts_date_time_types: Default::default(),
+    })
+    .unwrap();
+
+    let model = fs::read_to_string(output_path.join("Prose.java")).unwrap();
+    assert!(!model.contains("TemporalSupport.DateTime"), "{model}");
+    assert!(
+        !model.contains("import example.prose.TemporalSupport"),
+        "{model}"
+    );
+    assert!(!output_path.join("TemporalSupport.java").exists());
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+#[test]
+fn java_json_authored_datetime_does_not_shadow_temporal_carrier() {
+    let temp_dir = unique_output_path("java-json-datetime-shadow");
+    let gradle_root = temp_dir.join("project");
+    fs::create_dir_all(&gradle_root).unwrap();
+    fs::copy(
+        project_root().join("samples/java/build.gradle"),
+        gradle_root.join("build.gradle"),
+    )
+    .unwrap();
+    fs::copy(
+        project_root().join("samples/java/settings.gradle"),
+        gradle_root.join("settings.gradle"),
+    )
+    .unwrap();
+    let input_path = temp_dir.join("shadow.nexusrpc.yaml");
+    fs::write(
+        &input_path,
+        r##"$schema: https://json-schema.org/draft/2020-12/schema
+nexusrpc: "1.0.0"
+$defs:
+  DateTime:
+    type: object
+    properties:
+      label: { type: string }
+  Event:
+    type: object
+    required: [authored, timestamp]
+    properties:
+      authored: { $ref: "#/$defs/DateTime" }
+      timestamp: { type: string, format: date-time }
+"##,
+    )
+    .unwrap();
+    let output_path = gradle_root.join("src/main/java/example/shadow");
+    generate_to_file(&GenerateRequest {
+        language: nexgen::language::Language::Java,
+        input_paths: vec![input_path],
+        support_paths: Vec::new(),
+        descriptor_paths: Vec::new(),
+        output_path: output_path.clone(),
+        format: false,
+        generate_native_api: false,
+        java_package_name: Some("example.shadow".to_string()),
+        ts_date_time_types: Default::default(),
+    })
+    .unwrap();
+
+    let event = fs::read_to_string(output_path.join("Event.java")).unwrap();
+    assert!(
+        event.contains("TemporalSupport.DateTime timestamp"),
+        "{event}"
+    );
+    assert!(event.contains("DateTime authored"), "{event}");
+    assert!(!event.contains("import example.shadow.TemporalSupport.DateTime;"));
+
+    let test_package = gradle_root.join("src/test/java/example/shadow");
+    fs::create_dir_all(&test_package).unwrap();
+    fs::write(
+        test_package.join("DateTimeTypeIdentityTest.java"),
+        r#"package example.shadow;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import org.junit.jupiter.api.Test;
+
+final class DateTimeTypeIdentityTest {
+    @Test
+    void authoredAndTemporalDateTimesRemainDistinct() throws Exception {
+        assertEquals(DateTime.class, Event.class.getMethod("getAuthored").getReturnType());
+        assertEquals(TemporalSupport.DateTime.class, Event.class.getMethod("getTimestamp").getReturnType());
+    }
+}
+"#,
+    )
+    .unwrap();
+    let status = Command::new(project_root().join("samples/java/gradlew"))
+        .args(["test", "--no-daemon"])
+        .current_dir(&gradle_root)
+        .status()
+        .expect("run Gradle DateTime identity test");
+    assert!(status.success());
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+#[test]
 fn java_json_emits_wave2_object_and_matcher_contracts() {
     let temp_dir = unique_output_path("java-json-wave2-contracts");
     fs::create_dir_all(&temp_dir).unwrap();

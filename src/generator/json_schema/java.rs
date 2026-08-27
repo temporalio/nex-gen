@@ -1490,10 +1490,38 @@ impl JavaType {
 /// offset-less time-of-day values.
 fn java_temporal_type(kind: crate::json_schema::format::TemporalKind) -> &'static str {
     match kind {
-        crate::json_schema::format::TemporalKind::DateTime => "DateTime",
+        crate::json_schema::format::TemporalKind::DateTime => "TemporalSupport.DateTime",
         crate::json_schema::format::TemporalKind::Date => "LocalDate",
         crate::json_schema::format::TemporalKind::Time => "String",
         crate::json_schema::format::TemporalKind::Duration => "Duration",
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct JavaFileFeatures {
+    temporal: bool,
+    content_encoding: bool,
+    date: bool,
+    duration: bool,
+}
+
+impl JavaFileFeatures {
+    fn from_schema(schema: &Schema) -> Self {
+        use crate::json_schema::format::TemporalKind;
+        Self {
+            temporal: schema_uses_feature(schema, |candidate| {
+                temporal_kind_direct(candidate).is_some()
+            }),
+            content_encoding: schema_uses_feature(schema, |candidate| {
+                content_encoding_direct(candidate).is_some()
+            }),
+            date: schema_uses_feature(schema, |candidate| {
+                temporal_kind_direct(candidate) == Some(TemporalKind::Date)
+            }),
+            duration: schema_uses_feature(schema, |candidate| {
+                temporal_kind_direct(candidate) == Some(TemporalKind::Duration)
+            }),
+        }
     }
 }
 
@@ -2310,6 +2338,7 @@ pub(in crate::generator) fn render_model_file(
     all_models: &BTreeMap<String, PlannedJsonType>,
 ) -> Result<String> {
     let schema = decode_schema(model)?;
+    let features = JavaFileFeatures::from_schema(&schema);
     // Resolve every emitted type name (with any `x-java-name` override applied)
     // through the shared manifest. The parent generator builds `registry` from
     // the pre-override `model_name`, so patch each entry's class through the
@@ -2351,7 +2380,14 @@ pub(in crate::generator) fn render_model_file(
         let mut body = String::new();
         let mut refs = BTreeSet::new();
         render_union_interface(&mut body, &schema, &union, &mut refs);
-        return Ok(assemble_file(&package, root_package, &refs, false, &body));
+        return Ok(assemble_file(
+            &package,
+            root_package,
+            &refs,
+            false,
+            features,
+            &body,
+        ));
     }
 
     let kind = resolve_model_kind(&schema, &context, all_models)?;
@@ -2453,7 +2489,14 @@ pub(in crate::generator) fn render_model_file(
         }
     }
 
-    Ok(assemble_file(&package, root_package, &refs, false, &body))
+    Ok(assemble_file(
+        &package,
+        root_package,
+        &refs,
+        false,
+        features,
+        &body,
+    ))
 }
 
 /// Renders a named `oneOf` union def as a sealed-by-convention interface with a
@@ -3000,6 +3043,7 @@ fn assemble_file(
     root_package: &str,
     model_refs: &BTreeSet<(String, String)>,
     service_imports: bool,
+    features: JavaFileFeatures,
     body: &str,
 ) -> String {
     let mut output = String::new();
@@ -3035,15 +3079,12 @@ fn assemble_file(
         if package != root_package {
             imports.insert(format!("{root_package}.SpecNumbers"));
             imports.insert(format!("{root_package}.Violation"));
-            if body.contains("TemporalSupport.") {
+            if features.temporal {
                 imports.insert(format!("{root_package}.TemporalSupport"));
             }
-            if body.contains("Base64Support.") {
+            if features.content_encoding {
                 imports.insert(format!("{root_package}.Base64Support"));
             }
-        }
-        if body.contains("DateTime") {
-            imports.insert(format!("{root_package}.TemporalSupport.DateTime"));
         }
     }
     imports.insert("org.jspecify.annotations.Nullable".to_string());
@@ -3054,13 +3095,11 @@ fn assemble_file(
     }
     // Materialized-temporal `java.time` field types (imported so the `@Nullable`
     // type-use annotation binds to the simple name, not a package qualifier).
-    for (needle, import) in [
-        ("LocalDate", "java.time.LocalDate"),
-        ("Duration", "java.time.Duration"),
-    ] {
-        if body.contains(needle) {
-            imports.insert(import.to_string());
-        }
+    if features.date {
+        imports.insert("java.time.LocalDate".to_string());
+    }
+    if features.duration {
+        imports.insert("java.time.Duration".to_string());
     }
     // Closed value-set (`const`/`enum`) value classes carry Jackson
     // `@JsonCreator`/`@JsonValue` for the standalone/interop wire mapping.
