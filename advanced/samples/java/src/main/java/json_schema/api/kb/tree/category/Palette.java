@@ -70,6 +70,14 @@ public final class Palette {
             List<Violation> violations = new ArrayList<>();
             if (value.swatches == null) {
                 violations.add(new Violation("swatches", "required"));
+            } else {
+                for (int validationIndex0 = 0; validationIndex0 < value.swatches.size(); validationIndex0++) {
+                    String validationValue0 = value.swatches.get(validationIndex0);
+                    if (validationValue0 == null) {
+                        violations.add(new Violation("swatches" + "[" + validationIndex0 + "]", "explicit null not allowed"));
+                    } else {
+                    }
+                }
             }
             if (!violations.isEmpty()) {
                 // TODO: Use PayloadValidationException.newPayloadValidationException once it is available in an SDK release.

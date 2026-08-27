@@ -104,25 +104,54 @@ export const categoryTransferTypeConverter =
     }
 
     public toTransferType(value: Category): unknown {
+      if (!__nexgenDefinitions.isPlainObject(value)) {
+        throw __nexgenDefinitions.payloadValidationError([
+          { path: "", reason: "expected object" },
+        ]);
+      }
       const violations: __nexgenDefinitions.Violation[] = [];
       const out: Record<string, unknown> = Object.create(null) as Record<
         string,
         unknown
       >;
-      out["id"] = value.id;
-      out["name"] = value.name;
+      if (value.id === undefined || value.id === null) {
+        violations.push({ path: "id", reason: "required" });
+      } else {
+        if (!(typeof value.id === "string")) {
+          violations.push({ path: "id", reason: "expected string" });
+        } else {
+        }
+        out["id"] = value.id;
+      }
+      if (value.name === undefined || value.name === null) {
+        violations.push({ path: "name", reason: "required" });
+      } else {
+        if (!(typeof value.name === "string")) {
+          violations.push({ path: "name", reason: "expected string" });
+        } else {
+        }
+        out["name"] = value.name;
+      }
       if (value.children !== undefined) {
-        value.children.forEach((element, index) => {});
-        out["children"] = value.children.map((element, index) =>
-          (() => {
-            try {
-              return categoryTransferTypeConverter.toTransferType(element);
-            } catch (error) {
-              __nexgenDefinitions.collect(violations, `children[${index}]`, error);
-              return undefined;
-            }
-          })(),
-        );
+        if (value.children === null) {
+          violations.push({ path: "children", reason: "explicit null not allowed" });
+        } else {
+          if (!Array.isArray(value.children)) {
+            violations.push({ path: "children", reason: "expected array" });
+          } else {
+            value.children.forEach((element, index) => {});
+          }
+          out["children"] = value.children.map((element, index) =>
+            (() => {
+              try {
+                return categoryTransferTypeConverter.toTransferType(element);
+              } catch (error) {
+                __nexgenDefinitions.collect(violations, `children[${index}]`, error);
+                return undefined;
+              }
+            })(),
+          );
+        }
       }
       if (violations.length) {
         throw __nexgenDefinitions.payloadValidationError(violations);
@@ -186,11 +215,37 @@ export const paletteTransferTypeConverter =
     }
 
     public toTransferType(value: Palette): unknown {
+      if (!__nexgenDefinitions.isPlainObject(value)) {
+        throw __nexgenDefinitions.payloadValidationError([
+          { path: "", reason: "expected object" },
+        ]);
+      }
+      const violations: __nexgenDefinitions.Violation[] = [];
       const out: Record<string, unknown> = Object.create(null) as Record<
         string,
         unknown
       >;
-      out["swatches"] = value.swatches;
+      if (value.swatches === undefined || value.swatches === null) {
+        violations.push({ path: "swatches", reason: "required" });
+      } else {
+        if (!Array.isArray(value.swatches)) {
+          violations.push({ path: "swatches", reason: "expected array" });
+        } else {
+          value.swatches.forEach((element, index) => {
+            if (!(typeof element === "string")) {
+              violations.push({
+                path: `swatches[${index}]`,
+                reason: "expected string",
+              });
+            } else {
+            }
+          });
+        }
+        out["swatches"] = value.swatches;
+      }
+      if (violations.length) {
+        throw __nexgenDefinitions.payloadValidationError(violations);
+      }
       return out;
     }
   })();

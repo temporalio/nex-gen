@@ -114,6 +114,15 @@ public final class Room {
             if (value.displayName == null) {
                 violations.add(new Violation("displayName", "required"));
             }
+            if (value.members != null) {
+                for (int validationIndex0 = 0; validationIndex0 < value.members.size(); validationIndex0++) {
+                    String validationValue0 = value.members.get(validationIndex0);
+                    if (validationValue0 == null) {
+                        violations.add(new Violation("members" + "[" + validationIndex0 + "]", "explicit null not allowed"));
+                    } else {
+                    }
+                }
+            }
             java.util.Set<String> wireKeys = new java.util.LinkedHashSet<>();
             if (value.roomId != null) {
                 wireKeys.add("roomId");

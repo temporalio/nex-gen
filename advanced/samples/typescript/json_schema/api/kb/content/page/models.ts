@@ -135,33 +135,66 @@ export const pageTransferTypeConverter =
     }
 
     public toTransferType(value: Page): unknown {
+      if (!__nexgenDefinitions.isPlainObject(value)) {
+        throw __nexgenDefinitions.payloadValidationError([
+          { path: "", reason: "expected object" },
+        ]);
+      }
       const violations: __nexgenDefinitions.Violation[] = [];
       const out: Record<string, unknown> = Object.create(null) as Record<
         string,
         unknown
       >;
-      out["pageId"] = value.pageId;
-      out["title"] = value.title;
-      out["meta"] = (() => {
-        try {
-          return pageMetaTransferTypeConverter.toTransferType(value.meta);
-        } catch (error) {
-          __nexgenDefinitions.collect(violations, "meta", error);
-          return undefined;
+      if (value.pageId === undefined || value.pageId === null) {
+        violations.push({ path: "pageId", reason: "required" });
+      } else {
+        if (!(typeof value.pageId === "string")) {
+          violations.push({ path: "pageId", reason: "expected string" });
+        } else {
         }
-      })();
+        out["pageId"] = value.pageId;
+      }
+      if (value.title === undefined || value.title === null) {
+        violations.push({ path: "title", reason: "required" });
+      } else {
+        if (!(typeof value.title === "string")) {
+          violations.push({ path: "title", reason: "expected string" });
+        } else {
+        }
+        out["title"] = value.title;
+      }
+      if (value.meta === undefined || value.meta === null) {
+        violations.push({ path: "meta", reason: "required" });
+      } else {
+        out["meta"] = (() => {
+          try {
+            return pageMetaTransferTypeConverter.toTransferType(value.meta);
+          } catch (error) {
+            __nexgenDefinitions.collect(violations, "meta", error);
+            return undefined;
+          }
+        })();
+      }
       if (value.blocks !== undefined) {
-        value.blocks.forEach((element, index) => {});
-        out["blocks"] = value.blocks.map((element, index) =>
-          (() => {
-            try {
-              return blockTransferTypeConverter.toTransferType(element);
-            } catch (error) {
-              __nexgenDefinitions.collect(violations, `blocks[${index}]`, error);
-              return undefined;
-            }
-          })(),
-        );
+        if (value.blocks === null) {
+          violations.push({ path: "blocks", reason: "explicit null not allowed" });
+        } else {
+          if (!Array.isArray(value.blocks)) {
+            violations.push({ path: "blocks", reason: "expected array" });
+          } else {
+            value.blocks.forEach((element, index) => {});
+          }
+          out["blocks"] = value.blocks.map((element, index) =>
+            (() => {
+              try {
+                return blockTransferTypeConverter.toTransferType(element);
+              } catch (error) {
+                __nexgenDefinitions.collect(violations, `blocks[${index}]`, error);
+                return undefined;
+              }
+            })(),
+          );
+        }
       }
       if (violations.length) {
         throw __nexgenDefinitions.payloadValidationError(violations);
@@ -231,20 +264,43 @@ export const pageMetaTransferTypeConverter =
     }
 
     public toTransferType(value: PageMeta): unknown {
+      if (!__nexgenDefinitions.isPlainObject(value)) {
+        throw __nexgenDefinitions.payloadValidationError([
+          { path: "", reason: "expected object" },
+        ]);
+      }
       const violations: __nexgenDefinitions.Violation[] = [];
       const out: Record<string, unknown> = Object.create(null) as Record<
         string,
         unknown
       >;
-      out["author"] = value.author;
-      if (value.wordCount !== undefined) {
-        if (!Number.isSafeInteger(value.wordCount)) {
-          violations.push({
-            path: "wordCount",
-            reason: "exceeds ±(2^53-1) integer cap",
-          });
+      if (value.author === undefined || value.author === null) {
+        violations.push({ path: "author", reason: "required" });
+      } else {
+        if (!(typeof value.author === "string")) {
+          violations.push({ path: "author", reason: "expected string" });
+        } else {
         }
-        out["wordCount"] = value.wordCount;
+        out["author"] = value.author;
+      }
+      if (value.wordCount !== undefined) {
+        if (value.wordCount === null) {
+          violations.push({ path: "wordCount", reason: "explicit null not allowed" });
+        } else {
+          if (
+            !(typeof value.wordCount === "number" && Number.isInteger(value.wordCount))
+          ) {
+            violations.push({ path: "wordCount", reason: "expected integer" });
+          } else {
+            if (!Number.isSafeInteger(value.wordCount)) {
+              violations.push({
+                path: "wordCount",
+                reason: "exceeds ±(2^53-1) integer cap",
+              });
+            }
+          }
+          out["wordCount"] = value.wordCount;
+        }
       }
       if (violations.length) {
         throw __nexgenDefinitions.payloadValidationError(violations);

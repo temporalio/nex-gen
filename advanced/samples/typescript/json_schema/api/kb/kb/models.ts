@@ -68,11 +68,28 @@ export const getCategoryTreeInputTransferTypeConverter =
     }
 
     public toTransferType(value: GetCategoryTreeInput): unknown {
+      if (!__nexgenDefinitions.isPlainObject(value)) {
+        throw __nexgenDefinitions.payloadValidationError([
+          { path: "", reason: "expected object" },
+        ]);
+      }
+      const violations: __nexgenDefinitions.Violation[] = [];
       const out: Record<string, unknown> = Object.create(null) as Record<
         string,
         unknown
       >;
-      out["rootId"] = value.rootId;
+      if (value.rootId === undefined || value.rootId === null) {
+        violations.push({ path: "rootId", reason: "required" });
+      } else {
+        if (!(typeof value.rootId === "string")) {
+          violations.push({ path: "rootId", reason: "expected string" });
+        } else {
+        }
+        out["rootId"] = value.rootId;
+      }
+      if (violations.length) {
+        throw __nexgenDefinitions.payloadValidationError(violations);
+      }
       return out;
     }
   })();
@@ -118,11 +135,28 @@ export const getPageInputTransferTypeConverter =
     }
 
     public toTransferType(value: GetPageInput): unknown {
+      if (!__nexgenDefinitions.isPlainObject(value)) {
+        throw __nexgenDefinitions.payloadValidationError([
+          { path: "", reason: "expected object" },
+        ]);
+      }
+      const violations: __nexgenDefinitions.Violation[] = [];
       const out: Record<string, unknown> = Object.create(null) as Record<
         string,
         unknown
       >;
-      out["pageId"] = value.pageId;
+      if (value.pageId === undefined || value.pageId === null) {
+        violations.push({ path: "pageId", reason: "required" });
+      } else {
+        if (!(typeof value.pageId === "string")) {
+          violations.push({ path: "pageId", reason: "expected string" });
+        } else {
+        }
+        out["pageId"] = value.pageId;
+      }
+      if (violations.length) {
+        throw __nexgenDefinitions.payloadValidationError(violations);
+      }
       return out;
     }
   })();
@@ -185,16 +219,40 @@ export const putBlockOutputTransferTypeConverter =
     }
 
     public toTransferType(value: PutBlockOutput): unknown {
+      if (!__nexgenDefinitions.isPlainObject(value)) {
+        throw __nexgenDefinitions.payloadValidationError([
+          { path: "", reason: "expected object" },
+        ]);
+      }
       const violations: __nexgenDefinitions.Violation[] = [];
       const out: Record<string, unknown> = Object.create(null) as Record<
         string,
         unknown
       >;
-      out["blockId"] = value.blockId;
-      if (!Number.isSafeInteger(value.revision)) {
-        violations.push({ path: "revision", reason: "exceeds ±(2^53-1) integer cap" });
+      if (value.blockId === undefined || value.blockId === null) {
+        violations.push({ path: "blockId", reason: "required" });
+      } else {
+        if (!(typeof value.blockId === "string")) {
+          violations.push({ path: "blockId", reason: "expected string" });
+        } else {
+        }
+        out["blockId"] = value.blockId;
       }
-      out["revision"] = value.revision;
+      if (value.revision === undefined || value.revision === null) {
+        violations.push({ path: "revision", reason: "required" });
+      } else {
+        if (!(typeof value.revision === "number" && Number.isInteger(value.revision))) {
+          violations.push({ path: "revision", reason: "expected integer" });
+        } else {
+          if (!Number.isSafeInteger(value.revision)) {
+            violations.push({
+              path: "revision",
+              reason: "exceeds ±(2^53-1) integer cap",
+            });
+          }
+        }
+        out["revision"] = value.revision;
+      }
       if (violations.length) {
         throw __nexgenDefinitions.payloadValidationError(violations);
       }

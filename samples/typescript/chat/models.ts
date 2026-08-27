@@ -104,11 +104,28 @@ export const getRoomInputTransferTypeConverter =
     }
 
     public toTransferType(value: GetRoomInput): unknown {
+      if (!__nexgenDefinitions.isPlainObject(value)) {
+        throw __nexgenDefinitions.payloadValidationError([
+          { path: "", reason: "expected object" },
+        ]);
+      }
+      const violations: __nexgenDefinitions.Violation[] = [];
       const out: Record<string, unknown> = Object.create(null) as Record<
         string,
         unknown
       >;
-      out["roomId"] = value.roomId;
+      if (value.roomId === undefined || value.roomId === null) {
+        violations.push({ path: "roomId", reason: "required" });
+      } else {
+        if (!(typeof value.roomId === "string")) {
+          violations.push({ path: "roomId", reason: "expected string" });
+        } else {
+        }
+        out["roomId"] = value.roomId;
+      }
+      if (violations.length) {
+        throw __nexgenDefinitions.payloadValidationError(violations);
+      }
       return out;
     }
   })();
@@ -152,6 +169,11 @@ export const labelsTransferTypeConverter =
     }
 
     public toTransferType(value: Labels): unknown {
+      if (!__nexgenDefinitions.isPlainObject(value)) {
+        throw __nexgenDefinitions.payloadValidationError([
+          { path: "", reason: "expected object" },
+        ]);
+      }
       const violations: __nexgenDefinitions.Violation[] = [];
       const out: Record<string, unknown> = Object.create(null) as Record<
         string,
@@ -159,6 +181,10 @@ export const labelsTransferTypeConverter =
       >;
       for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
         const path = __nexgenDefinitions.memberPath(key);
+        if (!(typeof entry === "string")) {
+          violations.push({ path: path, reason: "expected string" });
+        } else {
+        }
         out[key] = entry;
       }
       const keys = Object.keys(out);
@@ -270,27 +296,64 @@ export const messageTransferTypeConverter =
     }
 
     public toTransferType(value: Message): unknown {
+      if (!__nexgenDefinitions.isPlainObject(value)) {
+        throw __nexgenDefinitions.payloadValidationError([
+          { path: "", reason: "expected object" },
+        ]);
+      }
       const violations: __nexgenDefinitions.Violation[] = [];
       const out: Record<string, unknown> = Object.create(null) as Record<
         string,
         unknown
       >;
-      if (value.kind !== "text") {
-        violations.push({ path: "kind", reason: `must equal "text"` });
+      if (value.kind === undefined || value.kind === null) {
+        violations.push({ path: "kind", reason: "required" });
+      } else {
+        if (!(typeof value.kind === "string")) {
+          violations.push({ path: "kind", reason: "expected string" });
+        } else {
+          if (value.kind !== "text") {
+            violations.push({ path: "kind", reason: `must equal "text"` });
+          }
+        }
+        out["kind"] = value.kind;
       }
-      out["kind"] = value.kind;
-      out["body"] = value.body;
+      if (value.body === undefined || value.body === null) {
+        violations.push({ path: "body", reason: "required" });
+      } else {
+        if (!(typeof value.body === "string")) {
+          violations.push({ path: "body", reason: "expected string" });
+        } else {
+        }
+        out["body"] = value.body;
+      }
       if (value.replyToId !== undefined) {
+        if (value.replyToId !== null) {
+          if (!(typeof value.replyToId === "string")) {
+            violations.push({ path: "replyToId", reason: "expected string" });
+          } else {
+          }
+        }
         out["replyToId"] = value.replyToId;
       }
       if (value.priority !== undefined) {
-        if (!Number.isSafeInteger(value.priority)) {
-          violations.push({
-            path: "priority",
-            reason: "exceeds ±(2^53-1) integer cap",
-          });
+        if (value.priority === null) {
+          violations.push({ path: "priority", reason: "explicit null not allowed" });
+        } else {
+          if (
+            !(typeof value.priority === "number" && Number.isInteger(value.priority))
+          ) {
+            violations.push({ path: "priority", reason: "expected integer" });
+          } else {
+            if (!Number.isSafeInteger(value.priority)) {
+              violations.push({
+                path: "priority",
+                reason: "exceeds ±(2^53-1) integer cap",
+              });
+            }
+          }
+          out["priority"] = value.priority;
         }
-        out["priority"] = value.priority;
       }
       if (violations.length) {
         throw __nexgenDefinitions.payloadValidationError(violations);
@@ -416,26 +479,74 @@ export const roomTransferTypeConverter =
     }
 
     public toTransferType(value: Room): unknown {
+      if (!__nexgenDefinitions.isPlainObject(value)) {
+        throw __nexgenDefinitions.payloadValidationError([
+          { path: "", reason: "expected object" },
+        ]);
+      }
       const violations: __nexgenDefinitions.Violation[] = [];
       const out: Record<string, unknown> = Object.create(null) as Record<
         string,
         unknown
       >;
-      out["roomId"] = value.roomId;
-      out["displayName"] = value.displayName;
+      if (value.roomId === undefined || value.roomId === null) {
+        violations.push({ path: "roomId", reason: "required" });
+      } else {
+        if (!(typeof value.roomId === "string")) {
+          violations.push({ path: "roomId", reason: "expected string" });
+        } else {
+        }
+        out["roomId"] = value.roomId;
+      }
+      if (value.displayName === undefined || value.displayName === null) {
+        violations.push({ path: "displayName", reason: "required" });
+      } else {
+        if (!(typeof value.displayName === "string")) {
+          violations.push({ path: "displayName", reason: "expected string" });
+        } else {
+        }
+        out["displayName"] = value.displayName;
+      }
+      if (value.topic !== null) {
+        if (!(typeof value.topic === "string")) {
+          violations.push({ path: "topic", reason: "expected string" });
+        } else {
+        }
+      }
       out["topic"] = value.topic;
       if (value.members !== undefined) {
-        out["members"] = value.members;
+        if (value.members === null) {
+          violations.push({ path: "members", reason: "explicit null not allowed" });
+        } else {
+          if (!Array.isArray(value.members)) {
+            violations.push({ path: "members", reason: "expected array" });
+          } else {
+            value.members.forEach((element, index) => {
+              if (!(typeof element === "string")) {
+                violations.push({
+                  path: `members[${index}]`,
+                  reason: "expected string",
+                });
+              } else {
+              }
+            });
+          }
+          out["members"] = value.members;
+        }
       }
       if (value.labels !== undefined) {
-        out["labels"] = (() => {
-          try {
-            return labelsTransferTypeConverter.toTransferType(value.labels);
-          } catch (error) {
-            __nexgenDefinitions.collect(violations, "labels", error);
-            return undefined;
-          }
-        })();
+        if (value.labels === null) {
+          violations.push({ path: "labels", reason: "explicit null not allowed" });
+        } else {
+          out["labels"] = (() => {
+            try {
+              return labelsTransferTypeConverter.toTransferType(value.labels);
+            } catch (error) {
+              __nexgenDefinitions.collect(violations, "labels", error);
+              return undefined;
+            }
+          })();
+        }
       }
       for (const [key, entry] of Object.entries(value.additionalProperties ?? {})) {
         const path = __nexgenDefinitions.memberPath(key);
@@ -510,20 +621,37 @@ export const sendMessageInputTransferTypeConverter =
     }
 
     public toTransferType(value: SendMessageInput): unknown {
+      if (!__nexgenDefinitions.isPlainObject(value)) {
+        throw __nexgenDefinitions.payloadValidationError([
+          { path: "", reason: "expected object" },
+        ]);
+      }
       const violations: __nexgenDefinitions.Violation[] = [];
       const out: Record<string, unknown> = Object.create(null) as Record<
         string,
         unknown
       >;
-      out["roomId"] = value.roomId;
-      out["message"] = (() => {
-        try {
-          return messageTransferTypeConverter.toTransferType(value.message);
-        } catch (error) {
-          __nexgenDefinitions.collect(violations, "message", error);
-          return undefined;
+      if (value.roomId === undefined || value.roomId === null) {
+        violations.push({ path: "roomId", reason: "required" });
+      } else {
+        if (!(typeof value.roomId === "string")) {
+          violations.push({ path: "roomId", reason: "expected string" });
+        } else {
         }
-      })();
+        out["roomId"] = value.roomId;
+      }
+      if (value.message === undefined || value.message === null) {
+        violations.push({ path: "message", reason: "required" });
+      } else {
+        out["message"] = (() => {
+          try {
+            return messageTransferTypeConverter.toTransferType(value.message);
+          } catch (error) {
+            __nexgenDefinitions.collect(violations, "message", error);
+            return undefined;
+          }
+        })();
+      }
       if (violations.length) {
         throw __nexgenDefinitions.payloadValidationError(violations);
       }
@@ -572,11 +700,28 @@ export const sendMessageOutputTransferTypeConverter =
     }
 
     public toTransferType(value: SendMessageOutput): unknown {
+      if (!__nexgenDefinitions.isPlainObject(value)) {
+        throw __nexgenDefinitions.payloadValidationError([
+          { path: "", reason: "expected object" },
+        ]);
+      }
+      const violations: __nexgenDefinitions.Violation[] = [];
       const out: Record<string, unknown> = Object.create(null) as Record<
         string,
         unknown
       >;
-      out["messageId"] = value.messageId;
+      if (value.messageId === undefined || value.messageId === null) {
+        violations.push({ path: "messageId", reason: "required" });
+      } else {
+        if (!(typeof value.messageId === "string")) {
+          violations.push({ path: "messageId", reason: "expected string" });
+        } else {
+        }
+        out["messageId"] = value.messageId;
+      }
+      if (violations.length) {
+        throw __nexgenDefinitions.payloadValidationError(violations);
+      }
       return out;
     }
   })();

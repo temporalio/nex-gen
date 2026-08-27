@@ -1477,8 +1477,9 @@ fn typescript_json_guards_nullable_array_elements_during_serialize_validation() 
     let rendered = fs::read_to_string(output_path.join("models.ts")).unwrap();
 
     assert!(
-        rendered
-            .contains("value.slots.forEach((element, index) => {\n      if (element !== null) {"),
+        rendered.contains(
+            "value.slots.forEach((element, index) => {\n          if (element !== null) {"
+        ),
         "{rendered}"
     );
     assert!(

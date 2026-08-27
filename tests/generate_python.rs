@@ -1703,10 +1703,10 @@ fn python_json_validates_non_object_union_branch_constraints() {
     // its unconstrained `number` still contributes the uniform finiteness guard
     // at the indexed path.
     assert!(
-        rendered.contains("for item_index_8, item_element_8 in enumerate(value.list_or_name):")
+        rendered.contains("for item_index_12, item_element_12 in enumerate(value.list_or_name):")
     );
     assert!(rendered.contains(
-        "Violation(path=f'listOrName[{item_index_8}]', reason=f\"must be a finite number, got {item_element_8}\")"
+        "Violation(path=f'listOrName[{item_index_12}]', reason=f\"must be a finite number, got {item_element_12}\")"
     ));
     fs::remove_dir_all(temp_dir).unwrap();
 }

@@ -60,11 +60,30 @@ public final class BlobIndex {
     public static final class Serializer extends com.fasterxml.jackson.databind.JsonSerializer<BlobIndex> {
         @Override
         public void serialize(BlobIndex value, JsonGenerator gen, SerializerProvider serializers) throws IOException {
+            JsonGenerator target = gen;
+            com.fasterxml.jackson.databind.util.TokenBuffer pending = new com.fasterxml.jackson.databind.util.TokenBuffer(gen.getCodec(), false);
+            gen = pending;
+            List<Violation> violations = new ArrayList<>();
+            if (value.additionalProperties == null) {
+                violations.add(new Violation("", "expected object"));
+            } else {
+                for (Map.Entry<String, byte[]> entry : value.additionalProperties.entrySet()) {
+                    if (entry.getValue() == null) {
+                        violations.add(new Violation(Violation.memberPath(entry.getKey()), "explicit null not allowed"));
+                        continue;
+                    }
+                }
+            }
+            if (!violations.isEmpty()) {
+                // TODO: Use PayloadValidationException.newPayloadValidationException once it is available in an SDK release.
+                throw ApplicationFailure.newNonRetryableFailure("Payload validation failed", "PayloadValidationError", violations);
+            }
             gen.writeStartObject();
             for (Map.Entry<String, byte[]> entry : value.additionalProperties.entrySet()) {
                 gen.writeStringField(entry.getKey(), Base64Support.formatBase64(entry.getValue()));
             }
             gen.writeEndObject();
+            pending.serialize(target);
         }
     }
 

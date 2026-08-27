@@ -62,14 +62,21 @@ public final class Nicknames {
     public static final class Serializer extends com.fasterxml.jackson.databind.JsonSerializer<Nicknames> {
         @Override
         public void serialize(Nicknames value, JsonGenerator gen, SerializerProvider serializers) throws IOException {
+            JsonGenerator target = gen;
+            com.fasterxml.jackson.databind.util.TokenBuffer pending = new com.fasterxml.jackson.databind.util.TokenBuffer(gen.getCodec(), false);
+            gen = pending;
             List<Violation> violations = new ArrayList<>();
-            for (Map.Entry<String, @Nullable String> entry : value.additionalProperties.entrySet()) {
-                if (entry.getValue() == null) {
-                    continue;
-                }
-                int length = entry.getValue().codePointCount(0, entry.getValue().length());
-                if (length < 2) {
-                    violations.add(new Violation(Violation.memberPath(entry.getKey()), "must have length >= 2, got " + length));
+            if (value.additionalProperties == null) {
+                violations.add(new Violation("", "expected object"));
+            } else {
+                for (Map.Entry<String, @Nullable String> entry : value.additionalProperties.entrySet()) {
+                    if (entry.getValue() == null) {
+                        continue;
+                    }
+                    int length = entry.getValue().codePointCount(0, entry.getValue().length());
+                    if (length < 2) {
+                        violations.add(new Violation(Violation.memberPath(entry.getKey()), "must have length >= 2, got " + length));
+                    }
                 }
             }
             if (!violations.isEmpty()) {
@@ -85,6 +92,7 @@ public final class Nicknames {
                 gen.writeStringField(entry.getKey(), entry.getValue());
             }
             gen.writeEndObject();
+            pending.serialize(target);
         }
     }
 

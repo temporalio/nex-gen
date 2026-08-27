@@ -2391,6 +2391,13 @@ public final class Showcase {
                 if (value.tags.size() > 5) {
                     violations.add(new Violation("tags", "must have at most 5 items, got " + value.tags.size()));
                 }
+                for (int validationIndex0 = 0; validationIndex0 < value.tags.size(); validationIndex0++) {
+                    String validationValue0 = value.tags.get(validationIndex0);
+                    if (validationValue0 == null) {
+                        violations.add(new Violation("tags" + "[" + validationIndex0 + "]", "explicit null not allowed"));
+                    } else {
+                    }
+                }
             }
             if (value.aliases != null) {
                 java.util.Map<Object, Integer> seen = new java.util.HashMap<>();
@@ -2401,6 +2408,13 @@ public final class Showcase {
                         violations.add(new Violation("aliases", "duplicate items: element at index " + index + " equals index " + priorIndex));
                     } else {
                         seen.put(element, index);
+                    }
+                }
+                for (int validationIndex0 = 0; validationIndex0 < value.aliases.size(); validationIndex0++) {
+                    String validationValue0 = value.aliases.get(validationIndex0);
+                    if (validationValue0 == null) {
+                        violations.add(new Violation("aliases" + "[" + validationIndex0 + "]", "explicit null not allowed"));
+                    } else {
                     }
                 }
             }
@@ -2417,6 +2431,13 @@ public final class Showcase {
                 if (matchCount > 2) {
                     violations.add(new Violation("roles", "too many matching items: at most 2, got " + matchCount));
                 }
+                for (int validationIndex0 = 0; validationIndex0 < value.roles.size(); validationIndex0++) {
+                    String validationValue0 = value.roles.get(validationIndex0);
+                    if (validationValue0 == null) {
+                        violations.add(new Violation("roles" + "[" + validationIndex0 + "]", "explicit null not allowed"));
+                    } else {
+                    }
+                }
             }
             if (value.idOrName != null) {
                 IdOrName.validate(value.idOrName, "idOrName", violations);
@@ -2430,7 +2451,23 @@ public final class Showcase {
             if (value.measurements != null) {
                 Measurements.validate(value.measurements, "measurements", violations);
             }
+            if (value.shapes != null) {
+                for (int validationIndex0 = 0; validationIndex0 < value.shapes.size(); validationIndex0++) {
+                    Shape validationValue0 = value.shapes.get(validationIndex0);
+                    if (validationValue0 == null) {
+                        violations.add(new Violation("shapes" + "[" + validationIndex0 + "]", "explicit null not allowed"));
+                    } else {
+                    }
+                }
+            }
             if (value.segments != null) {
+                for (int validationIndex0 = 0; validationIndex0 < value.segments.size(); validationIndex0++) {
+                    ShowcaseSegmentsItem validationValue0 = value.segments.get(validationIndex0);
+                    if (validationValue0 == null) {
+                        violations.add(new Violation("segments" + "[" + validationIndex0 + "]", "explicit null not allowed"));
+                    } else {
+                    }
+                }
                 for (int index = 0; index < value.segments.size(); index++) {
                     ShowcaseSegmentsItem.validate(value.segments.get(index), "segments" + "[" + index + "]", violations);
                 }
@@ -2438,7 +2475,9 @@ public final class Showcase {
             if (value.slots != null) {
                 for (int validationIndex0 = 0; validationIndex0 < value.slots.size(); validationIndex0++) {
                     String validationValue0 = value.slots.get(validationIndex0);
-                    if (validationValue0 != null) {
+                    if (validationValue0 == null) {
+                        continue;
+                    } else {
                         int nestedLength = validationValue0.codePointCount(0, validationValue0.length());
                         if (nestedLength < 2) {
                             violations.add(new Violation("slots" + "[" + validationIndex0 + "]", "must have length >= 2, got " + nestedLength));
@@ -2460,6 +2499,20 @@ public final class Showcase {
                         }
                     }
                 }
+                for (int validationIndex0 = 0; validationIndex0 < value.grid.size(); validationIndex0++) {
+                    List<Long> validationValue0 = value.grid.get(validationIndex0);
+                    if (validationValue0 == null) {
+                        violations.add(new Violation("grid" + "[" + validationIndex0 + "]", "explicit null not allowed"));
+                    } else {
+                        for (int validationIndex1 = 0; validationIndex1 < validationValue0.size(); validationIndex1++) {
+                            Long validationValue1 = validationValue0.get(validationIndex1);
+                            if (validationValue1 == null) {
+                                violations.add(new Violation("grid" + "[" + validationIndex0 + "]" + "[" + validationIndex1 + "]", "explicit null not allowed"));
+                            } else {
+                            }
+                        }
+                    }
+                }
             }
             if (value.numberGrid != null) {
                 for (int finiteIndex0 = 0; finiteIndex0 < value.numberGrid.size(); finiteIndex0++) {
@@ -2475,14 +2528,39 @@ public final class Showcase {
                         }
                     }
                 }
+                for (int validationIndex0 = 0; validationIndex0 < value.numberGrid.size(); validationIndex0++) {
+                    List<Double> validationValue0 = value.numberGrid.get(validationIndex0);
+                    if (validationValue0 == null) {
+                        violations.add(new Violation("numberGrid" + "[" + validationIndex0 + "]", "explicit null not allowed"));
+                    } else {
+                        for (int validationIndex1 = 0; validationIndex1 < validationValue0.size(); validationIndex1++) {
+                            Double validationValue1 = validationValue0.get(validationIndex1);
+                            if (validationValue1 == null) {
+                                violations.add(new Violation("numberGrid" + "[" + validationIndex0 + "]" + "[" + validationIndex1 + "]", "explicit null not allowed"));
+                            } else {
+                            }
+                        }
+                    }
+                }
             }
             if (value.links != null) {
                 for (int validationIndex0 = 0; validationIndex0 < value.links.size(); validationIndex0++) {
                     String validationValue0 = value.links.get(validationIndex0);
-                    if (validationValue0 != null) {
+                    if (validationValue0 == null) {
+                        violations.add(new Violation("links" + "[" + validationIndex0 + "]", "explicit null not allowed"));
+                    } else {
                         if (!java.util.regex.Pattern.compile("^(?:[A-Za-z][A-Za-z0-9+.-]*:(?://(?:(?:[A-Za-z0-9._~!$&'()*+,;=:-]|%[0-9A-Fa-f][0-9A-Fa-f])*@)?(?:(?:\\[(?:([0-9a-fA-F]{1,4}:){6}([0-9a-fA-F]{1,4}:[0-9a-fA-F]{1,4}|((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])))|::([0-9a-fA-F]{1,4}:){5}([0-9a-fA-F]{1,4}:[0-9a-fA-F]{1,4}|((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])))|([0-9a-fA-F]{1,4})?::([0-9a-fA-F]{1,4}:){4}([0-9a-fA-F]{1,4}:[0-9a-fA-F]{1,4}|((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])))|(([0-9a-fA-F]{1,4}:){0,1}[0-9a-fA-F]{1,4})?::([0-9a-fA-F]{1,4}:){3}([0-9a-fA-F]{1,4}:[0-9a-fA-F]{1,4}|((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])))|(([0-9a-fA-F]{1,4}:){0,2}[0-9a-fA-F]{1,4})?::([0-9a-fA-F]{1,4}:){2}([0-9a-fA-F]{1,4}:[0-9a-fA-F]{1,4}|((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])))|(([0-9a-fA-F]{1,4}:){0,3}[0-9a-fA-F]{1,4})?::([0-9a-fA-F]{1,4}:)([0-9a-fA-F]{1,4}:[0-9a-fA-F]{1,4}|((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])))|(([0-9a-fA-F]{1,4}:){0,4}[0-9a-fA-F]{1,4})?::([0-9a-fA-F]{1,4}:[0-9a-fA-F]{1,4}|((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])))|(([0-9a-fA-F]{1,4}:){0,5}[0-9a-fA-F]{1,4})?::[0-9a-fA-F]{1,4}|(([0-9a-fA-F]{1,4}:){0,6}[0-9a-fA-F]{1,4})?::)\\]|\\[v[0-9A-Fa-f]+\\.[A-Za-z0-9._~!$&'()*+,;=:-]+\\])|(?:[A-Za-z0-9._~!$&'()*+,;=-]|%[0-9A-Fa-f][0-9A-Fa-f])*)(?::[0-9]*)?(?:/(?:[A-Za-z0-9._~!$&'()*+,;=:@-]|%[0-9A-Fa-f][0-9A-Fa-f])*)*|/(?:(?:[A-Za-z0-9._~!$&'()*+,;=:@-]|%[0-9A-Fa-f][0-9A-Fa-f])+(?:/(?:[A-Za-z0-9._~!$&'()*+,;=:@-]|%[0-9A-Fa-f][0-9A-Fa-f])*)*)?|(?:[A-Za-z0-9._~!$&'()*+,;=:@-]|%[0-9A-Fa-f][0-9A-Fa-f])+(?:/(?:[A-Za-z0-9._~!$&'()*+,;=:@-]|%[0-9A-Fa-f][0-9A-Fa-f])*)*)?(?:\\?(?:(?:[A-Za-z0-9._~!$&'()*+,;=:@-]|%[0-9A-Fa-f][0-9A-Fa-f])|[/?])*)?(?:#(?:(?:[A-Za-z0-9._~!$&'()*+,;=:@-]|%[0-9A-Fa-f][0-9A-Fa-f])|[/?])*)?)\\z").matcher(validationValue0).find()) {
                             violations.add(new Violation("links" + "[" + validationIndex0 + "]", "must be a valid uri, got " + validationValue0));
                         }
+                    }
+                }
+            }
+            if (value.addresses != null) {
+                for (int validationIndex0 = 0; validationIndex0 < value.addresses.size(); validationIndex0++) {
+                    Address validationValue0 = value.addresses.get(validationIndex0);
+                    if (validationValue0 == null) {
+                        violations.add(new Violation("addresses" + "[" + validationIndex0 + "]", "explicit null not allowed"));
+                    } else {
                     }
                 }
             }
@@ -2493,12 +2571,39 @@ public final class Showcase {
                         TemporalSupport.checkDate(temporalValue0, "dates" + "[" + temporalIndex0 + "]", violations);
                     }
                 }
+                for (int validationIndex0 = 0; validationIndex0 < value.dates.size(); validationIndex0++) {
+                    LocalDate validationValue0 = value.dates.get(validationIndex0);
+                    if (validationValue0 == null) {
+                        violations.add(new Violation("dates" + "[" + validationIndex0 + "]", "explicit null not allowed"));
+                    } else {
+                        String nestedWire1 = TemporalSupport.formatDate(validationValue0);
+                    }
+                }
+            }
+            if (value.blobs != null) {
+                for (int validationIndex0 = 0; validationIndex0 < value.blobs.size(); validationIndex0++) {
+                    byte[] validationValue0 = value.blobs.get(validationIndex0);
+                    if (validationValue0 == null) {
+                        violations.add(new Violation("blobs" + "[" + validationIndex0 + "]", "explicit null not allowed"));
+                    } else {
+                        String nestedWire1 = Base64Support.formatBase64(validationValue0);
+                    }
+                }
             }
             if (value.metricOrLabel != null) {
                 MetricOrLabel.validate(value.metricOrLabel, "metricOrLabel", violations);
             }
             if (value.addressListOrLabel != null) {
                 AddressListOrLabel.validate(value.addressListOrLabel, "addressListOrLabel", violations);
+            }
+            if (value.rows != null) {
+                for (int validationIndex0 = 0; validationIndex0 < value.rows.size(); validationIndex0++) {
+                    ShowcaseRowsItem validationValue0 = value.rows.get(validationIndex0);
+                    if (validationValue0 == null) {
+                        violations.add(new Violation("rows" + "[" + validationIndex0 + "]", "explicit null not allowed"));
+                    } else {
+                    }
+                }
             }
             if (value.nullableCount != null) {
                 if (value.nullableCount < -SpecNumbers.INTEGER_CAP || value.nullableCount > SpecNumbers.INTEGER_CAP) {
@@ -2533,6 +2638,13 @@ public final class Showcase {
                         seen.put(element, index);
                     }
                 }
+                for (int validationIndex0 = 0; validationIndex0 < value.nullableTags.size(); validationIndex0++) {
+                    String validationValue0 = value.nullableTags.get(validationIndex0);
+                    if (validationValue0 == null) {
+                        violations.add(new Violation("nullableTags" + "[" + validationIndex0 + "]", "explicit null not allowed"));
+                    } else {
+                    }
+                }
             }
             if (value.integralMeasurements != null) {
                 for (int finiteIndex0 = 0; finiteIndex0 < value.integralMeasurements.size(); finiteIndex0++) {
@@ -2551,6 +2663,13 @@ public final class Showcase {
                 }
                 if (matchCount < 1) {
                     violations.add(new Violation("integralMeasurements", "no element matches the required schema"));
+                }
+                for (int validationIndex0 = 0; validationIndex0 < value.integralMeasurements.size(); validationIndex0++) {
+                    Double validationValue0 = value.integralMeasurements.get(validationIndex0);
+                    if (validationValue0 == null) {
+                        violations.add(new Violation("integralMeasurements" + "[" + validationIndex0 + "]", "explicit null not allowed"));
+                    } else {
+                    }
                 }
             }
             if (value.byFive != null) {

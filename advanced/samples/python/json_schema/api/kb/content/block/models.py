@@ -77,19 +77,36 @@ class _BlockStyleTransferTypeConverter(
 
     @typing_extensions.override
     def to_transfer_type(self, value: "BlockStyle") -> typing.Any:
+        if not isinstance(value, BlockStyle):
+            raise temporalio.converter.create_payload_validation_error(
+                [Violation(path="", reason="expected object")]
+            )
         violations: list[Violation] = []
         out: dict[str, typing.Any] = {}
         if value.bold is not None:
+            if not (isinstance(value.bold, bool)):
+                violations.append(Violation(path="bold", reason="expected boolean"))
             out["bold"] = value.bold
         if value.indent is not None:
-            if abs(value.indent) > 9007199254740991:
-                violations.append(
-                    Violation(path="indent", reason="exceeds ±(2^53-1) integer cap")
+            if not (
+                not isinstance(value.indent, bool)
+                and (
+                    isinstance(value.indent, int)
+                    or (isinstance(value.indent, float) and value.indent.is_integer())
                 )
-            if value.indent < 0:
-                violations.append(
-                    Violation(path="indent", reason=f"must be >= 0, got {value.indent}")
-                )
+            ):
+                violations.append(Violation(path="indent", reason="expected integer"))
+            else:
+                if abs(value.indent) > 9007199254740991:
+                    violations.append(
+                        Violation(path="indent", reason="exceeds ±(2^53-1) integer cap")
+                    )
+                if value.indent < 0:
+                    violations.append(
+                        Violation(
+                            path="indent", reason=f"must be >= 0, got {value.indent}"
+                        )
+                    )
             out["indent"] = value.indent
         if violations:
             raise temporalio.converter.create_payload_validation_error(violations)

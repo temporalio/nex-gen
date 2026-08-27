@@ -97,11 +97,27 @@ class _CategoryTransferTypeConverter(
 
     @typing_extensions.override
     def to_transfer_type(self, value: "Category") -> typing.Any:
+        if not isinstance(value, Category):
+            raise temporalio.converter.create_payload_validation_error(
+                [Violation(path="", reason="expected object")]
+            )
         violations: list[Violation] = []
         out: dict[str, typing.Any] = {}
-        out["id"] = value.id
-        out["name"] = value.name
+        if value.id is None:
+            violations.append(Violation(path="id", reason="required"))
+        else:
+            if not (isinstance(value.id, str)):
+                violations.append(Violation(path="id", reason="expected string"))
+            out["id"] = value.id
+        if value.name is None:
+            violations.append(Violation(path="name", reason="required"))
+        else:
+            if not (isinstance(value.name, str)):
+                violations.append(Violation(path="name", reason="expected string"))
+            out["name"] = value.name
         if value.children is not None:
+            if not (isinstance(value.children, list)):
+                violations.append(Violation(path="children", reason="expected array"))
             children_out: list[typing.Any] = []
             for children_index, children_element in enumerate(value.children):
                 try:
@@ -189,8 +205,29 @@ class _PaletteTransferTypeConverter(
 
     @typing_extensions.override
     def to_transfer_type(self, value: "Palette") -> typing.Any:
+        if not isinstance(value, Palette):
+            raise temporalio.converter.create_payload_validation_error(
+                [Violation(path="", reason="expected object")]
+            )
+        violations: list[Violation] = []
         out: dict[str, typing.Any] = {}
-        out["swatches"] = value.swatches
+        if value.swatches is None:
+            violations.append(Violation(path="swatches", reason="required"))
+        else:
+            if not (isinstance(value.swatches, list)):
+                violations.append(Violation(path="swatches", reason="expected array"))
+            else:
+                for item_index_8, item_element_8 in enumerate(value.swatches):
+                    if not (isinstance(item_element_8, str)):
+                        violations.append(
+                            Violation(
+                                path=f"swatches[{item_index_8}]",
+                                reason="expected string",
+                            )
+                        )
+            out["swatches"] = value.swatches
+        if violations:
+            raise temporalio.converter.create_payload_validation_error(violations)
         return out
 
 

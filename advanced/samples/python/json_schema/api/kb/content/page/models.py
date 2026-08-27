@@ -67,14 +67,39 @@ class _PageMetaTransferTypeConverter(
 
     @typing_extensions.override
     def to_transfer_type(self, value: "PageMeta") -> typing.Any:
+        if not isinstance(value, PageMeta):
+            raise temporalio.converter.create_payload_validation_error(
+                [Violation(path="", reason="expected object")]
+            )
         violations: list[Violation] = []
         out: dict[str, typing.Any] = {}
-        out["author"] = value.author
+        if value.author is None:
+            violations.append(Violation(path="author", reason="required"))
+        else:
+            if not (isinstance(value.author, str)):
+                violations.append(Violation(path="author", reason="expected string"))
+            out["author"] = value.author
         if value.word_count is not None:
-            if abs(value.word_count) > 9007199254740991:
-                violations.append(
-                    Violation(path="wordCount", reason="exceeds ±(2^53-1) integer cap")
+            if not (
+                not isinstance(value.word_count, bool)
+                and (
+                    isinstance(value.word_count, int)
+                    or (
+                        isinstance(value.word_count, float)
+                        and value.word_count.is_integer()
+                    )
                 )
+            ):
+                violations.append(
+                    Violation(path="wordCount", reason="expected integer")
+                )
+            else:
+                if abs(value.word_count) > 9007199254740991:
+                    violations.append(
+                        Violation(
+                            path="wordCount", reason="exceeds ±(2^53-1) integer cap"
+                        )
+                    )
             out["wordCount"] = value.word_count
         if violations:
             raise temporalio.converter.create_payload_validation_error(violations)

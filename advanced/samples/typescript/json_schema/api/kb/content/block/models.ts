@@ -161,35 +161,68 @@ export const blockTransferTypeConverter =
     }
 
     public toTransferType(value: Block): unknown {
+      if (!__nexgenDefinitions.isPlainObject(value)) {
+        throw __nexgenDefinitions.payloadValidationError([
+          { path: "", reason: "expected object" },
+        ]);
+      }
       const violations: __nexgenDefinitions.Violation[] = [];
       const out: Record<string, unknown> = Object.create(null) as Record<
         string,
         unknown
       >;
-      out["blockId"] = value.blockId;
-      if (!Number.isSafeInteger(value.order)) {
-        violations.push({ path: "order", reason: "exceeds ±(2^53-1) integer cap" });
+      if (value.blockId === undefined || value.blockId === null) {
+        violations.push({ path: "blockId", reason: "required" });
       } else {
-        if (value.order < 0) {
-          violations.push({
-            path: "order",
-            reason: `must be >= 0, got ${value.order}`,
-          });
+        if (!(typeof value.blockId === "string")) {
+          violations.push({ path: "blockId", reason: "expected string" });
+        } else {
+        }
+        out["blockId"] = value.blockId;
+      }
+      if (value.order === undefined || value.order === null) {
+        violations.push({ path: "order", reason: "required" });
+      } else {
+        if (!(typeof value.order === "number" && Number.isInteger(value.order))) {
+          violations.push({ path: "order", reason: "expected integer" });
+        } else {
+          if (!Number.isSafeInteger(value.order)) {
+            violations.push({ path: "order", reason: "exceeds ±(2^53-1) integer cap" });
+          } else {
+            if (value.order < 0) {
+              violations.push({
+                path: "order",
+                reason: `must be >= 0, got ${value.order}`,
+              });
+            }
+          }
+        }
+        out["order"] = value.order;
+      }
+      if (value.text !== undefined) {
+        if (value.text === null) {
+          violations.push({ path: "text", reason: "explicit null not allowed" });
+        } else {
+          if (!(typeof value.text === "string")) {
+            violations.push({ path: "text", reason: "expected string" });
+          } else {
+          }
+          out["text"] = value.text;
         }
       }
-      out["order"] = value.order;
-      if (value.text !== undefined) {
-        out["text"] = value.text;
-      }
       if (value.style !== undefined) {
-        out["style"] = (() => {
-          try {
-            return blockStyleTransferTypeConverter.toTransferType(value.style);
-          } catch (error) {
-            __nexgenDefinitions.collect(violations, "style", error);
-            return undefined;
-          }
-        })();
+        if (value.style === null) {
+          violations.push({ path: "style", reason: "explicit null not allowed" });
+        } else {
+          out["style"] = (() => {
+            try {
+              return blockStyleTransferTypeConverter.toTransferType(value.style);
+            } catch (error) {
+              __nexgenDefinitions.collect(violations, "style", error);
+              return undefined;
+            }
+          })();
+        }
       }
       if (value.page !== undefined) {
         out["page"] =
@@ -275,26 +308,50 @@ export const blockStyleTransferTypeConverter =
     }
 
     public toTransferType(value: BlockStyle): unknown {
+      if (!__nexgenDefinitions.isPlainObject(value)) {
+        throw __nexgenDefinitions.payloadValidationError([
+          { path: "", reason: "expected object" },
+        ]);
+      }
       const violations: __nexgenDefinitions.Violation[] = [];
       const out: Record<string, unknown> = Object.create(null) as Record<
         string,
         unknown
       >;
       if (value.bold !== undefined) {
-        out["bold"] = value.bold;
+        if (value.bold === null) {
+          violations.push({ path: "bold", reason: "explicit null not allowed" });
+        } else {
+          if (!(typeof value.bold === "boolean")) {
+            violations.push({ path: "bold", reason: "expected boolean" });
+          } else {
+          }
+          out["bold"] = value.bold;
+        }
       }
       if (value.indent !== undefined) {
-        if (!Number.isSafeInteger(value.indent)) {
-          violations.push({ path: "indent", reason: "exceeds ±(2^53-1) integer cap" });
+        if (value.indent === null) {
+          violations.push({ path: "indent", reason: "explicit null not allowed" });
         } else {
-          if (value.indent < 0) {
-            violations.push({
-              path: "indent",
-              reason: `must be >= 0, got ${value.indent}`,
-            });
+          if (!(typeof value.indent === "number" && Number.isInteger(value.indent))) {
+            violations.push({ path: "indent", reason: "expected integer" });
+          } else {
+            if (!Number.isSafeInteger(value.indent)) {
+              violations.push({
+                path: "indent",
+                reason: "exceeds ±(2^53-1) integer cap",
+              });
+            } else {
+              if (value.indent < 0) {
+                violations.push({
+                  path: "indent",
+                  reason: `must be >= 0, got ${value.indent}`,
+                });
+              }
+            }
           }
+          out["indent"] = value.indent;
         }
-        out["indent"] = value.indent;
       }
       if (violations.length) {
         throw __nexgenDefinitions.payloadValidationError(violations);
