@@ -159,10 +159,11 @@ binding), choosing the standard or URL-safe variant per the declared
   requires padding, so the unpadded wire is re-padded before decode
   (`s + "=" * (-len(s) % 4)`).
 
-**No synthesized identifier, no P15 surface.** Unlike [[default]]'s
-`<Field>OrDefault()` accessor, bytes materialization renames nothing and
-adds no new declaration — the field is simply typed as bytes — so it
-carries no collision risk.
+**No member-derived identifier, no P15 surface.** Unlike [[default]]'s
+`<Field>OrDefault()` accessor, bytes materialization renames nothing and the
+field is simply typed as bytes. A target may share a generator-owned compiled
+predicate by encoding kind; that declaration is independent of authored member
+and derived-position names, so two members cannot collide through it.
 
 ## Validator mapping
 
@@ -297,12 +298,11 @@ code depend on how many predicates a node happens to carry — which is how a
   canonical form, mirroring [[format]].
 - **[[nullability]]**: orthogonal — a `null` skips the check and is not
   materialized; a present value is checked and decoded. A [[const]] / [[enum]]
-  on the **wrapper** does not narrow the emitted field to the literal's own
-  type: the null branch survives, the field stays nullable, and the closed
-  value applies to the non-null branch. Collapsing the wrapper to the literal
-  emits a field an explicit wire `null` cannot inhabit — in a statically-typed
-  target, one that does not compile — and it drops the branch a `null` needs
-  while the schema still admits it.
+  belongs on the **non-null branch**. Putting it on the `oneOf` wrapper is a
+  load reject under the shared applicator ownership rule; the diagnostic tells
+  the author to move it into the branch whose values it constrains. This keeps
+  the null branch and bytes materialization intact without creating a second
+  wrapper-level precedence rule.
 - **[[oneOf]]**: **deferred** on a non-object branch of a sum type — the
   synthesized `<Union><Kind>` wrapper has no bytes construct to hold, so it is
   rejected rather than materialized in one target and left an unvalidated

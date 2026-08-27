@@ -11804,6 +11804,17 @@ properties:
     }
 
     #[test]
+    fn rejects_closed_literals_on_nullable_content_encoding_wrapper() {
+        for literal in ["const: aGk=", "enum: [aGk=]"] {
+            let error = numeric_reject(&format!(
+                "oneOf:\n  - {{ type: string, contentEncoding: base64 }}\n  - {{ type: 'null' }}\n{literal}"
+            ));
+            assert!(error.contains("cannot be a sibling of `oneOf`"), "{error}");
+            assert!(error.contains("move it into the branch"), "{error}");
+        }
+    }
+
+    #[test]
     fn rejects_content_encoding_on_non_string_field() {
         let error = numeric_reject("type: integer\ncontentEncoding: base64");
         assert!(error.contains("requires `type: string`"), "{error}");
