@@ -3298,7 +3298,7 @@ fn render_typescript_default_type_import_if_used(
     name: &str,
     package: &str,
 ) {
-    if !contains_identifier(source, name) {
+    if !contains_identifier_outside_comments(source, name) {
         return;
     }
     output.push_str("import type ");
@@ -3306,6 +3306,42 @@ fn render_typescript_default_type_import_if_used(
     output.push_str(" from '");
     output.push_str(package);
     output.push_str("';\n");
+}
+
+/// Type-only default imports must be driven by emitted code, not authored
+/// prose. In particular, a description mentioning Java's `Long` type must not
+/// add an undeclared `long` package dependency to TypeScript output.
+fn contains_identifier_outside_comments(source: &str, identifier: &str) -> bool {
+    let bytes = source.as_bytes();
+    let mut code = String::with_capacity(source.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index..].starts_with(b"//") {
+            while index < bytes.len() && bytes[index] != b'\n' {
+                code.push(' ');
+                index += 1;
+            }
+        } else if bytes[index..].starts_with(b"/*") {
+            code.push_str("  ");
+            index += 2;
+            while index < bytes.len() && !bytes[index..].starts_with(b"*/") {
+                code.push(if bytes[index] == b'\n' { '\n' } else { ' ' });
+                index += 1;
+            }
+            if index < bytes.len() {
+                code.push_str("  ");
+                index += 2;
+            }
+        } else {
+            let character = source[index..]
+                .chars()
+                .next()
+                .expect("index remains on a UTF-8 boundary");
+            code.push(character);
+            index += character.len_utf8();
+        }
+    }
+    contains_identifier(&code, identifier)
 }
 
 fn contains_identifier(source: &str, identifier: &str) -> bool {
