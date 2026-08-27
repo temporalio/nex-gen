@@ -3044,7 +3044,10 @@ fn ts_inline_union_serializer(
     }
     // Named off the union itself (`<Model><Property>`, the synthesized-name rule)
     // in the module's value namespace, which no generated type occupies.
-    let name = format!("serialize{model_name}{}", json_name.to_upper_camel_case());
+    let name = format!(
+        "serialize{model_name}{}",
+        property.ts_member_name(json_name).to_upper_camel_case()
+    );
     Some((name, union))
 }
 
