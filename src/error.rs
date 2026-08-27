@@ -31,6 +31,16 @@ pub enum Error {
     GeneratedFileConflict { path: PathBuf },
 
     #[error(
+        "generated file path `{path}` is claimed by both `{first_origin}` and `{second_origin}`; {remedy}"
+    )]
+    GeneratedFileOriginConflict {
+        path: PathBuf,
+        first_origin: PathBuf,
+        second_origin: PathBuf,
+        remedy: String,
+    },
+
+    #[error(
         "flattened API for `{type_name}` would generate duplicate parameter `{field}` from `{conflicting_field}`"
     )]
     FlattenedApiFieldConflict {
