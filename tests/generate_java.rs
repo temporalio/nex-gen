@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -954,7 +955,19 @@ fn java_json_cross_module_java_name_override_moves_every_reference() {
 fn java_json_bare_ref_root_alias_collapses_to_the_target_class() {
     let temp_dir = unique_output_path("java-json-bare-ref-alias");
     let input = write_bare_ref_alias_closure(&temp_dir);
-    let output_path = temp_dir.join("aliases");
+    let gradle_root = temp_dir.join("project");
+    fs::create_dir_all(&gradle_root).unwrap();
+    fs::copy(
+        project_root().join("samples/java/build.gradle"),
+        gradle_root.join("build.gradle"),
+    )
+    .unwrap();
+    fs::copy(
+        project_root().join("samples/java/settings.gradle"),
+        gradle_root.join("settings.gradle"),
+    )
+    .unwrap();
+    let output_path = gradle_root.join("src/main/java/example/aliases");
     generate_to_file(&GenerateRequest {
         language: nexgen::language::Language::Java,
         input_paths: vec![input],
@@ -987,6 +1000,41 @@ fn java_json_bare_ref_root_alias_collapses_to_the_target_class() {
     let holder = fs::read_to_string(output_path.join("service/Holder.java")).unwrap();
     assert!(holder.contains("private final Main item;"), "{holder}");
     assert!(!holder.contains("Alternate"), "{holder}");
+
+    let test_package = gradle_root.join("src/test/java/example/aliases");
+    fs::create_dir_all(&test_package).unwrap();
+    fs::write(
+        test_package.join("BareAliasTest.java"),
+        r#"package example.aliases;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import example.aliases.service.Holder;
+import example.aliases.target.main.Main;
+import org.junit.jupiter.api.Test;
+
+final class BareAliasTest {
+    @Test
+    void aliasPositionsUseTheTargetClassAtRuntime() throws Exception {
+        Main value = new Main("ok");
+        Holder holder = new Holder(value);
+        assertEquals(value, holder.getItem());
+
+        ObjectMapper mapper = new ObjectMapper();
+        Main decoded = mapper.readValue(mapper.writeValueAsBytes(value), Main.class);
+        assertEquals(value, decoded);
+    }
+}
+"#,
+    )
+    .unwrap();
+    let status = Command::new(project_root().join("samples/java/gradlew"))
+        .args(["--no-daemon", "test"])
+        .current_dir(&gradle_root)
+        .status()
+        .expect("run Gradle alias compile/runtime test");
+    assert!(status.success(), "Gradle alias test failed: {status}");
     fs::remove_dir_all(temp_dir).unwrap();
 }
 
