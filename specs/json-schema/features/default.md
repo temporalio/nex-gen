@@ -276,7 +276,7 @@ Three consequences that the count specs already encode:
 | `default` on a nullability **branch** | `{oneOf:[{type:"string", default:"x"},{type:"null"}]}` — put it on the wrapper |
 | `default` outside a `properties` member | `{type:"array", items:{type:"string", default:"x"}}`; likewise under `additionalProperties`, `contains`, `propertyNames` |
 | With `const` | `{type:"string", const:"v1", default:"v1"}` |
-| Synthesized-name collision (P15) | a field `nickname` with a `default` **and** a sibling member mapping to `NicknameOrDefault` (Go field/method clash); two `DEFAULT_<FIELD>` consts that case-map the same after qualification (TS); a Python sibling explicitly renamed to `_nickname` (private-backing clash) |
+| Synthesized-name collision (P15) | a field `nickname` with a `default` **and** a sibling member mapping to `NicknameOrDefault` (Go field/method clash); two default-bearing members whose emitted identifiers case-map to the same stable `DEFAULT_<FIELD>` name (TS); a Python sibling explicitly renamed to `_nickname` (private-backing clash) |
 
 ### Runtime fixtures (validator / adapters)
 
