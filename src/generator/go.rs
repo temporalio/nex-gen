@@ -3386,6 +3386,18 @@ fn render_file(
 /// // use-existing for idempotent deduplication on workflow ID.
 /// ```
 pub(in crate::generator) fn render_go_doc_comment(output: &mut String, indent: &str, text: &str) {
+    fn neutralize_directive(line: &str) -> String {
+        let trimmed = line.trim_start();
+        let leading = &line[..line.len() - trimmed.len()];
+        if let Some(rest) = trimmed.strip_prefix("+build") {
+            format!("{leading}\\+build{rest}")
+        } else if let Some(rest) = trimmed.strip_prefix("go:") {
+            format!("{leading}go\\:{rest}")
+        } else {
+            line.to_string()
+        }
+    }
+
     let max_width = GO_DOC_COMMENT_LINE_LENGTH.saturating_sub(indent.chars().count() + 3);
     for line in text.trim().lines() {
         let line = line.trim();
@@ -3402,7 +3414,7 @@ pub(in crate::generator) fn render_go_doc_comment(output: &mut String, indent: &
             {
                 output.push_str(indent);
                 output.push_str("// ");
-                output.push_str(&current);
+                output.push_str(&neutralize_directive(&current));
                 output.push('\n');
                 current.clear();
             }
@@ -3413,7 +3425,7 @@ pub(in crate::generator) fn render_go_doc_comment(output: &mut String, indent: &
         }
         output.push_str(indent);
         output.push_str("// ");
-        output.push_str(&current);
+        output.push_str(&neutralize_directive(&current));
         output.push('\n');
     }
 }

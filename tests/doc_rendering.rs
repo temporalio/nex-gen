@@ -19,6 +19,10 @@ services:
       Service prose containing */ and <service> & enough words to cross the target formatting boundary without losing its authored structure.
 
       Service second paragraph.
+
+      +build ignore
+
+      go:generate hostile-tool
     operations:
       run:
         description: |-
@@ -33,7 +37,7 @@ $defs:
     description: |-
       Type prose containing */ and <type> & enough words to cross the target formatting boundary without losing its authored structure.
 
-      Type second paragraph contains a backslash \ and triple quotes """ safely.
+      Type second paragraph has \ and C:\unicorn plus triple quotes """ safely.
     deprecated: true
     type: object
     additionalProperties: false
@@ -169,13 +173,15 @@ fn go_hostile_documentation_is_wrapped_and_syntax_safe() {
     let output = generate(nexgen::language::Language::Go, None);
     let rendered = joined_files(&output, "go");
     assert!(rendered.contains("// Hostile title */ & <summary>\n//\n// Type prose"));
-    assert!(rendered.contains(
-        "//\n// Type second paragraph contains a backslash \\ and triple quotes \"\"\" safely."
-    ));
+    assert!(
+        rendered.contains("//\n// Type second paragraph has \\ and C:\\unicorn plus triple quotes")
+    );
     assert!(rendered.contains("//\n// Deprecated: This type is deprecated."));
     assert!(rendered.contains("\t// Value title */ & <summary>\n\t//\n\t// Field prose"));
     assert!(rendered.contains("\t//\n\t// Deprecated: This field is deprecated."));
     assert!(rendered.contains("// Service second paragraph."));
+    assert!(rendered.contains("// \\+build ignore"));
+    assert!(rendered.contains("// go\\:generate hostile-tool"));
     assert!(rendered.contains("\t// Operation second paragraph."));
     assert_hostile_comment_lines_fit(&rendered);
 
@@ -186,6 +192,18 @@ fn go_hostile_documentation_is_wrapped_and_syntax_safe() {
             .status()
             .unwrap();
         assert!(status.success(), "gofmt rejected {}", path.display());
+        let second_pass = Command::new("gofmt")
+            .arg("-l")
+            .arg(output.join(path))
+            .output()
+            .unwrap();
+        assert!(second_pass.status.success(), "gofmt recheck failed");
+        assert!(
+            second_pass.stdout.is_empty(),
+            "gofmt was not idempotent for {}: {}",
+            path.display(),
+            String::from_utf8_lossy(&second_pass.stdout)
+        );
     }
     fs::remove_dir_all(output.parent().unwrap()).unwrap();
 }
@@ -195,9 +213,9 @@ fn typescript_hostile_documentation_is_wrapped_escaped_and_typechecks() {
     let output = generate(nexgen::language::Language::TypeScript, None);
     let rendered = joined_files(&output, "ts");
     assert!(rendered.contains(" * Hostile title * / & <summary>\n *\n * Type prose"));
-    assert!(rendered.contains(
-        " *\n * Type second paragraph contains a backslash \\ and triple quotes \"\"\" safely."
-    ));
+    assert!(
+        rendered.contains(" *\n * Type second paragraph has \\ and C:\\unicorn plus triple quotes")
+    );
     assert!(rendered.contains(" *\n * @deprecated\n */\nexport interface Hostile"));
     assert!(rendered.contains("   * Value title * / & <summary>\n   *\n   * Field prose"));
     assert!(rendered.contains("   *\n   * @deprecated\n   */\n  value: string;"));
@@ -258,9 +276,9 @@ fn python_hostile_documentation_is_wrapped_escaped_and_parses() {
     let output = generate(nexgen::language::Language::Python, None);
     let rendered = joined_files(&output, "py");
     assert!(rendered.contains("\"\"\"Hostile title */ & <summary>\n\n    Type prose"));
-    assert!(rendered.contains(
-        "Type second paragraph contains a backslash \\\\ and triple quotes \\\"\\\"\\\""
-    ));
+    assert!(
+        rendered.contains("Type second paragraph has \\\\ and C:\\\\unicorn plus triple quotes")
+    );
     assert!(rendered.contains("\"\"\"Value title */ & <summary>\n\n    Field prose"));
     assert!(rendered.contains("Service second paragraph."));
     assert!(rendered.contains("Operation second paragraph."));
@@ -289,9 +307,11 @@ fn java_hostile_documentation_is_wrapped_escaped_and_compiles() {
     );
     let rendered = joined_files(&output, "java");
     assert!(rendered.contains(" * Hostile title * / &amp; &lt;summary&gt;\n *\n * Type prose"));
-    assert!(rendered.contains(
-        " *\n * Type second paragraph contains a backslash \\ and triple quotes \"\"\" safely."
-    ));
+    assert!(
+        rendered.contains(
+            " *\n * Type second paragraph has &#92; and C:&#92;unicorn plus triple quotes"
+        )
+    );
     assert!(rendered.contains(" *\n * @deprecated This type is deprecated.\n */\n@Deprecated"));
     assert!(
         rendered

@@ -207,7 +207,7 @@ still has to be neutralized.
 
 | Language | Escaping |
 |---|---|
-| Go | `//` line comments have no terminator to escape, but they *do* have a **directive grammar**: a physical line whose first token is `+build` is a legacy build constraint and one beginning `go:` is a tool directive, either of which `gofmt` will hoist above the `package` clause and so drop the whole generated file out of the build. Each physical line is prefixed `// `, and any line that would begin such a token is neutralized (e.g. an inserted leading space) so it cannot be read as one. |
+| Go | `//` line comments have no terminator to escape, but they *do* have a **directive grammar**: a physical line whose first token is `+build` is a legacy build constraint and one beginning `go:` is a tool directive, either of which `gofmt` may hoist above the `package` clause. Each physical line is prefixed `// `, and the directive punctuation is backslash-neutralized (`+build` → `\+build`, `go:` → `go\:`) so the text cannot be acted on. Leading whitespace is not a sufficient escape because Go's constraint parser trims it. |
 | TypeScript | replace `*/` → `* /` so the body can't close the JSDoc block early. |
 | Python | escape `\` → `\\` and `"""` → `\"\"\"` so the body can't terminate the docstring. |
 | Java | replace `*/` → `* /`; HTML-escape `&`→`&amp;`, `<`→`&lt;`, `>`→`&gt;`, and `\`→`&#92;` (applied after the `&` pass). The backslash is not cosmetic: JLS §3.3 translates Unicode escapes in a first lexical phase that covers comments, so a `\u` not followed by four hex digits is a hard compile error, and a well-formed one is silently substituted — neither of which any other target does. A Javadoc body is HTML, so the entity renders as the character the author wrote. |
