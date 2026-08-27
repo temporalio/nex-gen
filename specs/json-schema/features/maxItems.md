@@ -54,10 +54,6 @@ Loader behavior:
   then be written in a form wide enough to hold it — in Java the `long` literal
   (`{n}L`), because a bare Java integer literal stops at 2^31−1. The ceiling
   above is a representability limit, not a licence to emit the bound bare.
-  *(Status: unimplemented for Java — the literal is emitted bare, so a bound in
-  this range loads and the generated Java package does not compile. The fix is
-  the literal, not a narrower ceiling: **P1** requires fixing the outlier target
-  rather than narrowing the shared accept set.)*
 - `maxItems` on a non-array [[type]] (`{type:"string", maxItems:3}`) →
   reject per **P7.1** (statically meaningless — the string-length analog
   is [[maxLength]], the object member-count analog is [[maxProperties]]).
