@@ -615,7 +615,10 @@ fn generate_typescript_to_string(input_paths: &[PathBuf], descriptor_paths: &[Pa
     let temp_dir = unique_output_path("typescript-rendered");
     let output_path = temp_dir.join("output");
     generate_to_file(&GenerateRequest {
-        config: Default::default(),
+        config: nexgen::nexgen_config::NexgenConfig {
+            mode: nexgen::generator::GenerationMode::NativeApi,
+            ..Default::default()
+        },
         language: nexgen::language::Language::TypeScript,
         input_paths: input_paths.to_vec(),
         support_paths: Vec::new(),
