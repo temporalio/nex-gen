@@ -21,6 +21,10 @@ pub fn current() -> NexgenConfig {
     CONFIGS.with(|configs| configs.borrow().last().copied().unwrap_or_default())
 }
 
+pub fn is_scoped() -> bool {
+    CONFIGS.with(|configs| !configs.borrow().is_empty())
+}
+
 pub fn with_nexgen_config<T>(config: NexgenConfig, f: impl FnOnce() -> T) -> T {
     CONFIGS.with(|configs| configs.borrow_mut().push(config));
     let _scope = Scope;

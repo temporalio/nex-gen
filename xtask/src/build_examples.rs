@@ -395,6 +395,7 @@ fn build_example(repo_root: &Path, language: Language, example_id: &str) -> Resu
         ts_date_time_types: Default::default(),
     };
     let config = NexgenConfig {
+        mode: GenerationMode::NativeApi,
         system_nexus: language == Language::Python && example_id == "workflow-service",
         ..current()
     };

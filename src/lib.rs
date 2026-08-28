@@ -49,6 +49,9 @@ pub struct GenerateRequest {
 }
 
 pub fn generate_to_file(request: &GenerateRequest) -> Result<()> {
+    if nexgen_config::is_scoped() {
+        return generate_to_file_inner(request);
+    }
     let config = nexgen_config::NexgenConfig {
         mode: if request.generate_native_api {
             GenerationMode::NativeApi

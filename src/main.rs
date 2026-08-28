@@ -173,6 +173,11 @@ fn main() -> ExitCode {
             {
                 let system_nexus = args.system_nexus;
                 let config = NexgenConfig {
+                    mode: if args.generate_native_api {
+                        nexgen::generator::GenerationMode::NativeApi
+                    } else {
+                        nexgen::generator::GenerationMode::DefinitionsOnly
+                    },
                     system_nexus,
                     ..current()
                 };
