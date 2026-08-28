@@ -28,6 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Go and .NET now honor `@nexus.default` WIT directives.
 - Python proto-backed models now consistently register their Temporal transfer
   type converters after the model and converter definitions. Generic models
   preserve static type information without casting class decorators to `Any`.
