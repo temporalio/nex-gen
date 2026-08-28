@@ -41,7 +41,7 @@ interface workflow-service {
     ///   go="Workflow function identifying the workflow to start."
     /// @nexus.proto-field "workflow_type"
     workflow: workflow-function,
-    /// @nexus.doc "Unique identifier for the workflow execution."
+    /// @nexus.doc "Unique identifier for the workflow execution. Must be nonempty."
     /// @nexus.proto-field "workflow_id"
     id: string,
     /// @nexus.doc "Task queue to run the workflow on."

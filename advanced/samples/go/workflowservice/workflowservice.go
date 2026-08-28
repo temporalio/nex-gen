@@ -418,7 +418,7 @@ func signalWithStartWorkflowResponseFromProto(ctx workflow.Context, proto *workf
 }
 
 type SignalWithStartWorkflowOptions struct {
-	// ID - Unique identifier for the workflow execution.
+	// ID - Unique identifier for the workflow execution. Must be nonempty.
 	//
 	// Required.
 	ID string

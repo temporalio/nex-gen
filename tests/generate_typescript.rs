@@ -987,7 +987,7 @@ fn typescript_renders_required_fields_and_custom_message_types() {
     assert!(rendered.contains("args?: ReadonlyArray<unknown>;"));
     assert!(rendered.contains("Arguments for signal."));
     assert!(rendered.contains("signalArgs?: ReadonlyArray<unknown>;"));
-    assert!(rendered.contains("* Unique identifier for the workflow execution."));
+    assert!(rendered.contains("* Unique identifier for the workflow execution. Must be nonempty."));
     assert!(!rendered.contains("@property workflow"));
     assert!(rendered.contains("* @returns A workflow handle to the started workflow."));
     assert!(rendered.contains("id: string;"));

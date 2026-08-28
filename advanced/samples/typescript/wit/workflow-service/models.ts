@@ -146,7 +146,7 @@ export type SignalWithStartWorkflowRequest<
      */
     args?: ReadonlyArray<unknown> | Readonly<Parameters<WorkflowFn>>;
     /**
-     * Unique identifier for the workflow execution.
+     * Unique identifier for the workflow execution. Must be nonempty.
      */
     id: string;
     /**

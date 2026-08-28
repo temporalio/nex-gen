@@ -413,7 +413,9 @@ fn dotnet_renders_proto_backed_temporal_types() {
     assert!(rendered.contains("/// <param name=\"signal\">Signal name or signal expression to send with the start request.</param>"));
     assert!(rendered.contains("/// <param name=\"signalArgs\">Arguments for the signal.</param>"));
     assert!(rendered.contains("/// <param name=\"options\">Request fields for signaling a workflow, starting it first if needed.</param>"));
-    assert!(rendered.contains("/// Unique identifier for the workflow execution."));
+    assert!(
+        rendered.contains("/// Unique identifier for the workflow execution. Must be nonempty.")
+    );
     assert!(rendered.contains("/// Cron schedule for recurring workflow executions. See https://docs.temporal.io/cron-job."));
     assert!(rendered.contains("/// Single-line fixed summary for the workflow execution that may appear in UI and CLI. This can be in single-line Temporal Markdown format."));
     assert!(rendered.contains("/// <summary>\n        /// Arguments for the workflow.\n        /// </summary>\n        public IReadOnlyCollection<object?>? Args"));

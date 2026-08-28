@@ -574,7 +574,7 @@ async def signal_with_start_workflow(
         args: List-form arguments for workflow. Cannot be set if positional_args are
             set. For typed workflow callables, list contents are not statically
             typechecked; pass workflow arguments positionally for precise typechecking.
-        id: Unique identifier for the workflow execution.
+        id: Unique identifier for the workflow execution. Must be nonempty.
         task_queue: Task queue to run the workflow on.
         signal: Signal name or callable to send with the start request.
         signal_args: Argument value, or list of argument values, for signal. For typed

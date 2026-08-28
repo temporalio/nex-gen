@@ -85,7 +85,7 @@ namespace Temporalio.Workflows
         /// </summary>
         public IReadOnlyCollection<object?>? Args { get; init; }
         /// <summary>
-        /// Unique identifier for the workflow execution.
+        /// Unique identifier for the workflow execution. Must be nonempty.
         /// </summary>
         public string Id { get; init; }
         /// <summary>

@@ -29,7 +29,7 @@ namespace Temporalio.Workflows
         }
 
         /// <summary>
-        /// Unique identifier for the workflow execution.
+        /// Unique identifier for the workflow execution. Must be nonempty.
         /// </summary>
         public string Id { get; set; }
         /// <summary>
