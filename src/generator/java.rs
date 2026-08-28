@@ -6,7 +6,7 @@ use heck::ToLowerCamelCase;
 use crate::error::{Error, Result};
 use crate::generator::json_schema::java as java_json;
 use crate::generator::json_schema::java::JavaContext;
-use crate::generator::{GeneratedFiles, GeneratedOutputLayout, GenerationMode};
+use crate::generator::{GeneratedFiles, GeneratedOutputLayout};
 use crate::planning::{PlannedFamily, PlannedJsonType};
 use crate::spec::{ApiSpecLeaf, ApiSpecNode};
 use crate::spec::{ExternalTypeSpec, ModulePath, ServiceSpec, TypeSpec};
@@ -17,7 +17,6 @@ const JAVA_FORMAT_LINE_LENGTH: usize = 88;
 pub(crate) fn generate(
     tree: &crate::spec::ApiSpecTree<PlannedFamily>,
     _support: &crate::SupportFiles,
-    _mode: GenerationMode,
     base_package: Option<&str>,
 ) -> Result<GeneratedFiles> {
     let base_package = base_package.unwrap_or(DEFAULT_PACKAGE);

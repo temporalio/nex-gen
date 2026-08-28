@@ -45,21 +45,19 @@ struct PythonGenerationResult {
 pub(crate) fn generate(
     tree: &crate::spec::ApiSpecTree<PlannedFamily>,
     support: &crate::SupportFiles,
-    mode: GenerationMode,
 ) -> Result<GeneratedFiles> {
     match &tree.root {
         ApiSpecNode::Leaf(leaf) => {
             let support_fragments = support_fragments_for_plan(&leaf.spec, support);
-            generate_leaf(&leaf.spec, &support_fragments, mode)
+            generate_leaf(&leaf.spec, &support_fragments)
         }
-        ApiSpecNode::Branch(branch) => generate_tree(branch, support, mode),
+        ApiSpecNode::Branch(branch) => generate_tree(branch, support),
     }
 }
 
 fn generate_leaf(
     api_plan: &PlannedSpec,
     support_fragments: &[SupportFragmentSpec],
-    mode: GenerationMode,
 ) -> Result<GeneratedFiles> {
     reject_support_namespaces(Language::Python, support_fragments)?;
     let inline_model_rebuilds = api_plan
@@ -68,24 +66,22 @@ fn generate_leaf(
         .values()
         .all(BTreeSet::is_empty);
     let generated =
-        ApiPlanner::new(api_plan, inline_model_rebuilds, None)?.build(support_fragments, mode)?;
+        ApiPlanner::new(api_plan, inline_model_rebuilds, None)?.build(support_fragments)?;
     Ok(generated.generated_files)
 }
 
 fn generate_leaf_with_model_hoists(
     api_plan: &PlannedSpec,
     support_fragments: &[SupportFragmentSpec],
-    mode: GenerationMode,
     model_hoists: &PythonModelHoists,
 ) -> Result<PythonGenerationResult> {
     reject_support_namespaces(Language::Python, support_fragments)?;
-    ApiPlanner::new(api_plan, true, Some(model_hoists))?.build(support_fragments, mode)
+    ApiPlanner::new(api_plan, true, Some(model_hoists))?.build(support_fragments)
 }
 
 fn generate_tree(
     branch: &ApiSpecBranch<PlannedFamily>,
     support: &crate::SupportFiles,
-    mode: GenerationMode,
 ) -> Result<GeneratedFiles> {
     let model_hoists = tree_model_hoists(branch)?;
     let mut files = BTreeMap::new();
@@ -100,7 +96,6 @@ fn generate_tree(
         let exported_names = generate_tree_node(
             node,
             support,
-            mode,
             &model_hoists,
             &mut files,
             &mut warnings,
@@ -125,7 +120,6 @@ fn generate_tree(
 fn generate_tree_node(
     node: &ApiSpecNode<PlannedFamily>,
     support: &crate::SupportFiles,
-    mode: GenerationMode,
     model_hoists: &PythonModelHoists,
     files: &mut BTreeMap<PathBuf, String>,
     warnings: &mut Vec<String>,
@@ -134,12 +128,8 @@ fn generate_tree_node(
     match node {
         ApiSpecNode::Leaf(leaf) => {
             let support_fragments = support_fragments_for_plan(&leaf.spec, support);
-            let generated = generate_leaf_with_model_hoists(
-                &leaf.spec,
-                &support_fragments,
-                mode,
-                model_hoists,
-            )?;
+            let generated =
+                generate_leaf_with_model_hoists(&leaf.spec, &support_fragments, model_hoists)?;
             extend_root_package_imports(root_package_imports, generated.root_package_imports);
             warnings.extend(generated.generated_files.warnings);
             let prefix = leaf.module_path.to_path_buf();
@@ -154,7 +144,6 @@ fn generate_tree_node(
                 let exported_names = generate_tree_node(
                     node,
                     support,
-                    mode,
                     model_hoists,
                     files,
                     warnings,
@@ -509,7 +498,6 @@ impl<'a> ApiPlanner<'a> {
     fn build(
         mut self,
         support_fragments: &[SupportFragmentSpec],
-        mode: GenerationMode,
     ) -> Result<PythonGenerationResult> {
         let api_plan = self.api_plan;
         let services = api_plan
@@ -565,7 +553,7 @@ impl<'a> ApiPlanner<'a> {
         validate_python_generated_names(self.api_plan, &model_fragments.generated_names)?;
 
         let (generated_files, exported_names) =
-            self.render_package(&model_fragments, &services, support_fragments, mode)?;
+            self.render_package(&model_fragments, &services, support_fragments)?;
         Ok(PythonGenerationResult {
             generated_files,
             root_package_imports: model_fragments.root_package_imports,
@@ -587,8 +575,8 @@ impl<'a> ApiPlanner<'a> {
         model_fragments: &RenderedModelFragments,
         services: &[RenderedService<'_>],
         support_fragments: &[SupportFragmentSpec],
-        mode: GenerationMode,
     ) -> Result<(GeneratedFiles, BTreeSet<String>)> {
+        let mode = crate::nexgen_config::current().mode;
         let mut files = BTreeMap::new();
         render_support_package(&mut files, support_fragments)?;
         for (path, contents) in self.external_models.render_support_files()? {
@@ -682,7 +670,6 @@ impl<'a> ApiPlanner<'a> {
             &empty_root_package_imports
         };
         let exported_names = package_export_names(
-            mode,
             services,
             if mode == GenerationMode::NativeApi {
                 &package_model_names
@@ -3334,14 +3321,13 @@ fn render_definitions_only_package_init(
 }
 
 fn package_export_names(
-    mode: GenerationMode,
     services: &[RenderedService<'_>],
     model_names: &[String],
     root_package_imports: &RootPackageImports,
 ) -> BTreeSet<String> {
     let mut names = root_package_export_names(root_package_imports);
     names.extend(model_names.iter().cloned());
-    match mode {
+    match crate::nexgen_config::current().mode {
         GenerationMode::DefinitionsOnly => {
             names.extend(services.iter().map(|service| service.name.to_string()));
         }

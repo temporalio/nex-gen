@@ -625,9 +625,8 @@ pub(crate) fn generate(
     api_plan: &PlannedSpec,
     support_fragments: &[SupportFragmentSpec],
     options: &GoOptions,
-    mode: GenerationMode,
 ) -> Result<GeneratedFiles> {
-    generate_in_tree(api_plan, support_fragments, options, mode, &[])
+    generate_in_tree(api_plan, support_fragments, options, &[])
 }
 
 /// Generates one input file, given every JSON model the whole generate closure
@@ -643,10 +642,9 @@ fn generate_in_tree(
     api_plan: &PlannedSpec,
     support_fragments: &[SupportFragmentSpec],
     options: &GoOptions,
-    mode: GenerationMode,
     tree_models: &[PlannedJsonType],
 ) -> Result<GeneratedFiles> {
-    ApiPlanner::new(api_plan, options, mode, tree_models)?.generate(support_fragments)
+    ApiPlanner::new(api_plan, options, tree_models)?.generate(support_fragments)
 }
 
 /// Every JSON model declared anywhere in the generate closure.
@@ -662,11 +660,10 @@ pub(crate) fn generate_tree(
     tree: &ApiSpecTree<PlannedFamily>,
     support: &SupportFiles,
     options: &GoOptions,
-    mode: GenerationMode,
 ) -> Result<GeneratedFiles> {
     match &tree.root {
-        ApiSpecNode::Leaf(leaf) => generate_single_leaf(leaf, support, options, mode),
-        ApiSpecNode::Branch(branch) => generate_branch_tree(branch, support, options, mode),
+        ApiSpecNode::Leaf(leaf) => generate_single_leaf(leaf, support, options),
+        ApiSpecNode::Branch(branch) => generate_branch_tree(branch, support, options),
     }
 }
 
@@ -678,9 +675,8 @@ fn generate_single_leaf(
     leaf: &ApiSpecLeaf<PlannedFamily>,
     support: &SupportFiles,
     options: &GoOptions,
-    mode: GenerationMode,
 ) -> Result<GeneratedFiles> {
-    let mut generated = generate(&leaf.spec, &support.fragments, options, mode)?;
+    let mut generated = generate(&leaf.spec, &support.fragments, options)?;
     if go_tree_has_json_models(&[leaf]) {
         let package_name = GoPackageContext::new(&leaf.spec, options)?.package_name;
         insert_generated_file(
@@ -696,7 +692,6 @@ fn generate_branch_tree(
     branch: &ApiSpecBranch<PlannedFamily>,
     support: &SupportFiles,
     options: &GoOptions,
-    mode: GenerationMode,
 ) -> Result<GeneratedFiles> {
     let mut leaves = Vec::new();
     collect_leaf_specs(branch, &mut leaves);
@@ -729,7 +724,7 @@ fn generate_branch_tree(
         // references to sibling files are unqualified within the one package.
         let mut leaf_spec = leaf.spec.clone();
         leaf_spec.module_path = root.clone();
-        let generated = generate_in_tree(&leaf_spec, &[], options, mode, &tree_models)?;
+        let generated = generate_in_tree(&leaf_spec, &[], options, &tree_models)?;
         warnings.extend(generated.warnings);
 
         // `generate` names the single JSON member file `<package>.go`; re-key it
@@ -885,9 +880,11 @@ fn plan_uses_json_models(api_plan: &PlannedSpec) -> bool {
 }
 
 impl GoExternalModels {
-    fn new(api_plan: &PlannedSpec, package: GoPackageContext, mode: GenerationMode) -> Self {
+    fn new(api_plan: &PlannedSpec, package: GoPackageContext) -> Self {
         if plan_uses_json_models(api_plan) {
-            Self::Json(json::ModelBackend::new(mode == GenerationMode::NativeApi))
+            Self::Json(json::ModelBackend::new(
+                crate::nexgen_config::current().mode == GenerationMode::NativeApi,
+            ))
         } else {
             Self::Proto(proto::ModelBackend::new(package))
         }
@@ -1006,7 +1003,6 @@ impl GoExternalModels {
 
 struct ApiPlanner<'a> {
     api_plan: &'a PlannedSpec,
-    mode: GenerationMode,
     package: GoPackageContext,
     imports: BTreeSet<String>,
     external_models: GoExternalModels,
@@ -1020,7 +1016,6 @@ impl<'a> ApiPlanner<'a> {
     fn new(
         api_plan: &'a PlannedSpec,
         options: &GoOptions,
-        mode: GenerationMode,
         tree_models: &[PlannedJsonType],
     ) -> Result<Self> {
         let package = GoPackageContext::new(api_plan, options)?;
@@ -1034,13 +1029,12 @@ impl<'a> ApiPlanner<'a> {
         collect_imports_from_plan(api_plan, &mut imports);
         imports.retain(|import_path| !package.is_self_import(import_path));
 
-        let mut external_models = GoExternalModels::new(api_plan, package.clone(), mode);
+        let mut external_models = GoExternalModels::new(api_plan, package.clone());
         external_models.adopt_tree_models(tree_models);
         external_models.prepare(api_plan)?;
 
         Ok(Self {
             api_plan,
-            mode,
             package,
             imports,
             external_models,
@@ -1156,7 +1150,7 @@ impl<'a> ApiPlanner<'a> {
             self.imports
                 .insert("github.com/nexus-rpc/sdk-go/nexus".to_string());
         }
-        if self.mode == GenerationMode::NativeApi
+        if crate::nexgen_config::current().mode == GenerationMode::NativeApi
             && self.external_models.renders_operation_references()
             && !self.api_plan.services.is_empty()
             && !self.package.is_self_import("go.temporal.io/sdk/workflow")

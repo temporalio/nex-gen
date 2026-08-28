@@ -2257,22 +2257,21 @@ impl ExternalModelBackend for DotNetExternalModels {
 pub(crate) fn generate(
     tree: &crate::spec::ApiSpecTree<PlannedFamily>,
     support: &crate::SupportFiles,
-    mode: GenerationMode,
 ) -> Result<GeneratedFiles> {
     match &tree.root {
         ApiSpecNode::Leaf(leaf) => {
             let support_fragments = support_fragments_for_plan(&leaf.spec, support);
-            generate_leaf(&leaf.spec, &support_fragments, mode)
+            generate_leaf(&leaf.spec, &support_fragments)
         }
-        ApiSpecNode::Branch(branch) => generate_tree(branch, support, mode),
+        ApiSpecNode::Branch(branch) => generate_tree(branch, support),
     }
 }
 
 fn generate_leaf(
     api_plan: &PlannedSpec,
     support_fragments: &[SupportFragmentSpec],
-    mode: GenerationMode,
 ) -> Result<GeneratedFiles> {
+    let mode = crate::nexgen_config::current().mode;
     let support_namespace = dotnet_support_namespace(support_fragments)?;
     let generator = ApiPlanner::new(api_plan, support_namespace.as_deref())?;
     validate_dotnet_support_references(
@@ -2322,12 +2321,11 @@ fn generate_leaf(
 fn generate_tree(
     branch: &ApiSpecBranch<PlannedFamily>,
     support: &crate::SupportFiles,
-    mode: GenerationMode,
 ) -> Result<GeneratedFiles> {
     let mut files = BTreeMap::new();
     let mut warnings = Vec::new();
     for node in branch.children.values() {
-        generate_tree_node(node, support, mode, &mut files, &mut warnings)?;
+        generate_tree_node(node, support, &mut files, &mut warnings)?;
     }
     Ok(GeneratedFiles {
         layout: crate::generator::GeneratedOutputLayout::Directory,
@@ -2339,14 +2337,13 @@ fn generate_tree(
 fn generate_tree_node(
     node: &ApiSpecNode<PlannedFamily>,
     support: &crate::SupportFiles,
-    mode: GenerationMode,
     files: &mut BTreeMap<PathBuf, String>,
     warnings: &mut Vec<String>,
 ) -> Result<()> {
     match node {
         ApiSpecNode::Leaf(leaf) => {
             let support_fragments = support_fragments_for_plan(&leaf.spec, support);
-            let generated = generate_leaf(&leaf.spec, &support_fragments, mode)?;
+            let generated = generate_leaf(&leaf.spec, &support_fragments)?;
             warnings.extend(generated.warnings);
             let prefix = leaf.module_path.to_path_buf();
             for (path, contents) in generated.files {
@@ -2356,7 +2353,7 @@ fn generate_tree_node(
         }
         ApiSpecNode::Branch(branch) => {
             for node in branch.children.values() {
-                generate_tree_node(node, support, mode, files, warnings)?;
+                generate_tree_node(node, support, files, warnings)?;
             }
             Ok(())
         }

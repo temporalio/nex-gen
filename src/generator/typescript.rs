@@ -86,9 +86,9 @@ pub(crate) fn render_tree_support_files(
 fn generate_tree(
     branch: &ApiSpecBranch<PlannedFamily>,
     support: &crate::SupportFiles,
-    mode: GenerationMode,
     ts_date_time_types: TsDateTimeTypes,
 ) -> Result<GeneratedFiles> {
+    let mode = crate::nexgen_config::current().mode;
     let mut files = BTreeMap::new();
     let mut warnings = Vec::new();
     let tree_support_files = render_tree_support_files(branch);
@@ -97,14 +97,7 @@ fn generate_tree(
     insert_branch_index_file(&mut files, branch, has_json_runtime_module)?;
     insert_files(&mut files, tree_support_files)?;
     for node in branch.children.values() {
-        generate_tree_node(
-            node,
-            support,
-            mode,
-            ts_date_time_types,
-            &mut files,
-            &mut warnings,
-        )?;
+        generate_tree_node(node, support, ts_date_time_types, &mut files, &mut warnings)?;
     }
     Ok(GeneratedFiles {
         layout: crate::generator::GeneratedOutputLayout::Directory,
@@ -116,7 +109,6 @@ fn generate_tree(
 fn generate_tree_node(
     node: &ApiSpecNode<PlannedFamily>,
     support: &crate::SupportFiles,
-    mode: GenerationMode,
     ts_date_time_types: TsDateTimeTypes,
     files: &mut BTreeMap<PathBuf, String>,
     warnings: &mut Vec<String>,
@@ -124,8 +116,7 @@ fn generate_tree_node(
     match node {
         ApiSpecNode::Leaf(leaf) => {
             let support_fragments = support_fragments_for_plan(&leaf.spec, support);
-            let generated =
-                generate_leaf(&leaf.spec, &support_fragments, mode, ts_date_time_types)?;
+            let generated = generate_leaf(&leaf.spec, &support_fragments, ts_date_time_types)?;
             warnings.extend(generated.warnings);
             let prefix = leaf.module_path.to_path_buf();
             for (path, mut contents) in generated.files {
@@ -141,7 +132,7 @@ fn generate_tree_node(
         ApiSpecNode::Branch(branch) => {
             insert_branch_index_file(files, branch, false)?;
             for node in branch.children.values() {
-                generate_tree_node(node, support, mode, ts_date_time_types, files, warnings)?;
+                generate_tree_node(node, support, ts_date_time_types, files, warnings)?;
             }
             Ok(())
         }
@@ -1889,7 +1880,6 @@ impl PlannedOperationExt for PlannedOperation {
 pub(crate) fn generate(
     tree: &crate::spec::ApiSpecTree<PlannedFamily>,
     support: &crate::SupportFiles,
-    mode: GenerationMode,
     ts_date_time_types: TsDateTimeTypes,
 ) -> Result<GeneratedFiles> {
     // A `$ref` resolves against the whole input closure ([[ref]]
@@ -1900,9 +1890,9 @@ pub(crate) fn generate(
     match &tree.root {
         ApiSpecNode::Leaf(leaf) => {
             let support_fragments = support_fragments_for_plan(&leaf.spec, support);
-            generate_leaf(&leaf.spec, &support_fragments, mode, ts_date_time_types)
+            generate_leaf(&leaf.spec, &support_fragments, ts_date_time_types)
         }
-        ApiSpecNode::Branch(branch) => generate_tree(branch, support, mode, ts_date_time_types),
+        ApiSpecNode::Branch(branch) => generate_tree(branch, support, ts_date_time_types),
     }
 }
 
@@ -1938,7 +1928,6 @@ fn collect_tree_json_models_into(
 fn generate_leaf(
     api_plan: &PlannedSpec,
     support_fragments: &[SupportFragmentSpec],
-    mode: GenerationMode,
     ts_date_time_types: TsDateTimeTypes,
 ) -> Result<GeneratedFiles> {
     reject_support_namespaces(Language::TypeScript, support_fragments)?;
@@ -2013,7 +2002,6 @@ fn generate_leaf(
         &language_imports,
         support_source.as_deref(),
         api_plan,
-        mode,
     )
 }
 
@@ -3087,8 +3075,8 @@ fn render_module_files(
     language_imports: &[LanguageImportSpec],
     support_source: Option<&str>,
     api_plan: &PlannedSpec,
-    mode: GenerationMode,
 ) -> Result<GeneratedFiles> {
+    let mode = crate::nexgen_config::current().mode;
     let support_source = support_source.filter(|source| !source.trim().is_empty());
     let support_exports = support_source.map(support_exports);
     let module_model_names = model_fragments
@@ -3109,7 +3097,6 @@ fn render_module_files(
         language_imports,
         support_exports.as_ref(),
         api_plan,
-        mode,
     );
     // A module whose every operation type is `$ref`d from another file declares
     // nothing of its own. Emitting the empty `models.ts` anyway would leave the
@@ -3729,8 +3716,8 @@ fn render_models_module(
     language_imports: &[LanguageImportSpec],
     support_exports: Option<&SupportExports>,
     api_plan: &PlannedSpec,
-    mode: GenerationMode,
 ) -> String {
+    let mode = crate::nexgen_config::current().mode;
     let mut body = String::new();
 
     if mode == GenerationMode::NativeApi {

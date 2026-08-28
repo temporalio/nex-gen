@@ -144,13 +144,7 @@ pub(crate) fn compile_tree_to_files(
     // planned IR -> emitted JSON names -> render target-language files
     let name_resolution = planning::EmittedNameResolutionPass::new(language, &planned_tree)?;
     let generator_ready_tree = name_resolution.apply(planned_tree)?;
-    generator::generate_files_from_planned_tree(
-        language,
-        &generator_ready_tree,
-        support,
-        mode,
-        options,
-    )
+    generator::generate_files_from_planned_tree(language, &generator_ready_tree, support, options)
 }
 
 /// The output directory's basename, used as the Go package name — matching
