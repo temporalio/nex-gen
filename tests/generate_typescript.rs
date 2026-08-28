@@ -615,13 +615,13 @@ fn generate_typescript_to_string(input_paths: &[PathBuf], descriptor_paths: &[Pa
     let temp_dir = unique_output_path("typescript-rendered");
     let output_path = temp_dir.join("output");
     generate_to_file(&GenerateRequest {
+        config: Default::default(),
         language: nexgen::language::Language::TypeScript,
         input_paths: input_paths.to_vec(),
         support_paths: Vec::new(),
         descriptor_paths: descriptor_paths.to_vec(),
         output_path: output_path.clone(),
         format: false,
-        generate_native_api: true,
         java_package_name: None,
         ts_date_time_types: Default::default(),
     })
@@ -1157,13 +1157,13 @@ fn typescript_json_names_inline_object_union_branch() {
     let output_path = temp_dir.join("detail");
 
     generate_to_file(&GenerateRequest {
+        config: Default::default(),
         language: nexgen::language::Language::TypeScript,
         input_paths: vec![input_path],
         support_paths: Vec::new(),
         descriptor_paths: Vec::new(),
         output_path: output_path.clone(),
         format: false,
-        generate_native_api: false,
         java_package_name: None,
         ts_date_time_types: Default::default(),
     })
@@ -1200,13 +1200,13 @@ fn typescript_json_validates_non_object_union_branch_constraints() {
     let output_path = temp_dir.join("bc");
 
     generate_to_file(&GenerateRequest {
+        config: Default::default(),
         language: nexgen::language::Language::TypeScript,
         input_paths: vec![input_path],
         support_paths: Vec::new(),
         descriptor_paths: Vec::new(),
         output_path: output_path.clone(),
         format: false,
-        generate_native_api: false,
         java_package_name: None,
         ts_date_time_types: Default::default(),
     })
@@ -1247,13 +1247,13 @@ fn typescript_json_recursively_converts_union_array_branches() {
     let output_path = temp_dir.join("probe");
 
     generate_to_file(&GenerateRequest {
+        config: Default::default(),
         language: nexgen::language::Language::TypeScript,
         input_paths: vec![input_path],
         support_paths: Vec::new(),
         descriptor_paths: Vec::new(),
         output_path: output_path.clone(),
         format: false,
-        generate_native_api: false,
         java_package_name: None,
         ts_date_time_types: nexgen::generator::TsDateTimeTypes::Date,
     })
@@ -1306,13 +1306,13 @@ fn typescript_json_rejects_non_finite_numbers_at_every_position() {
     let output_path = temp_dir.join("probe");
 
     generate_to_file(&GenerateRequest {
+        config: Default::default(),
         language: nexgen::language::Language::TypeScript,
         input_paths: vec![input_path],
         support_paths: Vec::new(),
         descriptor_paths: Vec::new(),
         output_path: output_path.clone(),
         format: false,
-        generate_native_api: false,
         java_package_name: None,
         ts_date_time_types: Default::default(),
     })
@@ -1341,13 +1341,13 @@ fn typescript_json_detects_nested_runtime_support() {
     let output_path = temp_dir.join("probe");
 
     generate_to_file(&GenerateRequest {
+        config: Default::default(),
         language: nexgen::language::Language::TypeScript,
         input_paths: vec![input_path],
         support_paths: Vec::new(),
         descriptor_paths: Vec::new(),
         output_path: output_path.clone(),
         format: false,
-        generate_native_api: false,
         java_package_name: None,
         ts_date_time_types: Default::default(),
     })
@@ -1375,13 +1375,13 @@ fn typescript_json_validates_native_temporals_before_serializing() {
         let output_path = temp_dir.join("probe");
 
         generate_to_file(&GenerateRequest {
+            config: Default::default(),
             language: nexgen::language::Language::TypeScript,
             input_paths: vec![input_path],
             support_paths: Vec::new(),
             descriptor_paths: Vec::new(),
             output_path: output_path.clone(),
             format: false,
-            generate_native_api: false,
             java_package_name: None,
             ts_date_time_types: repr,
         })
@@ -1435,13 +1435,13 @@ fn typescript_json_guards_nullable_array_elements_during_serialize_validation() 
     let output_path = temp_dir.join("probe");
 
     generate_to_file(&GenerateRequest {
+        config: Default::default(),
         language: nexgen::language::Language::TypeScript,
         input_paths: vec![input_path],
         support_paths: Vec::new(),
         descriptor_paths: Vec::new(),
         output_path: output_path.clone(),
         format: false,
-        generate_native_api: false,
         java_package_name: None,
         ts_date_time_types: Default::default(),
     })
@@ -1477,13 +1477,13 @@ fn typescript_json_maps_element_position_unions() {
     let output_path = temp_dir.join("bag");
 
     generate_to_file(&GenerateRequest {
+        config: Default::default(),
         language: nexgen::language::Language::TypeScript,
         input_paths: vec![input_path],
         support_paths: Vec::new(),
         descriptor_paths: Vec::new(),
         output_path: output_path.clone(),
         format: false,
-        generate_native_api: false,
         java_package_name: None,
         ts_date_time_types: Default::default(),
     })
@@ -1516,13 +1516,13 @@ fn typescript_json_one_sided_operation_type_info() {
     let output_path = temp_dir.join("jobs");
 
     generate_to_file(&GenerateRequest {
+        config: Default::default(),
         language: nexgen::language::Language::TypeScript,
         input_paths: vec![input_path],
         support_paths: Vec::new(),
         descriptor_paths: Vec::new(),
         output_path: output_path.clone(),
         format: false,
-        generate_native_api: false,
         java_package_name: None,
         ts_date_time_types: Default::default(),
     })
@@ -1553,13 +1553,13 @@ fn typescript_json_operation_type_info_follows_ts_name_override() {
     let output_path = temp_dir.join("pages");
 
     generate_to_file(&GenerateRequest {
+        config: Default::default(),
         language: nexgen::language::Language::TypeScript,
         input_paths: vec![input_path],
         support_paths: Vec::new(),
         descriptor_paths: Vec::new(),
         output_path: output_path.clone(),
         format: false,
-        generate_native_api: false,
         java_package_name: None,
         ts_date_time_types: Default::default(),
     })
@@ -1592,13 +1592,13 @@ fn typescript_json_cross_module_ts_name_override_moves_every_reference() {
     let output_path = temp_dir.join("output");
 
     generate_to_file(&GenerateRequest {
+        config: Default::default(),
         language: nexgen::language::Language::TypeScript,
         input_paths: vec![input_dir],
         support_paths: Vec::new(),
         descriptor_paths: Vec::new(),
         output_path: output_path.clone(),
         format: false,
-        generate_native_api: false,
         java_package_name: None,
         ts_date_time_types: Default::default(),
     })
@@ -1650,13 +1650,13 @@ fn typescript_json_override_moves_member_derived_names_only() {
     let output_path = temp_dir.join("probe");
 
     generate_to_file(&GenerateRequest {
+        config: Default::default(),
         language: nexgen::language::Language::TypeScript,
         input_paths: vec![input_path],
         support_paths: Vec::new(),
         descriptor_paths: Vec::new(),
         output_path: output_path.clone(),
         format: false,
-        generate_native_api: false,
         java_package_name: None,
         ts_date_time_types: Default::default(),
     })
@@ -1692,13 +1692,13 @@ fn typescript_json_rejects_same_type_name_in_two_modules() {
     fs::write(input_dir.join("b/page.json"), page).unwrap();
 
     let request = |output: &str| GenerateRequest {
+        config: Default::default(),
         language: nexgen::language::Language::TypeScript,
         input_paths: vec![input_dir.clone()],
         support_paths: Vec::new(),
         descriptor_paths: Vec::new(),
         output_path: temp_dir.join(output),
         format: false,
-        generate_native_api: false,
         java_package_name: None,
         ts_date_time_types: Default::default(),
     };
@@ -1777,13 +1777,13 @@ fn typescript_json_service_module_without_own_types_imports_instead_of_reemittin
     let input_dir = write_service_only_module_closure(&temp_dir);
     let output_path = temp_dir.join("out");
     generate_to_file(&GenerateRequest {
+        config: Default::default(),
         language: nexgen::language::Language::TypeScript,
         input_paths: vec![input_dir],
         support_paths: Vec::new(),
         descriptor_paths: Vec::new(),
         output_path: output_path.clone(),
         format: false,
-        generate_native_api: false,
         java_package_name: None,
         ts_date_time_types: Default::default(),
     })
@@ -1836,13 +1836,13 @@ fn typescript_json_emits_complete_matchers_and_typed_mixed_extras() {
     let output_path = temp_dir.join("probe");
 
     generate_to_file(&GenerateRequest {
+        config: Default::default(),
         language: nexgen::language::Language::TypeScript,
         input_paths: vec![input_path],
         support_paths: Vec::new(),
         descriptor_paths: Vec::new(),
         output_path: output_path.clone(),
         format: false,
-        generate_native_api: false,
         java_package_name: None,
         ts_date_time_types: nexgen::generator::TsDateTimeTypes::Temporal,
     })
@@ -1993,13 +1993,13 @@ fn typescript_json_emits_complete_property_name_matcher() {
     fs::write(&input_path, TYPESCRIPT_PROPERTY_NAMES_SCHEMA).unwrap();
     let output_path = temp_dir.join("names");
     generate_to_file(&GenerateRequest {
+        config: Default::default(),
         language: nexgen::language::Language::TypeScript,
         input_paths: vec![input_path],
         support_paths: Vec::new(),
         descriptor_paths: Vec::new(),
         output_path: output_path.clone(),
         format: false,
-        generate_native_api: false,
         java_package_name: None,
         ts_date_time_types: Default::default(),
     })
@@ -2025,13 +2025,13 @@ fn typescript_json_materializes_closed_values_and_nullable_defaults() {
     fs::write(&input_path, TYPESCRIPT_MATERIALIZED_CLOSED_SCHEMA).unwrap();
     let output_path = temp_dir.join("closed");
     generate_to_file(&GenerateRequest {
+        config: Default::default(),
         language: nexgen::language::Language::TypeScript,
         input_paths: vec![input_path],
         support_paths: Vec::new(),
         descriptor_paths: Vec::new(),
         output_path: output_path.clone(),
         format: false,
-        generate_native_api: false,
         java_package_name: None,
         ts_date_time_types: nexgen::generator::TsDateTimeTypes::Temporal,
     })
@@ -2061,13 +2061,13 @@ fn typescript_json_deprecates_types_fields_services_and_operations() {
     fs::write(&input_path, TYPESCRIPT_DEPRECATION_SCHEMA).unwrap();
     let output_path = temp_dir.join("jobs");
     generate_to_file(&GenerateRequest {
+        config: Default::default(),
         language: nexgen::language::Language::TypeScript,
         input_paths: vec![input_path],
         support_paths: Vec::new(),
         descriptor_paths: Vec::new(),
         output_path: output_path.clone(),
         format: false,
-        generate_native_api: false,
         java_package_name: None,
         ts_date_time_types: Default::default(),
     })
@@ -2089,13 +2089,13 @@ fn typescript_json_wave3_pairwise_runtime_matrix() {
     fs::write(&input_path, TYPESCRIPT_WAVE3_MATRIX_SCHEMA).unwrap();
     let output_path = temp_dir.join("audit");
     generate_to_file(&GenerateRequest {
+        config: Default::default(),
         language: nexgen::language::Language::TypeScript,
         input_paths: vec![input_path],
         support_paths: Vec::new(),
         descriptor_paths: Vec::new(),
         output_path: output_path.clone(),
         format: false,
-        generate_native_api: false,
         java_package_name: None,
         ts_date_time_types: nexgen::generator::TsDateTimeTypes::Temporal,
     })
@@ -2409,13 +2409,13 @@ fn typescript_json_wave7_discrete_defects_typecheck_and_run() {
     fs::write(&input_path, TYPESCRIPT_WAVE7_SCHEMA).unwrap();
     let output_path = temp_dir.join("probe");
     generate_to_file(&GenerateRequest {
+        config: Default::default(),
         language: nexgen::language::Language::TypeScript,
         input_paths: vec![input_path],
         support_paths: Vec::new(),
         descriptor_paths: Vec::new(),
         output_path: output_path.clone(),
         format: false,
-        generate_native_api: false,
         java_package_name: None,
         ts_date_time_types: Default::default(),
     })
@@ -2597,13 +2597,13 @@ fn typescript_json_dispatches_cross_module_ref_union_branches() {
     fs::write(&main_path, TYPESCRIPT_CROSS_MODULE_MAIN).unwrap();
     let output_path = temp_dir.join("closure");
     generate_to_file(&GenerateRequest {
+        config: Default::default(),
         language: nexgen::language::Language::TypeScript,
         input_paths: vec![main_path, shapes_path],
         support_paths: Vec::new(),
         descriptor_paths: Vec::new(),
         output_path: output_path.clone(),
         format: false,
-        generate_native_api: false,
         java_package_name: None,
         ts_date_time_types: Default::default(),
     })
@@ -2683,13 +2683,13 @@ fn typescript_json_guards_nullable_elements_in_array_keywords() {
     fs::write(&input_path, TYPESCRIPT_NULLABLE_ELEMENT_SCHEMA).unwrap();
     let output_path = temp_dir.join("bag");
     generate_to_file(&GenerateRequest {
+        config: Default::default(),
         language: nexgen::language::Language::TypeScript,
         input_paths: vec![input_path],
         support_paths: Vec::new(),
         descriptor_paths: Vec::new(),
         output_path: output_path.clone(),
         format: false,
-        generate_native_api: false,
         java_package_name: None,
         ts_date_time_types: Default::default(),
     })
@@ -2792,13 +2792,13 @@ properties:
     .unwrap();
     let output_path = temp_dir.join("pin");
     generate_to_file(&GenerateRequest {
+        config: Default::default(),
         language: nexgen::language::Language::TypeScript,
         input_paths: vec![input_path],
         support_paths: Vec::new(),
         descriptor_paths: Vec::new(),
         output_path: output_path.clone(),
         format: false,
-        generate_native_api: false,
         java_package_name: None,
         ts_date_time_types: Default::default(),
     })
@@ -2881,13 +2881,13 @@ fn typescript_json_truncates_over_capacity_fractional_seconds() {
         fs::write(&input_path, TYPESCRIPT_FRACTIONAL_SECOND_SCHEMA).unwrap();
         let output_path = temp_dir.join("clock");
         generate_to_file(&GenerateRequest {
+            config: Default::default(),
             language: nexgen::language::Language::TypeScript,
             input_paths: vec![input_path],
             support_paths: Vec::new(),
             descriptor_paths: Vec::new(),
             output_path: output_path.clone(),
             format: false,
-            generate_native_api: false,
             java_package_name: None,
             ts_date_time_types: *repr,
         })

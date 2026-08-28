@@ -32,13 +32,13 @@ pub struct SupportFiles {
 }
 
 pub struct GenerateRequest {
+    pub config: nexgen_config::NexgenConfig,
     pub language: Language,
     pub input_paths: Vec<PathBuf>,
     pub support_paths: Vec<PathBuf>,
     pub descriptor_paths: Vec<PathBuf>,
     pub output_path: PathBuf,
     pub format: bool,
-    pub generate_native_api: bool,
     /// Java-only: the base package for generated types. Its last
     /// dot-separated segment must match the output directory's name. Ignored
     /// for other languages.
@@ -49,21 +49,7 @@ pub struct GenerateRequest {
 }
 
 pub fn generate_to_file(request: &GenerateRequest) -> Result<()> {
-    if nexgen_config::is_scoped() {
-        return generate_to_file_inner(request);
-    }
-    let config = nexgen_config::NexgenConfig {
-        mode: if request.generate_native_api {
-            GenerationMode::NativeApi
-        } else {
-            GenerationMode::DefinitionsOnly
-        },
-        ..nexgen_config::current()
-    };
-    nexgen_config::with_nexgen_config(config, || generate_to_file_inner(request))
-}
-
-fn generate_to_file_inner(request: &GenerateRequest) -> Result<()> {
+    let _config_scope = nexgen_config::scope(request.config);
     // A resolved output path with no name at all (the filesystem root, or
     // `..` past it) is never a real output directory: Go and Java derive
     // package names from its basename, and for every language it means the
@@ -449,13 +435,13 @@ mod tests {
 
     fn java_request(output_path: &str, java_package_name: Option<&str>) -> GenerateRequest {
         GenerateRequest {
+            config: Default::default(),
             language: Language::Java,
             input_paths: Vec::new(),
             support_paths: Vec::new(),
             descriptor_paths: Vec::new(),
             output_path: PathBuf::from(output_path),
             format: false,
-            generate_native_api: false,
             java_package_name: java_package_name.map(str::to_string),
             ts_date_time_types: Default::default(),
         }

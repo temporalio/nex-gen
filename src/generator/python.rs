@@ -7762,7 +7762,7 @@ mod tests {
         generate_files_for_tree_with_mode_and_options, generate_source,
     };
     use crate::language::Language;
-    use crate::nexgen_config::{NexgenConfig, current, with_nexgen_config};
+    use crate::nexgen_config::{NexgenConfig, current, scope};
     use crate::spec::ApiSpecTree;
     use crate::spec::{LanguageImportSpec, LanguageImportStyle};
 
@@ -8000,21 +8000,17 @@ class Example(enum.Enum):
         let descriptors =
             DescriptorIndex::load(&root.join("advanced/samples/descriptors/temporal_api.bin"))
                 .unwrap();
-        let generated = with_nexgen_config(
-            NexgenConfig {
-                system_nexus: true,
-                ..current()
-            },
-            || {
-                generate_files_for_tree_with_mode_and_options(
-                    Language::Python,
-                    ApiSpecTree::single(spec.clone()),
-                    &descriptors,
-                    &crate::SupportFiles::default(),
-                    GenerationMode::NativeApi,
-                    GenerateFilesOptions::default(),
-                )
-            },
+        let _scope = scope(NexgenConfig {
+            system_nexus: true,
+            ..current()
+        });
+        let generated = generate_files_for_tree_with_mode_and_options(
+            Language::Python,
+            ApiSpecTree::single(spec.clone()),
+            &descriptors,
+            &crate::SupportFiles::default(),
+            GenerationMode::NativeApi,
+            GenerateFilesOptions::default(),
         )
         .unwrap();
         assert_eq!(generated.layout, GeneratedOutputLayout::Directory);

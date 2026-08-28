@@ -72,13 +72,13 @@ fn generate(language: nexgen::language::Language, java_package_name: Option<&str
     let output_path = temp_dir.join(output_dir_name);
     fs::write(&input_path, HOSTILE_DOCUMENTATION_SCHEMA).unwrap();
     generate_to_file(&GenerateRequest {
+        config: Default::default(),
         language,
         input_paths: vec![input_path],
         support_paths: Vec::new(),
         descriptor_paths: Vec::new(),
         output_path: output_path.clone(),
         format: false,
-        generate_native_api: true,
         java_package_name: java_package_name.map(str::to_string),
         ts_date_time_types: Default::default(),
     })

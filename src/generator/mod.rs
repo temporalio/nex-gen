@@ -137,9 +137,8 @@ pub(crate) fn generate_files_for_tree_with_mode_and_options(
         mode,
         ..crate::nexgen_config::current()
     };
-    crate::nexgen_config::with_nexgen_config(config, || {
-        crate::compile_tree_to_files(language, tree, descriptors, support, options)
-    })
+    let _scope = crate::nexgen_config::scope(config);
+    crate::compile_tree_to_files(language, tree, descriptors, support, options)
 }
 
 pub(crate) fn generate_files_from_planned_tree(

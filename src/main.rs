@@ -5,7 +5,7 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 use nexgen::generator::TsDateTimeTypes;
 use nexgen::language::Language;
 #[cfg(feature = "advanced")]
-use nexgen::nexgen_config::{NexgenConfig, current, with_nexgen_config};
+use nexgen::nexgen_config::NexgenConfig;
 #[cfg(feature = "advanced")]
 use nexgen::parser::write_prepared_wit_directory;
 #[cfg(feature = "advanced")]
@@ -179,16 +179,11 @@ fn main() -> ExitCode {
                         nexgen::generator::GenerationMode::DefinitionsOnly
                     },
                     system_nexus,
-                    ..current()
                 };
-                with_nexgen_config(config, || {
-                    generate_to_file(&generate_request(
-                        Language::Python,
-                        args,
-                        Default::default(),
-                        None,
-                    ))
-                })
+                let mut request =
+                    generate_request(Language::Python, args, Default::default(), None);
+                request.config = config;
+                generate_to_file(&request)
             }
             #[cfg(not(feature = "advanced"))]
             {
@@ -240,6 +235,7 @@ fn generate_request(
     java_package_name: Option<String>,
 ) -> GenerateRequest {
     GenerateRequest {
+        config: Default::default(),
         language,
         input_paths: args.inputs,
         #[cfg(feature = "advanced")]
@@ -255,10 +251,6 @@ fn generate_request(
         format: args.format,
         #[cfg(not(feature = "advanced"))]
         format: false,
-        #[cfg(feature = "advanced")]
-        generate_native_api: args.generate_native_api,
-        #[cfg(not(feature = "advanced"))]
-        generate_native_api: false,
         java_package_name,
         ts_date_time_types,
     }

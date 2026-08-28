@@ -139,13 +139,13 @@ fn generate_dotnet_files(
     let temp_dir = unique_output_path("dotnet-rendered");
     let output_path = temp_dir.join("output");
     generate_to_file(&GenerateRequest {
+        config: Default::default(),
         language: nexgen::language::Language::Dotnet,
         input_paths: input_paths.to_vec(),
         support_paths: Vec::new(),
         descriptor_paths: descriptor_paths.to_vec(),
         output_path: output_path.clone(),
         format: false,
-        generate_native_api: true,
         java_package_name: None,
         ts_date_time_types: Default::default(),
     })

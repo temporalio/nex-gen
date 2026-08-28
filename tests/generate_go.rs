@@ -214,13 +214,13 @@ fn generate_to_string_with_inputs(
     let temp_dir = unique_output_path("go-rendered");
     let output_path = temp_dir.join("output");
     generate_to_file(&GenerateRequest {
+        config: Default::default(),
         language,
         input_paths: input_paths.to_vec(),
         support_paths: Vec::new(),
         descriptor_paths: descriptor_paths.to_vec(),
         output_path: output_path.clone(),
         format: false,
-        generate_native_api: true,
         java_package_name: None,
         ts_date_time_types: Default::default(),
     })?;
@@ -1025,13 +1025,13 @@ fn go_json_package_name_derives_from_output_directory_name() {
     let temp_dir = unique_output_path("go-json-package-name-fallback");
     let output_path = temp_dir.join("widgets");
     generate_to_file(&GenerateRequest {
+        config: Default::default(),
         language: nexgen::language::Language::Go,
         input_paths: vec![json_input_path(&root, "chat")],
         support_paths: Vec::new(),
         descriptor_paths: Vec::new(),
         output_path: output_path.clone(),
         format: false,
-        generate_native_api: true,
         java_package_name: None,
         ts_date_time_types: Default::default(),
     })
@@ -1723,13 +1723,13 @@ fn go_rejects_inputs_flattening_to_the_same_module_file() {
     let output_path = temp_dir.join("output");
 
     let result = generate_to_file(&GenerateRequest {
+        config: Default::default(),
         language: nexgen::language::Language::Go,
         input_paths: vec![temp_dir.clone()],
         support_paths: Vec::new(),
         descriptor_paths: Vec::new(),
         output_path,
         format: false,
-        generate_native_api: false,
         java_package_name: None,
         ts_date_time_types: Default::default(),
     });
@@ -1761,13 +1761,13 @@ fn go_rejects_reserved_generated_name_collision() {
     let output_path = temp_dir.join("output");
 
     let result = generate_to_file(&GenerateRequest {
+        config: Default::default(),
         language: nexgen::language::Language::Go,
         input_paths: vec![temp_dir.clone()],
         support_paths: Vec::new(),
         descriptor_paths: Vec::new(),
         output_path,
         format: false,
-        generate_native_api: false,
         java_package_name: None,
         ts_date_time_types: Default::default(),
     });
@@ -1832,13 +1832,13 @@ fn go_json_names_inline_object_union_branch() {
     let output_path = temp_dir.join("detail");
 
     generate_to_file(&GenerateRequest {
+        config: Default::default(),
         language: nexgen::language::Language::Go,
         input_paths: vec![input_path],
         support_paths: Vec::new(),
         descriptor_paths: Vec::new(),
         output_path: output_path.clone(),
         format: false,
-        generate_native_api: false,
         java_package_name: None,
         ts_date_time_types: Default::default(),
     })
@@ -1870,13 +1870,13 @@ fn go_json_decodes_element_position_unions() {
     let output_path = temp_dir.join("bag");
 
     generate_to_file(&GenerateRequest {
+        config: Default::default(),
         language: nexgen::language::Language::Go,
         input_paths: vec![input_path],
         support_paths: Vec::new(),
         descriptor_paths: Vec::new(),
         output_path: output_path.clone(),
         format: false,
-        generate_native_api: false,
         java_package_name: None,
         ts_date_time_types: Default::default(),
     })
@@ -1969,13 +1969,13 @@ fn go_json_recursively_converts_and_validates_element_positions() {
     let output_path = temp_dir.join("recursive");
 
     generate_to_file(&GenerateRequest {
+        config: Default::default(),
         language: nexgen::language::Language::Go,
         input_paths: vec![input_path],
         support_paths: Vec::new(),
         descriptor_paths: Vec::new(),
         output_path: output_path.clone(),
         format: false,
-        generate_native_api: false,
         java_package_name: None,
         ts_date_time_types: Default::default(),
     })
@@ -2101,13 +2101,13 @@ fn go_json_validates_non_object_union_branch_constraints() {
     let output_path = temp_dir.join("bc");
 
     generate_to_file(&GenerateRequest {
+        config: Default::default(),
         language: nexgen::language::Language::Go,
         input_paths: vec![input_path],
         support_paths: Vec::new(),
         descriptor_paths: Vec::new(),
         output_path: output_path.clone(),
         format: false,
-        generate_native_api: false,
         java_package_name: None,
         ts_date_time_types: Default::default(),
     })
@@ -2155,13 +2155,13 @@ properties:
     let output_path = temp_dir.join("note");
 
     generate_to_file(&GenerateRequest {
+        config: Default::default(),
         language: nexgen::language::Language::Go,
         input_paths: vec![input_path],
         support_paths: Vec::new(),
         descriptor_paths: Vec::new(),
         output_path: output_path.clone(),
         format: false,
-        generate_native_api: false,
         java_package_name: None,
         ts_date_time_types: Default::default(),
     })
@@ -2200,13 +2200,13 @@ properties:
     let output_path = temp_dir.join("output");
 
     generate_to_file(&GenerateRequest {
+        config: Default::default(),
         language: nexgen::language::Language::Go,
         input_paths: vec![input_path],
         support_paths: Vec::new(),
         descriptor_paths: Vec::new(),
         output_path: output_path.clone(),
         format: false,
-        generate_native_api: false,
         java_package_name: None,
         ts_date_time_types: Default::default(),
     })
@@ -2273,13 +2273,13 @@ $defs:
     let output_path = temp_dir.join("mixed");
 
     generate_to_file(&GenerateRequest {
+        config: Default::default(),
         language: nexgen::language::Language::Go,
         input_paths: vec![input_path],
         support_paths: Vec::new(),
         descriptor_paths: Vec::new(),
         output_path: output_path.clone(),
         format: false,
-        generate_native_api: false,
         java_package_name: None,
         ts_date_time_types: Default::default(),
     })
@@ -2377,13 +2377,13 @@ properties:
     .unwrap();
     let output_path = temp_dir.join("matcher");
     generate_to_file(&GenerateRequest {
+        config: Default::default(),
         language: nexgen::language::Language::Go,
         input_paths: vec![input_path],
         support_paths: Vec::new(),
         descriptor_paths: Vec::new(),
         output_path: output_path.clone(),
         format: false,
-        generate_native_api: false,
         java_package_name: None,
         ts_date_time_types: Default::default(),
     })
@@ -2486,13 +2486,13 @@ services:
     .unwrap();
     let output_path = temp_dir.join("service");
     generate_to_file(&GenerateRequest {
+        config: Default::default(),
         language: nexgen::language::Language::Go,
         input_paths: vec![input_path],
         support_paths: Vec::new(),
         descriptor_paths: Vec::new(),
         output_path: output_path.clone(),
         format: false,
-        generate_native_api: false,
         java_package_name: None,
         ts_date_time_types: Default::default(),
     })
@@ -2531,13 +2531,13 @@ $defs:
     .unwrap();
     let output_path = temp_dir.join("temporal_wire");
     generate_to_file(&GenerateRequest {
+        config: Default::default(),
         language: nexgen::language::Language::Go,
         input_paths: vec![input_path],
         support_paths: Vec::new(),
         descriptor_paths: Vec::new(),
         output_path: output_path.clone(),
         format: false,
-        generate_native_api: false,
         java_package_name: None,
         ts_date_time_types: Default::default(),
     })
@@ -2624,13 +2624,13 @@ properties:
     .unwrap();
     let output_path = temp_dir.join("native");
     generate_to_file(&GenerateRequest {
+        config: Default::default(),
         language: nexgen::language::Language::Go,
         input_paths: vec![input_path],
         support_paths: Vec::new(),
         descriptor_paths: Vec::new(),
         output_path: output_path.clone(),
         format: false,
-        generate_native_api: false,
         java_package_name: None,
         ts_date_time_types: Default::default(),
     })
@@ -2690,13 +2690,13 @@ fn go_json_wave3_pairwise_runtime_matrix() {
     fs::write(&input_path, GO_WAVE3_MATRIX_SCHEMA).unwrap();
     let output_path = temp_dir.join("audit");
     generate_to_file(&GenerateRequest {
+        config: Default::default(),
         language: nexgen::language::Language::Go,
         input_paths: vec![input_path],
         support_paths: Vec::new(),
         descriptor_paths: Vec::new(),
         output_path: output_path.clone(),
         format: false,
-        generate_native_api: false,
         java_package_name: None,
         ts_date_time_types: Default::default(),
     })
@@ -2971,13 +2971,13 @@ fn go_json_cross_module_go_name_override_moves_every_reference() {
     let output_path = temp_dir.join("output");
 
     generate_to_file(&GenerateRequest {
+        config: Default::default(),
         language: nexgen::language::Language::Go,
         input_paths: vec![input_dir],
         support_paths: Vec::new(),
         descriptor_paths: Vec::new(),
         output_path: output_path.clone(),
         format: false,
-        generate_native_api: false,
         java_package_name: None,
         ts_date_time_types: Default::default(),
     })
@@ -3036,13 +3036,13 @@ fn go_json_override_moves_member_derived_names_only() {
     let output_path = temp_dir.join("probe");
 
     generate_to_file(&GenerateRequest {
+        config: Default::default(),
         language: nexgen::language::Language::Go,
         input_paths: vec![input_path],
         support_paths: Vec::new(),
         descriptor_paths: Vec::new(),
         output_path: output_path.clone(),
         format: false,
-        generate_native_api: false,
         java_package_name: None,
         ts_date_time_types: Default::default(),
     })
@@ -3101,13 +3101,13 @@ services:
     .unwrap();
 
     let error = generate_to_file(&GenerateRequest {
+        config: Default::default(),
         language: nexgen::language::Language::Go,
         input_paths: vec![input_dir.clone()],
         support_paths: Vec::new(),
         descriptor_paths: Vec::new(),
         output_path: temp_dir.join("out"),
         format: false,
-        generate_native_api: false,
         java_package_name: None,
         ts_date_time_types: Default::default(),
     })
@@ -3123,13 +3123,13 @@ services:
     // Java gives each module its own sub-package (`…pkg.a.page`, `…pkg.b.page`)
     // and emits no aggregating barrel, so the two `Page` classes stay distinct.
     generate_to_file(&GenerateRequest {
+        config: Default::default(),
         language: nexgen::language::Language::Java,
         input_paths: vec![input_dir],
         support_paths: Vec::new(),
         descriptor_paths: Vec::new(),
         output_path: temp_dir.join("pkg"),
         format: false,
-        generate_native_api: false,
         java_package_name: Some("com.example.pkg".to_string()),
         ts_date_time_types: Default::default(),
     })
@@ -3178,13 +3178,13 @@ $defs:
     .unwrap();
 
     let error = generate_to_file(&GenerateRequest {
+        config: Default::default(),
         language: nexgen::language::Language::Go,
         input_paths: vec![input_dir],
         support_paths: Vec::new(),
         descriptor_paths: Vec::new(),
         output_path: temp_dir.join("out"),
         format: false,
-        generate_native_api: false,
         java_package_name: None,
         ts_date_time_types: Default::default(),
     })
@@ -3229,13 +3229,13 @@ services:
 
     let output_path = temp_dir.join("out");
     generate_to_file(&GenerateRequest {
+        config: Default::default(),
         language: nexgen::language::Language::Go,
         input_paths: vec![input_dir],
         support_paths: Vec::new(),
         descriptor_paths: Vec::new(),
         output_path: output_path.clone(),
         format: false,
-        generate_native_api: false,
         java_package_name: None,
         ts_date_time_types: Default::default(),
     })
@@ -3288,13 +3288,13 @@ properties:
     .unwrap();
     let output_path = temp_dir.join("fmod");
     generate_to_file(&GenerateRequest {
+        config: Default::default(),
         language: nexgen::language::Language::Go,
         input_paths: vec![input_path],
         support_paths: Vec::new(),
         descriptor_paths: Vec::new(),
         output_path: output_path.clone(),
         format: false,
-        generate_native_api: false,
         java_package_name: None,
         ts_date_time_types: Default::default(),
     })
@@ -3400,13 +3400,13 @@ properties:
     .unwrap();
     let output_path = temp_dir.join("nullable");
     generate_to_file(&GenerateRequest {
+        config: Default::default(),
         language: nexgen::language::Language::Go,
         input_paths: vec![input_path],
         support_paths: Vec::new(),
         descriptor_paths: Vec::new(),
         output_path: output_path.clone(),
         format: false,
-        generate_native_api: false,
         java_package_name: None,
         ts_date_time_types: Default::default(),
     })
@@ -3550,13 +3550,13 @@ $defs:
 
     let output_path = temp_dir.join("out");
     generate_to_file(&GenerateRequest {
+        config: Default::default(),
         language: nexgen::language::Language::Go,
         input_paths: vec![input_dir],
         support_paths: Vec::new(),
         descriptor_paths: Vec::new(),
         output_path: output_path.clone(),
         format: false,
-        generate_native_api: false,
         java_package_name: None,
         ts_date_time_types: Default::default(),
     })
@@ -3625,13 +3625,13 @@ properties:
     .unwrap();
     let output_path = temp_dir.join("mat");
     generate_to_file(&GenerateRequest {
+        config: Default::default(),
         language: nexgen::language::Language::Go,
         input_paths: vec![input_path],
         support_paths: Vec::new(),
         descriptor_paths: Vec::new(),
         output_path: output_path.clone(),
         format: false,
-        generate_native_api: false,
         java_package_name: None,
         ts_date_time_types: Default::default(),
     })
@@ -3764,13 +3764,13 @@ properties:
     .unwrap();
     let output_path = temp_dir.join("bag");
     generate_to_file(&GenerateRequest {
+        config: Default::default(),
         language: nexgen::language::Language::Go,
         input_paths: vec![input_path],
         support_paths: Vec::new(),
         descriptor_paths: Vec::new(),
         output_path: output_path.clone(),
         format: false,
-        generate_native_api: false,
         java_package_name: None,
         ts_date_time_types: Default::default(),
     })
@@ -3854,13 +3854,13 @@ $defs:
     .unwrap();
     let output_path = temp_dir.join("shapes");
     generate_to_file(&GenerateRequest {
+        config: Default::default(),
         language: nexgen::language::Language::Go,
         input_paths: vec![input_path],
         support_paths: Vec::new(),
         descriptor_paths: Vec::new(),
         output_path: output_path.clone(),
         format: false,
-        generate_native_api: false,
         java_package_name: None,
         ts_date_time_types: Default::default(),
     })
@@ -3980,13 +3980,13 @@ $defs:
     .unwrap();
     let output_path = temp_dir.join("shapes");
     generate_to_file(&GenerateRequest {
+        config: Default::default(),
         language: nexgen::language::Language::Go,
         input_paths: vec![input_path],
         support_paths: Vec::new(),
         descriptor_paths: Vec::new(),
         output_path: output_path.clone(),
         format: false,
-        generate_native_api: false,
         java_package_name: None,
         ts_date_time_types: Default::default(),
     })
@@ -4039,13 +4039,13 @@ properties:
     .unwrap();
     let output_path = temp_dir.join("nums");
     generate_to_file(&GenerateRequest {
+        config: Default::default(),
         language: nexgen::language::Language::Go,
         input_paths: vec![input_path],
         support_paths: Vec::new(),
         descriptor_paths: Vec::new(),
         output_path: output_path.clone(),
         format: false,
-        generate_native_api: false,
         java_package_name: None,
         ts_date_time_types: Default::default(),
     })
@@ -4131,13 +4131,13 @@ properties:
     .unwrap();
     let output_path = temp_dir.join("elements");
     generate_to_file(&GenerateRequest {
+        config: Default::default(),
         language: nexgen::language::Language::Go,
         input_paths: vec![input_path],
         support_paths: Vec::new(),
         descriptor_paths: Vec::new(),
         output_path: output_path.clone(),
         format: false,
-        generate_native_api: false,
         java_package_name: None,
         ts_date_time_types: Default::default(),
     })
@@ -4251,13 +4251,13 @@ properties:
     .unwrap();
     let output_path = temp_dir.join("names");
     generate_to_file(&GenerateRequest {
+        config: Default::default(),
         language: nexgen::language::Language::Go,
         input_paths: vec![input_path],
         support_paths: Vec::new(),
         descriptor_paths: Vec::new(),
         output_path: output_path.clone(),
         format: false,
-        generate_native_api: false,
         java_package_name: None,
         ts_date_time_types: Default::default(),
     })

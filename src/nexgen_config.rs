@@ -7,10 +7,19 @@ use std::cell::RefCell;
 
 use crate::generator::GenerationMode;
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct NexgenConfig {
     pub mode: GenerationMode,
     pub system_nexus: bool,
+}
+
+impl Default for NexgenConfig {
+    fn default() -> Self {
+        Self {
+            mode: GenerationMode::DefinitionsOnly,
+            system_nexus: false,
+        }
+    }
 }
 
 thread_local! {
@@ -21,19 +30,14 @@ pub fn current() -> NexgenConfig {
     CONFIGS.with(|configs| configs.borrow().last().copied().unwrap_or_default())
 }
 
-pub fn is_scoped() -> bool {
-    CONFIGS.with(|configs| !configs.borrow().is_empty())
-}
-
-pub fn with_nexgen_config<T>(config: NexgenConfig, f: impl FnOnce() -> T) -> T {
+pub fn scope(config: NexgenConfig) -> NexgenConfigScope {
     CONFIGS.with(|configs| configs.borrow_mut().push(config));
-    let _scope = Scope;
-    f()
+    NexgenConfigScope
 }
 
-struct Scope;
+pub struct NexgenConfigScope;
 
-impl Drop for Scope {
+impl Drop for NexgenConfigScope {
     fn drop(&mut self) {
         CONFIGS.with(|configs| {
             configs
@@ -46,7 +50,7 @@ impl Drop for Scope {
 
 #[cfg(test)]
 mod tests {
-    use super::{NexgenConfig, current, with_nexgen_config};
+    use super::{NexgenConfig, current, scope};
     use crate::generator::GenerationMode;
 
     #[test]
@@ -55,14 +59,16 @@ mod tests {
             mode: GenerationMode::DefinitionsOnly,
             system_nexus: true,
         };
-        with_nexgen_config(outer, || {
+        {
+            let _outer_scope = scope(outer);
             assert_eq!(current(), outer);
             let result = std::panic::catch_unwind(|| {
-                with_nexgen_config(NexgenConfig::default(), || panic!("test unwind"));
+                let _inner_scope = scope(NexgenConfig::default());
+                panic!("test unwind");
             });
             assert!(result.is_err());
             assert_eq!(current(), outer);
-        });
+        }
         assert_eq!(current(), NexgenConfig::default());
     }
 
@@ -72,12 +78,13 @@ mod tests {
             mode: GenerationMode::DefinitionsOnly,
             system_nexus: true,
         };
-        with_nexgen_config(config, || {
+        {
+            let _scope = scope(config);
             assert_eq!(current(), config);
             assert_eq!(
                 std::thread::spawn(current).join().unwrap(),
                 NexgenConfig::default()
             );
-        });
+        }
     }
 }

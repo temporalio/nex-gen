@@ -150,13 +150,13 @@ impl Workspace {
             fs::create_dir_all(parent).map_err(|error| error.to_string())?;
         }
         generate_to_file(&GenerateRequest {
+            config: Default::default(),
             language: target.language(),
             input_paths: schemas.to_vec(),
             support_paths: Vec::new(),
             descriptor_paths: Vec::new(),
             output_path: output_path.clone(),
             format: false,
-            generate_native_api: false,
             java_package_name: (target == Target::Java).then(|| format!("conformance.{dir}")),
             ts_date_time_types,
         })

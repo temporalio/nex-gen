@@ -318,7 +318,7 @@ fn read_java_files(dir: &Path) -> BTreeMap<PathBuf, String> {
 
 /// Regenerates one example into a temp Gradle-shaped tree so the derived Java
 /// package matches the checked-in output, then compares the emitted files.
-fn assert_regeneration_matches(mode: &str, generate_native_api: bool) {
+fn assert_regeneration_matches(mode: &str, generation_mode: nexgen::generator::GenerationMode) {
     let root = project_root();
     for example_id in ["chat", "kb", "showcase", "temporal"] {
         let temp_dir = unique_output_path(&format!("java-json-{mode}-{example_id}"));
@@ -327,13 +327,16 @@ fn assert_regeneration_matches(mode: &str, generate_native_api: bool) {
         let output_path = temp_dir.join(example_id);
 
         generate_to_file(&GenerateRequest {
+            config: nexgen::nexgen_config::NexgenConfig {
+                mode: generation_mode,
+                ..Default::default()
+            },
             language: nexgen::language::Language::Java,
             input_paths: vec![json_input_path(&root, example_id)],
             support_paths: Vec::new(),
             descriptor_paths: Vec::new(),
             output_path: output_path.clone(),
             format: false,
-            generate_native_api,
             java_package_name: Some(format!("json_schema.{mode}.{example_id}")),
             ts_date_time_types: Default::default(),
         })
@@ -392,12 +395,15 @@ fn assert_regeneration_matches(mode: &str, generate_native_api: bool) {
 
 #[test]
 fn java_json_example_generation_matches_checked_in_output() {
-    assert_regeneration_matches("definitions", false);
+    assert_regeneration_matches(
+        "definitions",
+        nexgen::generator::GenerationMode::DefinitionsOnly,
+    );
 }
 
 #[test]
 fn java_json_api_example_generation_matches_checked_in_output() {
-    assert_regeneration_matches("api", true);
+    assert_regeneration_matches("api", nexgen::generator::GenerationMode::NativeApi);
 }
 
 /// A structured inline object branch of a property-level union is named
@@ -414,13 +420,13 @@ fn java_json_names_inline_object_union_branch() {
     let output_path = temp_dir.join("detail");
 
     generate_to_file(&GenerateRequest {
+        config: Default::default(),
         language: nexgen::language::Language::Java,
         input_paths: vec![input_path],
         support_paths: Vec::new(),
         descriptor_paths: Vec::new(),
         output_path: output_path.clone(),
         format: false,
-        generate_native_api: false,
         java_package_name: Some("detail".to_string()),
         ts_date_time_types: Default::default(),
     })
@@ -466,13 +472,13 @@ fn java_json_validates_non_object_union_branch_constraints() {
     let output_path = temp_dir.join("bc");
 
     generate_to_file(&GenerateRequest {
+        config: Default::default(),
         language: nexgen::language::Language::Java,
         input_paths: vec![input_path],
         support_paths: Vec::new(),
         descriptor_paths: Vec::new(),
         output_path: output_path.clone(),
         format: false,
-        generate_native_api: false,
         java_package_name: Some("bc".to_string()),
         ts_date_time_types: Default::default(),
     })
@@ -515,13 +521,13 @@ fn java_json_rejects_non_finite_numbers_in_every_serialize_position() {
     let output_path = temp_dir.join("finite");
 
     generate_to_file(&GenerateRequest {
+        config: Default::default(),
         language: nexgen::language::Language::Java,
         input_paths: vec![input_path],
         support_paths: Vec::new(),
         descriptor_paths: Vec::new(),
         output_path: output_path.clone(),
         format: false,
-        generate_native_api: false,
         java_package_name: Some("finite".to_string()),
         ts_date_time_types: Default::default(),
     })
@@ -580,13 +586,13 @@ fn java_json_emits_runtime_support_for_nested_materialized_values() {
     let output_path = temp_dir.join("nested");
 
     generate_to_file(&GenerateRequest {
+        config: Default::default(),
         language: nexgen::language::Language::Java,
         input_paths: vec![input_path],
         support_paths: Vec::new(),
         descriptor_paths: Vec::new(),
         output_path: output_path.clone(),
         format: false,
-        generate_native_api: false,
         java_package_name: Some("nested".to_string()),
         ts_date_time_types: Default::default(),
     })
@@ -649,13 +655,13 @@ fn java_json_emits_wave2_object_and_matcher_contracts() {
     let output_path = temp_dir.join("java_conformance");
 
     generate_to_file(&GenerateRequest {
+        config: Default::default(),
         language: nexgen::language::Language::Java,
         input_paths: vec![input_path],
         support_paths: Vec::new(),
         descriptor_paths: Vec::new(),
         output_path: output_path.clone(),
         format: false,
-        generate_native_api: false,
         java_package_name: Some("java_conformance".to_string()),
         ts_date_time_types: Default::default(),
     })
@@ -743,13 +749,13 @@ fn java_json_emits_deprecated_services_and_operations() {
     let output_path = temp_dir.join("legacy");
 
     generate_to_file(&GenerateRequest {
+        config: Default::default(),
         language: nexgen::language::Language::Java,
         input_paths: vec![input_path],
         support_paths: Vec::new(),
         descriptor_paths: Vec::new(),
         output_path: output_path.clone(),
         format: false,
-        generate_native_api: true,
         java_package_name: Some("legacy".to_string()),
         ts_date_time_types: Default::default(),
     })
@@ -785,13 +791,13 @@ fn java_json_rejects_empty_service_descriptions() {
     let input_path = temp_dir.join("empty.nexusrpc.yaml");
     fs::write(&input_path, JAVA_EMPTY_SERVICE_DESCRIPTION_SCHEMA).unwrap();
     let error = generate_to_file(&GenerateRequest {
+        config: Default::default(),
         language: nexgen::language::Language::Java,
         input_paths: vec![input_path],
         support_paths: Vec::new(),
         descriptor_paths: Vec::new(),
         output_path: temp_dir.join("empty"),
         format: false,
-        generate_native_api: true,
         java_package_name: Some("empty".to_string()),
         ts_date_time_types: Default::default(),
     })
@@ -819,13 +825,13 @@ fn java_json_decodes_element_position_unions() {
     let output_path = temp_dir.join("bag");
 
     generate_to_file(&GenerateRequest {
+        config: Default::default(),
         language: nexgen::language::Language::Java,
         input_paths: vec![input_path],
         support_paths: Vec::new(),
         descriptor_paths: Vec::new(),
         output_path: output_path.clone(),
         format: false,
-        generate_native_api: false,
         java_package_name: Some("bag".to_string()),
         ts_date_time_types: Default::default(),
     })
@@ -928,13 +934,13 @@ fn java_json_cross_module_java_name_override_moves_every_reference() {
     let output_path = temp_dir.join("pages");
 
     generate_to_file(&GenerateRequest {
+        config: Default::default(),
         language: nexgen::language::Language::Java,
         input_paths: vec![input_dir],
         support_paths: Vec::new(),
         descriptor_paths: Vec::new(),
         output_path: output_path.clone(),
         format: false,
-        generate_native_api: false,
         java_package_name: Some("example.pages".to_string()),
         ts_date_time_types: Default::default(),
     })
@@ -1007,13 +1013,13 @@ services:
 
     let output_path = temp_dir.join("pkg");
     generate_to_file(&GenerateRequest {
+        config: Default::default(),
         language: nexgen::language::Language::Java,
         input_paths: vec![input_dir],
         support_paths: Vec::new(),
         descriptor_paths: Vec::new(),
         output_path: output_path.clone(),
         format: false,
-        generate_native_api: false,
         java_package_name: Some("com.example.pkg".to_string()),
         ts_date_time_types: Default::default(),
     })
@@ -1075,13 +1081,13 @@ fn java_json_nullable_property_keeps_the_branch_constraints() {
     let output_path = temp_dir.join("nullable_shape");
 
     generate_to_file(&GenerateRequest {
+        config: Default::default(),
         language: nexgen::language::Language::Java,
         input_paths: vec![input_path],
         support_paths: Vec::new(),
         descriptor_paths: Vec::new(),
         output_path: output_path.clone(),
         format: false,
-        generate_native_api: false,
         java_package_name: Some("nullable_shape".to_string()),
         ts_date_time_types: Default::default(),
     })
@@ -1151,13 +1157,13 @@ fn java_json_serialize_side_guards_match_the_parse_side() {
     let output_path = temp_dir.join("guards");
 
     generate_to_file(&GenerateRequest {
+        config: Default::default(),
         language: nexgen::language::Language::Java,
         input_paths: vec![input_path],
         support_paths: Vec::new(),
         descriptor_paths: Vec::new(),
         output_path: output_path.clone(),
         format: false,
-        generate_native_api: false,
         java_package_name: Some("guards".to_string()),
         ts_date_time_types: Default::default(),
     })
@@ -1235,13 +1241,13 @@ fn java_json_dispatches_a_non_string_discriminant_by_value() {
     let output_path = temp_dir.join("tagged");
 
     generate_to_file(&GenerateRequest {
+        config: Default::default(),
         language: nexgen::language::Language::Java,
         input_paths: vec![input_path],
         support_paths: Vec::new(),
         descriptor_paths: Vec::new(),
         output_path: output_path.clone(),
         format: false,
-        generate_native_api: false,
         java_package_name: Some("tagged".to_string()),
         ts_date_time_types: Default::default(),
     })
@@ -1294,13 +1300,13 @@ fn java_json_repaths_nested_violations_on_serialize() {
     let output_path = temp_dir.join("nested_path");
 
     generate_to_file(&GenerateRequest {
+        config: Default::default(),
         language: nexgen::language::Language::Java,
         input_paths: vec![input_path],
         support_paths: Vec::new(),
         descriptor_paths: Vec::new(),
         output_path: output_path.clone(),
         format: false,
-        generate_native_api: false,
         java_package_name: Some("nested_path".to_string()),
         ts_date_time_types: Default::default(),
     })
@@ -1353,13 +1359,13 @@ fn java_json_compiles_contains_matcher_regexes_once() {
     let output_path = temp_dir.join("contains_regex");
 
     generate_to_file(&GenerateRequest {
+        config: Default::default(),
         language: nexgen::language::Language::Java,
         input_paths: vec![input_path],
         support_paths: Vec::new(),
         descriptor_paths: Vec::new(),
         output_path: output_path.clone(),
         format: false,
-        generate_native_api: false,
         java_package_name: Some("contains_regex".to_string()),
         ts_date_time_types: Default::default(),
     })
@@ -1416,13 +1422,13 @@ fn java_json_member_javadoc_lands_on_the_getter() {
     let output_path = temp_dir.join("member_doc");
 
     generate_to_file(&GenerateRequest {
+        config: Default::default(),
         language: nexgen::language::Language::Java,
         input_paths: vec![input_path],
         support_paths: Vec::new(),
         descriptor_paths: Vec::new(),
         output_path: output_path.clone(),
         format: false,
-        generate_native_api: false,
         java_package_name: Some("member_doc".to_string()),
         ts_date_time_types: Default::default(),
     })
@@ -1478,13 +1484,13 @@ fn java_json_typed_map_union_branch_implements_the_interface() {
     let output_path = temp_dir.join("union_map");
 
     generate_to_file(&GenerateRequest {
+        config: Default::default(),
         language: nexgen::language::Language::Java,
         input_paths: vec![input_path],
         support_paths: Vec::new(),
         descriptor_paths: Vec::new(),
         output_path: output_path.clone(),
         format: false,
-        generate_native_api: false,
         java_package_name: Some("union_map".to_string()),
         ts_date_time_types: Default::default(),
     })
@@ -1554,13 +1560,13 @@ fn java_json_nullable_element_keeps_the_branch_constraints() {
     let output_path = temp_dir.join("nullable_element");
 
     generate_to_file(&GenerateRequest {
+        config: Default::default(),
         language: nexgen::language::Language::Java,
         input_paths: vec![input_path],
         support_paths: Vec::new(),
         descriptor_paths: Vec::new(),
         output_path: output_path.clone(),
         format: false,
-        generate_native_api: false,
         java_package_name: Some("nullable_element".to_string()),
         ts_date_time_types: Default::default(),
     })
@@ -1633,13 +1639,13 @@ fn java_json_writes_materialized_collection_elements_itself() {
     let output_path = temp_dir.join("materialized");
 
     generate_to_file(&GenerateRequest {
+        config: Default::default(),
         language: nexgen::language::Language::Java,
         input_paths: vec![input_path],
         support_paths: Vec::new(),
         descriptor_paths: Vec::new(),
         output_path: output_path.clone(),
         format: false,
-        generate_native_api: false,
         java_package_name: Some("materialized".to_string()),
         ts_date_time_types: Default::default(),
     })
@@ -1714,13 +1720,13 @@ fn java_json_enum_name_override_reaches_non_string_members() {
     let output_path = temp_dir.join("enum_names");
 
     generate_to_file(&GenerateRequest {
+        config: Default::default(),
         language: nexgen::language::Language::Java,
         input_paths: vec![input_path],
         support_paths: Vec::new(),
         descriptor_paths: Vec::new(),
         output_path: output_path.clone(),
         format: false,
-        generate_native_api: false,
         java_package_name: Some("enum_names".to_string()),
         ts_date_time_types: Default::default(),
     })
@@ -1794,13 +1800,13 @@ properties:
     let output_path = temp_dir.join("naming");
 
     generate_to_file(&GenerateRequest {
+        config: Default::default(),
         language: nexgen::language::Language::Java,
         input_paths: vec![input_path],
         support_paths: Vec::new(),
         descriptor_paths: Vec::new(),
         output_path: output_path.clone(),
         format: false,
-        generate_native_api: false,
         java_package_name: Some("naming".to_string()),
         ts_date_time_types: Default::default(),
     })
@@ -1863,13 +1869,13 @@ properties:
         .unwrap();
         let output_path = temp_dir.join("spelling");
         generate_to_file(&GenerateRequest {
+            config: Default::default(),
             language: nexgen::language::Language::Java,
             input_paths: vec![input_path],
             support_paths: Vec::new(),
             descriptor_paths: Vec::new(),
             output_path: output_path.clone(),
             format: false,
-            generate_native_api: false,
             java_package_name: Some("spelling".to_string()),
             ts_date_time_types: Default::default(),
         })
@@ -1910,13 +1916,13 @@ properties:
     .unwrap();
 
     let error = generate_to_file(&GenerateRequest {
+        config: Default::default(),
         language: nexgen::language::Language::Java,
         input_paths: vec![input_path],
         support_paths: Vec::new(),
         descriptor_paths: Vec::new(),
         output_path: temp_dir.join("collide"),
         format: false,
-        generate_native_api: false,
         java_package_name: Some("collide".to_string()),
         ts_date_time_types: Default::default(),
     })
@@ -1951,13 +1957,13 @@ properties:
     let output_path = temp_dir.join("fracsec");
 
     generate_to_file(&GenerateRequest {
+        config: Default::default(),
         language: nexgen::language::Language::Java,
         input_paths: vec![input_path],
         support_paths: Vec::new(),
         descriptor_paths: Vec::new(),
         output_path: output_path.clone(),
         format: false,
-        generate_native_api: false,
         java_package_name: Some("fracsec".to_string()),
         ts_date_time_types: Default::default(),
     })
