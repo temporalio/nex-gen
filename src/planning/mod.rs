@@ -8,12 +8,12 @@ use crate::descriptors::DescriptorIndex;
 use crate::error::{Error, Result};
 use crate::language::Language;
 use crate::spec::{
-    AliasTypeSpec, ApiSpec, ApiSpecTransform, AuthoredResourceType, ExternalTypeSourceSpec,
-    ExternalTypeSpec, ExternalVariantSourceSpec, FunctionArgSpec, FunctionArgsSpec,
-    FunctionFieldSpec, FunctionResultSpec, JsonModelSpec, LanguageStringSpec, ModulePath,
-    OperationSpec, RecordFieldVisibility, RecordSpec, ResourceFieldSpec, SelectedFamily,
-    SelectedSupportSpec, SelectedTextSpec, ServiceSpec, SupportSpec, Symbol, TypeDeclSpec,
-    TypeFamily, TypeReplacementSpec, TypeSpec,
+    AliasTypeSpec, ApiSpec, ApiSpecTransform, AuthoredResourceType, EnumValueSpec,
+    ExternalTypeSourceSpec, ExternalTypeSpec, ExternalVariantSourceSpec, FunctionArgSpec,
+    FunctionArgsSpec, FunctionFieldSpec, FunctionResultSpec, JsonModelSpec, LanguageStringSpec,
+    ModulePath, OperationSpec, RecordFieldVisibility, RecordSpec, ResourceFieldSpec,
+    SelectedFamily, SelectedSupportSpec, SelectedTextSpec, ServiceSpec, SupportSpec, Symbol,
+    TypeDeclSpec, TypeFamily, TypeReplacementSpec, TypeSpec,
 };
 use crate::spec::{ApiSpecLeaf, ApiSpecNode, ApiSpecTree, CompilerPass};
 
@@ -205,6 +205,7 @@ pub(crate) struct PlannedRecordData {
 pub(crate) struct PlannedFieldData {
     pub(crate) has_presence: Option<bool>,
     pub(crate) wire_binding: Option<PlannedWireFieldBinding>,
+    pub(crate) default_enum_value: Option<EnumValueSpec>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

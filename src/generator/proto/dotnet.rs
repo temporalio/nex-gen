@@ -842,8 +842,41 @@ fn render_field_to_proto_assignment(
             support_namespace,
         ));
         output.push_str(";\n");
+        if let Some(default_expr) = default_enum_proto_expr(field) {
+            output.push_str("        }\n        else\n        {\n            ");
+            output.push_str(&target);
+            output.push_str(" = ");
+            output.push_str(&default_expr);
+            output.push_str(";\n");
+        }
         output.push_str("        }\n");
     }
+}
+
+fn default_enum_proto_expr(field: &RecordFieldSpec<PlannedFamily>) -> Option<String> {
+    field.default_value.as_ref()?;
+    let enum_value = field
+        .data
+        .default_enum_value
+        .as_ref()
+        .expect("planned field default enum value should be resolved");
+    let proto = match field.field_type.without_option() {
+        PlannedType::External(ExternalTypeSpec::Proto(PlannedProtoType::Enum(proto))) => proto,
+        PlannedType::External(ExternalTypeSpec::Alias(alias)) => {
+            let PlannedType::External(ExternalTypeSpec::Proto(PlannedProtoType::Enum(proto))) =
+                alias.target.without_option()
+            else {
+                return None;
+            };
+            proto
+        }
+        _ => return None,
+    };
+    Some(format!(
+        "{}.{}",
+        dotnet_proto_type_name_for_info(&proto.proto),
+        csharp_type_name(&enum_value.name)
+    ))
 }
 
 fn field_to_proto_expr(

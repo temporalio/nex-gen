@@ -233,6 +233,7 @@ pub(super) fn planned_record_field_data(
                 wire_name: oneof.name.to_string(),
                 members,
             }),
+            ..Default::default()
         });
     }
     let field = message
@@ -246,6 +247,7 @@ pub(super) fn planned_record_field_data(
             wire_name: field.name.clone()?,
             wire_type: planned_wire_field_type(field, planner),
         }),
+        ..Default::default()
     })
 }
 

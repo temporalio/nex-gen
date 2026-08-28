@@ -15,7 +15,7 @@ use crate::planning::{
     PlannedResourceMethodResultKind as PlannedResourceMethodResult, PlannedSpec, PlannedType,
 };
 use crate::spec::{
-    AliasTypeSpec, EnumSpec, ExternalTypeSpec, FlagsSpec,
+    AliasTypeSpec, EnumSpec, EnumValueSpec, ExternalTypeSpec, FieldDefaultSpec, FlagsSpec,
     FunctionArgsSpec as GenericFunctionArgsSpec, FunctionFieldSpec as GenericFunctionFieldSpec,
     FunctionResultSpec as GenericFunctionResultSpec, IntSpec, LanguageStringSpec, ModulePath,
     OperationSpec, RecordFieldSpec, RecordSpec, SupportFragmentSpec, TypeReplacementSpec, TypeSpec,
@@ -116,6 +116,8 @@ pub(in crate::generator) struct PlannedField {
     annotation_override: Option<LanguageStringSpec>,
     pub(in crate::generator) flattened_annotation_override: Option<LanguageStringSpec>,
     pub(in crate::generator) required: bool,
+    pub(in crate::generator) default_value: Option<FieldDefaultSpec>,
+    pub(in crate::generator) default_enum_value: Option<EnumValueSpec>,
     role: PlannedFieldRole,
     pub(in crate::generator) kind: PlannedFieldKind,
 }
@@ -351,6 +353,8 @@ pub(in crate::generator) fn planned_field(
         annotation_override: field.annotation.clone(),
         flattened_annotation_override: field.flattened_annotation.clone(),
         required: field.required,
+        default_value: field.default_value.clone(),
+        default_enum_value: field.data.default_enum_value.clone(),
         role,
         kind: planned_field_kind(&field.field_type, spec),
     }
