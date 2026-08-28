@@ -20,9 +20,18 @@ from ._support import (
 )
 
 
+@dataclasses.dataclass(slots=True)
+class StartWorkflowRequest:
+    workflow: str
+    workflow_id: str
+    task_queue: str
+    workflow_start_delay: datetime.timedelta | None = None
+    namespace: str = dataclasses.field(default_factory=workflow_namespace)
+
+
 class _StartWorkflowRequestTransferTypeConverter(
     temporalio.converter.TransferTypeConverter[
-        "StartWorkflowRequest",
+        StartWorkflowRequest,
         temporalio.api.workflowservice.v1.request_response_pb2.StartWorkflowExecutionRequest,
     ]
 ):
@@ -37,8 +46,8 @@ class _StartWorkflowRequestTransferTypeConverter(
     def from_transfer_type(
         self,
         value: temporalio.api.workflowservice.v1.request_response_pb2.StartWorkflowExecutionRequest,
-        type_hint: type["StartWorkflowRequest"],
-    ) -> "StartWorkflowRequest":
+        type_hint: type[StartWorkflowRequest],
+    ) -> StartWorkflowRequest:
         if not value.HasField("workflow_type"):
             raise ValueError("missing required field StartWorkflowRequest.workflow")
         workflow = workflow_type_from_proto(value.workflow_type)
@@ -61,7 +70,7 @@ class _StartWorkflowRequestTransferTypeConverter(
     @typing_extensions.override
     def to_transfer_type(
         self,
-        value: "StartWorkflowRequest",
+        value: StartWorkflowRequest,
     ) -> temporalio.api.workflowservice.v1.request_response_pb2.StartWorkflowExecutionRequest:
         message = temporalio.api.workflowservice.v1.request_response_pb2.StartWorkflowExecutionRequest()
         message.workflow_type.CopyFrom(workflow_type_to_proto(value.workflow))
@@ -75,21 +84,19 @@ class _StartWorkflowRequestTransferTypeConverter(
         return message
 
 
-@temporalio.converter.transfer_type_convertible(
+_ = temporalio.converter.transfer_type_convertible(
     _StartWorkflowRequestTransferTypeConverter
-)
+)(StartWorkflowRequest)
+
+
 @dataclasses.dataclass(slots=True)
-class StartWorkflowRequest:
-    workflow: str
-    workflow_id: str
-    task_queue: str
-    workflow_start_delay: datetime.timedelta | None = None
-    namespace: str = dataclasses.field(default_factory=workflow_namespace)
+class StartWorkflowResult:
+    run_id: str | None = None
 
 
 class _StartWorkflowResultTransferTypeConverter(
     temporalio.converter.TransferTypeConverter[
-        "StartWorkflowResult",
+        StartWorkflowResult,
         temporalio.api.workflowservice.v1.request_response_pb2.StartWorkflowExecutionResponse,
     ]
 ):
@@ -104,8 +111,8 @@ class _StartWorkflowResultTransferTypeConverter(
     def from_transfer_type(
         self,
         value: temporalio.api.workflowservice.v1.request_response_pb2.StartWorkflowExecutionResponse,
-        type_hint: type["StartWorkflowResult"],
-    ) -> "StartWorkflowResult":
+        type_hint: type[StartWorkflowResult],
+    ) -> StartWorkflowResult:
         return StartWorkflowResult(
             run_id=value.run_id if bool(value.run_id) else None,
         )
@@ -113,7 +120,7 @@ class _StartWorkflowResultTransferTypeConverter(
     @typing_extensions.override
     def to_transfer_type(
         self,
-        value: "StartWorkflowResult",
+        value: StartWorkflowResult,
     ) -> temporalio.api.workflowservice.v1.request_response_pb2.StartWorkflowExecutionResponse:
         message = temporalio.api.workflowservice.v1.request_response_pb2.StartWorkflowExecutionResponse()
         if value.run_id is not None:
@@ -121,17 +128,21 @@ class _StartWorkflowResultTransferTypeConverter(
         return message
 
 
-@temporalio.converter.transfer_type_convertible(
+_ = temporalio.converter.transfer_type_convertible(
     _StartWorkflowResultTransferTypeConverter
-)
-@dataclasses.dataclass(slots=True)
-class StartWorkflowResult:
-    run_id: str | None = None
+)(StartWorkflowResult)
+
+
+@dataclasses.dataclass(slots=True, kw_only=True)
+class CancelWorkflowRequest:
+    namespace: str = dataclasses.field(default_factory=workflow_namespace)
+    workflow_execution: WorkflowExecution
+    reason: str | None = None
 
 
 class _CancelWorkflowRequestTransferTypeConverter(
     temporalio.converter.TransferTypeConverter[
-        "CancelWorkflowRequest",
+        CancelWorkflowRequest,
         temporalio.api.workflowservice.v1.request_response_pb2.RequestCancelWorkflowExecutionRequest,
     ]
 ):
@@ -146,8 +157,8 @@ class _CancelWorkflowRequestTransferTypeConverter(
     def from_transfer_type(
         self,
         value: temporalio.api.workflowservice.v1.request_response_pb2.RequestCancelWorkflowExecutionRequest,
-        type_hint: type["CancelWorkflowRequest"],
-    ) -> "CancelWorkflowRequest":
+        type_hint: type[CancelWorkflowRequest],
+    ) -> CancelWorkflowRequest:
         if not value.HasField("workflow_execution"):
             raise ValueError(
                 "missing required field CancelWorkflowRequest.workflow_execution"
@@ -166,7 +177,7 @@ class _CancelWorkflowRequestTransferTypeConverter(
     @typing_extensions.override
     def to_transfer_type(
         self,
-        value: "CancelWorkflowRequest",
+        value: CancelWorkflowRequest,
     ) -> temporalio.api.workflowservice.v1.request_response_pb2.RequestCancelWorkflowExecutionRequest:
         message = temporalio.api.workflowservice.v1.request_response_pb2.RequestCancelWorkflowExecutionRequest()
         message.namespace = value.namespace
@@ -180,19 +191,20 @@ class _CancelWorkflowRequestTransferTypeConverter(
         return message
 
 
-@temporalio.converter.transfer_type_convertible(
+_ = temporalio.converter.transfer_type_convertible(
     _CancelWorkflowRequestTransferTypeConverter
-)
-@dataclasses.dataclass(slots=True, kw_only=True)
-class CancelWorkflowRequest:
-    namespace: str = dataclasses.field(default_factory=workflow_namespace)
-    workflow_execution: WorkflowExecution
-    reason: str | None = None
+)(CancelWorkflowRequest)
+
+
+@dataclasses.dataclass(slots=True)
+class WorkflowExecution:
+    workflow_id: str
+    run_id: str | None = None
 
 
 class _WorkflowExecutionTransferTypeConverter(
     temporalio.converter.TransferTypeConverter[
-        "WorkflowExecution", temporalio.api.common.v1.message_pb2.WorkflowExecution
+        WorkflowExecution, temporalio.api.common.v1.message_pb2.WorkflowExecution
     ]
 ):
     transfer_type: (
@@ -203,8 +215,8 @@ class _WorkflowExecutionTransferTypeConverter(
     def from_transfer_type(
         self,
         value: temporalio.api.common.v1.message_pb2.WorkflowExecution,
-        type_hint: type["WorkflowExecution"],
-    ) -> "WorkflowExecution":
+        type_hint: type[WorkflowExecution],
+    ) -> WorkflowExecution:
         if not value.workflow_id:
             raise ValueError("missing required field WorkflowExecution.workflow_id")
         workflow_id = value.workflow_id
@@ -216,7 +228,7 @@ class _WorkflowExecutionTransferTypeConverter(
     @typing_extensions.override
     def to_transfer_type(
         self,
-        value: "WorkflowExecution",
+        value: WorkflowExecution,
     ) -> temporalio.api.common.v1.message_pb2.WorkflowExecution:
         message = temporalio.api.common.v1.message_pb2.WorkflowExecution()
         message.workflow_id = value.workflow_id
@@ -225,16 +237,19 @@ class _WorkflowExecutionTransferTypeConverter(
         return message
 
 
-@temporalio.converter.transfer_type_convertible(_WorkflowExecutionTransferTypeConverter)
+_ = temporalio.converter.transfer_type_convertible(
+    _WorkflowExecutionTransferTypeConverter
+)(WorkflowExecution)
+
+
 @dataclasses.dataclass(slots=True)
-class WorkflowExecution:
-    workflow_id: str
-    run_id: str | None = None
+class CancelWorkflowResponse:
+    pass
 
 
 class _CancelWorkflowResponseTransferTypeConverter(
     temporalio.converter.TransferTypeConverter[
-        "CancelWorkflowResponse",
+        CancelWorkflowResponse,
         temporalio.api.workflowservice.v1.request_response_pb2.RequestCancelWorkflowExecutionResponse,
     ]
 ):
@@ -249,22 +264,19 @@ class _CancelWorkflowResponseTransferTypeConverter(
     def from_transfer_type(
         self,
         value: temporalio.api.workflowservice.v1.request_response_pb2.RequestCancelWorkflowExecutionResponse,
-        type_hint: type["CancelWorkflowResponse"],
-    ) -> "CancelWorkflowResponse":
+        type_hint: type[CancelWorkflowResponse],
+    ) -> CancelWorkflowResponse:
         return CancelWorkflowResponse()
 
     @typing_extensions.override
     def to_transfer_type(
         self,
-        value: "CancelWorkflowResponse",
+        value: CancelWorkflowResponse,
     ) -> temporalio.api.workflowservice.v1.request_response_pb2.RequestCancelWorkflowExecutionResponse:
         message = temporalio.api.workflowservice.v1.request_response_pb2.RequestCancelWorkflowExecutionResponse()
         return message
 
 
-@temporalio.converter.transfer_type_convertible(
+_ = temporalio.converter.transfer_type_convertible(
     _CancelWorkflowResponseTransferTypeConverter
-)
-@dataclasses.dataclass(slots=True)
-class CancelWorkflowResponse:
-    pass
+)(CancelWorkflowResponse)

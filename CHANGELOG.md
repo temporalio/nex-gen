@@ -25,6 +25,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Python proto-backed models now consistently register their Temporal transfer
+  type converters after the model and converter definitions. Generic models
+  preserve static type information without casting class decorators to `Any`.
+
 ### Security
 
 ## [0.2.2] - 2026-08-25

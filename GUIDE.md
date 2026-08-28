@@ -624,28 +624,33 @@ record activity-options {
 **Python:**
 
 ```python
+@dataclasses.dataclass(slots=True, kw_only=True)
+class ActivityOptions:
+    task_queue: str | None = None
+    retry_policy: temporalio.common.RetryPolicy
+
+
 class _ActivityOptionsTransferTypeConverter(
-    temporalio.converter.TransferTypeConverter["ActivityOptions", ProtoActivityOptions]
+    temporalio.converter.TransferTypeConverter[ActivityOptions, ProtoActivityOptions]
 ):
-    def from_transfer_type(self, value, type_hint) -> "ActivityOptions":
+    def from_transfer_type(self, value, type_hint) -> ActivityOptions:
         return ActivityOptions(
             task_queue=task_queue_from_proto(value.task_queue)
                 if value.HasField("task_queue") else None,
             retry_policy=retry_policy_from_proto(value.retry_policy),
         )
 
-    def to_transfer_type(self, value: "ActivityOptions") -> ProtoActivityOptions:
+    def to_transfer_type(self, value: ActivityOptions) -> ProtoActivityOptions:
         message = ProtoActivityOptions()
         if value.task_queue is not None:
             message.task_queue.CopyFrom(task_queue_to_proto(value.task_queue))
         message.retry_policy.CopyFrom(retry_policy_to_proto(value.retry_policy))
         return message
 
-@temporalio.converter.transfer_type_convertible(_ActivityOptionsTransferTypeConverter)
-@dataclasses.dataclass(slots=True, kw_only=True)
-class ActivityOptions:
-    task_queue: str | None = None
-    retry_policy: temporalio.common.RetryPolicy
+
+_ = temporalio.converter.transfer_type_convertible(
+    _ActivityOptionsTransferTypeConverter
+)(ActivityOptions)
 ```
 
 **.NET:**

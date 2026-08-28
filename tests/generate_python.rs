@@ -1369,7 +1369,8 @@ fn python_request_models_are_bidirectional_wire_models() {
     assert!(rendered.contains("return await _signal_with_start_workflow(request)"));
     assert!(models.contains("payloads_to_proto(value.args)"));
     assert!(models.contains("def from_transfer_type("));
-    assert!(models.contains("@temporalio.converter.transfer_type_convertible("));
+    assert!(models.contains("_ = temporalio.converter.transfer_type_convertible("));
+    assert!(!models.contains("@temporalio.converter.transfer_type_convertible("));
     assert!(!models.contains("def from_proto("));
     assert!(models.contains("from ._support import ("));
     assert!(models.contains("retry_policy_to_proto,"));
@@ -1416,8 +1417,22 @@ fn python_standalone_proto_oneof_models_are_exported_and_converted() {
         .get(&PathBuf::from("__init__.py"))
         .expect("standalone Python package should include __init__.py");
 
-    assert!(models.contains("class Outcome(typing.Generic[OutputT]):"));
-    assert!(models.contains("\"Outcome[typing.Any]\""));
+    let outcome_model = models
+        .find("class Outcome(typing.Generic[OutputT]):")
+        .expect("generic model should be emitted");
+    let outcome_converter = models
+        .find("class _OutcomeTransferTypeConverter(")
+        .expect("generic converter should be emitted");
+    let outcome_registration = models
+        .find(
+            "_ = temporalio.converter.transfer_type_convertible(_OutcomeTransferTypeConverter[typing.Any])(Outcome)",
+        )
+        .expect("generic converter should be registered");
+    assert!(outcome_model < outcome_converter);
+    assert!(outcome_converter < outcome_registration);
+    assert!(models.contains("Outcome[OutputT]"));
+    assert!(!models.contains("\"Outcome[typing.Any]\""));
+    assert!(!models.contains("@typing.cast("));
     assert!(models.contains("output_type, = typing.get_args(type_hint) or (typing.Any,)"));
     assert!(models.contains(
         "@dataclasses.dataclass(slots=True)\nclass OutcomeValueSuccess(typing.Generic[OutputT]):\n    value: OutputT"
@@ -1436,9 +1451,10 @@ fn python_standalone_proto_oneof_models_are_exported_and_converted() {
     assert!(models.contains(
         "if _oneof_value_case is None:\n            raise ValueError(\"missing required field Outcome.value\")"
     ));
-    assert!(models.contains(
-        "_oneof_value = OutcomeValueSuccess(payloads_from_proto(value.success, [output_type])[0])"
-    ));
+    assert!(
+        models
+            .contains("typing.cast(OutputT, payloads_from_proto(value.success, [output_type])[0])")
+    );
     assert!(
         models.contains("_oneof_value = OutcomeValueFailure(failure_from_proto(value.failure))")
     );
@@ -1455,6 +1471,9 @@ fn python_standalone_proto_oneof_models_are_exported_and_converted() {
     );
     assert!(models.contains("unsupported variant case Outcome.value:"));
     assert!(models.contains("class PauseActivityRequest:"));
+    assert!(models.contains(
+        "_ = temporalio.converter.transfer_type_convertible(_PauseActivityRequestTransferTypeConverter)(PauseActivityRequest)"
+    ));
     assert!(models.contains("namespace: str"));
     assert!(models.contains("execution: WorkflowExecution | None = None"));
     assert!(models.contains("identity: str"));
@@ -1548,9 +1567,13 @@ fn python_proto_generics_propagate_payload_type_hints() {
         .expect("proto generic models should include the Temporal converter support module");
 
     assert!(models.contains("class PayloadBackedEnvelope(typing.Generic[OutputT, ContextT]):"));
-    assert!(models.contains("\"PayloadBackedEnvelope[typing.Any, typing.Any]\""));
-    assert!(models.contains("\"PayloadBackedOutput[typing.Any]\""));
-    assert!(models.contains("\"PayloadBackedContext[typing.Any]\""));
+    assert!(models.contains("PayloadBackedEnvelope[OutputT, ContextT]"));
+    assert!(models.contains("PayloadBackedOutput[OutputT]"));
+    assert!(models.contains("PayloadBackedContext[ContextT]"));
+    assert!(!models.contains("@typing.cast("));
+    assert!(models.contains(
+        "_ = temporalio.converter.transfer_type_convertible(_PayloadBackedEnvelopeTransferTypeConverter[typing.Any, typing.Any])(PayloadBackedEnvelope)"
+    ));
     assert!(models.contains(
         "output_type, context_type = typing.get_args(type_hint) or (typing.Any, typing.Any)"
     ));
@@ -1564,6 +1587,14 @@ fn python_proto_generics_propagate_payload_type_hints() {
     assert!(models.contains("payload_from_proto(value.details, output_type)"));
     assert!(models.contains("context_type, = typing.get_args(type_hint) or (typing.Any,)"));
     assert!(models.contains("payload_from_proto(value.details, context_type)"));
+    assert!(
+        models.contains("typing.cast(OutputT, payload_from_proto(value.details, output_type))")
+    );
+    assert!(
+        models.contains("typing.cast(ContextT, payload_from_proto(value.details, context_type))")
+    );
+    assert!(models.contains("typing.cast(PayloadBackedOutput[OutputT],"));
+    assert!(models.contains("typing.cast(PayloadBackedContext[ContextT],"));
     assert!(support.contains("type_hint: type[typing.Any] | None = None,"));
     assert!(support.contains("converter.from_payload(_clone_payload(proto), type_hint)"));
 }
