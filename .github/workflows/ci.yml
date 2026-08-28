@@ -52,13 +52,11 @@ jobs:
             samples/typescript/package-lock.json
             advanced/samples/typescript/package-lock.json
 
-      - name: Set up Go
+      - name: Set up Go for regular samples
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: samples/go/go.mod
-          cache-dependency-path: |
-            samples/go/go.sum
-            advanced/samples/go/go.sum
+          cache-dependency-path: samples/go/go.sum
 
       - name: Set up Java
         uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
@@ -83,8 +81,17 @@ jobs:
       - name: Validate TypeScript samples
         run: cargo validate typescript
 
-      - name: Validate Go samples
-        run: cargo validate go
+      - name: Validate regular Go samples
+        run: cargo validate go-regular
+
+      - name: Set up Go for advanced samples
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: advanced/samples/go/go.mod
+          cache-dependency-path: advanced/samples/go/go.sum
+
+      - name: Validate advanced Go samples
+        run: cargo validate go-advanced
 
       - name: Validate Java samples
         run: cargo validate java

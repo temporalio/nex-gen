@@ -12,6 +12,8 @@ pub enum ValidationLanguage {
     Python,
     Typescript,
     Go,
+    GoRegular,
+    GoAdvanced,
     Java,
     Dotnet,
 }
@@ -40,6 +42,10 @@ pub fn validate(request: &ValidateRequest) -> Result<()> {
             ValidationLanguage::Python => validate_python(&repo_root)?,
             ValidationLanguage::Typescript => validate_typescript(&repo_root)?,
             ValidationLanguage::Go => validate_go(&repo_root)?,
+            ValidationLanguage::GoRegular => validate_go_root(&repo_root.join("samples/go"))?,
+            ValidationLanguage::GoAdvanced => {
+                validate_go_root(&repo_root.join("advanced/samples/go"))?
+            }
             ValidationLanguage::Java => validate_java(&repo_root)?,
             ValidationLanguage::Dotnet => validate_dotnet(&repo_root)?,
         }
@@ -91,17 +97,21 @@ fn validate_typescript(repo_root: &Path) -> Result<()> {
 fn validate_go(repo_root: &Path) -> Result<()> {
     validate_generated_examples(repo_root, "go")?;
     for root in sample_roots(repo_root, "go") {
-        let output = run_output(&root, "gofmt", &["-l", "."])?;
-        if !output.is_empty() {
-            return Err(Error::RunCommand {
-                cwd: root,
-                command: format!("gofmt required for:\n{output}"),
-                source: io::Error::other("gofmt found unformatted files"),
-            });
-        }
-        run(&root, "go", &["test", "./..."])?;
+        validate_go_root(&root)?;
     }
     Ok(())
+}
+
+fn validate_go_root(root: &Path) -> Result<()> {
+    let output = run_output(root, "gofmt", &["-l", "."])?;
+    if !output.is_empty() {
+        return Err(Error::RunCommand {
+            cwd: root.to_path_buf(),
+            command: format!("gofmt required for:\n{output}"),
+            source: io::Error::other("gofmt found unformatted files"),
+        });
+    }
+    run(root, "go", &["test", "./..."])
 }
 
 fn validate_java(repo_root: &Path) -> Result<()> {

@@ -59,6 +59,8 @@ enum ValidationLanguage {
     Python,
     Typescript,
     Go,
+    GoRegular,
+    GoAdvanced,
     Java,
     Dotnet,
 }
@@ -112,6 +114,8 @@ impl From<ValidationLanguage> for validate::ValidationLanguage {
             ValidationLanguage::Python => Self::Python,
             ValidationLanguage::Typescript => Self::Typescript,
             ValidationLanguage::Go => Self::Go,
+            ValidationLanguage::GoRegular => Self::GoRegular,
+            ValidationLanguage::GoAdvanced => Self::GoAdvanced,
             ValidationLanguage::Java => Self::Java,
             ValidationLanguage::Dotnet => Self::Dotnet,
         }
