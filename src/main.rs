@@ -235,6 +235,16 @@ fn generate_request(
     java_package_name: Option<String>,
 ) -> GenerateRequest {
     GenerateRequest {
+        #[cfg(feature = "advanced")]
+        config: NexgenConfig {
+            mode: if args.generate_native_api {
+                nexgen::generator::GenerationMode::NativeApi
+            } else {
+                nexgen::generator::GenerationMode::DefinitionsOnly
+            },
+            ..Default::default()
+        },
+        #[cfg(not(feature = "advanced"))]
         config: Default::default(),
         language,
         input_paths: args.inputs,

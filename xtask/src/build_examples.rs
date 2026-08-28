@@ -446,6 +446,10 @@ fn build_json_example_variant(
         let output_path = json_example_output_path(repo_root, language, output_id, mode);
         reset_example_output_directory(&root, &output_path)?;
         generate_to_file(&GenerateRequest {
+            config: NexgenConfig {
+                mode,
+                ..Default::default()
+            },
             language,
             input_paths: vec![input_path.clone()],
             support_paths: Vec::new(),
