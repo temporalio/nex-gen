@@ -2,10 +2,10 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
-#[cfg(feature = "advanced")]
-use nexgen::generate_to_file_with_system_nexus;
 use nexgen::generator::TsDateTimeTypes;
 use nexgen::language::Language;
+#[cfg(feature = "advanced")]
+use nexgen::nexgen_config::{NexgenConfig, current, with_nexgen_config};
 #[cfg(feature = "advanced")]
 use nexgen::parser::write_prepared_wit_directory;
 #[cfg(feature = "advanced")]
@@ -172,10 +172,18 @@ fn main() -> ExitCode {
             #[cfg(feature = "advanced")]
             {
                 let system_nexus = args.system_nexus;
-                generate_to_file_with_system_nexus(
-                    &generate_request(Language::Python, args, Default::default(), None),
+                let config = NexgenConfig {
                     system_nexus,
-                )
+                    ..current()
+                };
+                with_nexgen_config(config, || {
+                    generate_to_file(&generate_request(
+                        Language::Python,
+                        args,
+                        Default::default(),
+                        None,
+                    ))
+                })
             }
             #[cfg(not(feature = "advanced"))]
             {

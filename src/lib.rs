@@ -6,6 +6,7 @@ pub mod error;
 pub mod generator;
 pub mod json_schema;
 pub mod language;
+pub mod nexgen_config;
 pub mod parser;
 pub mod spec;
 
@@ -48,17 +49,18 @@ pub struct GenerateRequest {
 }
 
 pub fn generate_to_file(request: &GenerateRequest) -> Result<()> {
-    generate_to_file_with_system_nexus(request, false)
+    let config = nexgen_config::NexgenConfig {
+        mode: if request.generate_native_api {
+            GenerationMode::NativeApi
+        } else {
+            GenerationMode::DefinitionsOnly
+        },
+        ..nexgen_config::current()
+    };
+    nexgen_config::with_nexgen_config(config, || generate_to_file_inner(request))
 }
 
-/// Generates bindings with optional Temporal System Nexus-specific output.
-///
-/// This is used by the advanced CLI surface; ordinary library generation keeps
-/// the option disabled.
-pub fn generate_to_file_with_system_nexus(
-    request: &GenerateRequest,
-    system_nexus: bool,
-) -> Result<()> {
+fn generate_to_file_inner(request: &GenerateRequest) -> Result<()> {
     // A resolved output path with no name at all (the filesystem root, or
     // `..` past it) is never a real output directory: Go and Java derive
     // package names from its basename, and for every language it means the
@@ -90,20 +92,8 @@ pub fn generate_to_file_with_system_nexus(
             None
         },
         ts_date_time_types: request.ts_date_time_types,
-        system_nexus,
     };
-    let generated = compile_tree_to_files(
-        request.language,
-        tree,
-        &descriptors,
-        &support,
-        if request.generate_native_api {
-            GenerationMode::NativeApi
-        } else {
-            GenerationMode::DefinitionsOnly
-        },
-        options,
-    )?;
+    let generated = compile_tree_to_files(request.language, tree, &descriptors, &support, options)?;
     print_warnings(&generated);
 
     write_generated_files(&request.output_path, &generated)?;
@@ -123,9 +113,9 @@ pub(crate) fn compile_tree_to_files(
     authored_tree: ApiSpecTree,
     descriptors: &DescriptorIndex,
     support: &SupportFiles,
-    mode: GenerationMode,
     options: GenerateFilesOptions,
 ) -> Result<GeneratedFiles> {
+    let mode = nexgen_config::current().mode;
     // parse (frontend) -> validate authored intent -> select target metadata
     let authored_tree =
         planning::AuthoredValidationPass::new(descriptors, language).apply(authored_tree)?;

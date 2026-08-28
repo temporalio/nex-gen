@@ -46,14 +46,13 @@ pub(crate) fn generate(
     tree: &crate::spec::ApiSpecTree<PlannedFamily>,
     support: &crate::SupportFiles,
     mode: GenerationMode,
-    system_nexus: bool,
 ) -> Result<GeneratedFiles> {
     match &tree.root {
         ApiSpecNode::Leaf(leaf) => {
             let support_fragments = support_fragments_for_plan(&leaf.spec, support);
-            generate_leaf(&leaf.spec, &support_fragments, mode, system_nexus)
+            generate_leaf(&leaf.spec, &support_fragments, mode)
         }
-        ApiSpecNode::Branch(branch) => generate_tree(branch, support, mode, system_nexus),
+        ApiSpecNode::Branch(branch) => generate_tree(branch, support, mode),
     }
 }
 
@@ -61,7 +60,6 @@ fn generate_leaf(
     api_plan: &PlannedSpec,
     support_fragments: &[SupportFragmentSpec],
     mode: GenerationMode,
-    system_nexus: bool,
 ) -> Result<GeneratedFiles> {
     reject_support_namespaces(Language::Python, support_fragments)?;
     let inline_model_rebuilds = api_plan
@@ -69,11 +67,8 @@ fn generate_leaf(
         .module_imports
         .values()
         .all(BTreeSet::is_empty);
-    let generated = ApiPlanner::new(api_plan, inline_model_rebuilds, None)?.build(
-        support_fragments,
-        mode,
-        system_nexus,
-    )?;
+    let generated =
+        ApiPlanner::new(api_plan, inline_model_rebuilds, None)?.build(support_fragments, mode)?;
     Ok(generated.generated_files)
 }
 
@@ -82,21 +77,15 @@ fn generate_leaf_with_model_hoists(
     support_fragments: &[SupportFragmentSpec],
     mode: GenerationMode,
     model_hoists: &PythonModelHoists,
-    system_nexus: bool,
 ) -> Result<PythonGenerationResult> {
     reject_support_namespaces(Language::Python, support_fragments)?;
-    ApiPlanner::new(api_plan, true, Some(model_hoists))?.build(
-        support_fragments,
-        mode,
-        system_nexus,
-    )
+    ApiPlanner::new(api_plan, true, Some(model_hoists))?.build(support_fragments, mode)
 }
 
 fn generate_tree(
     branch: &ApiSpecBranch<PlannedFamily>,
     support: &crate::SupportFiles,
     mode: GenerationMode,
-    system_nexus: bool,
 ) -> Result<GeneratedFiles> {
     let model_hoists = tree_model_hoists(branch)?;
     let mut files = BTreeMap::new();
@@ -113,7 +102,6 @@ fn generate_tree(
             support,
             mode,
             &model_hoists,
-            system_nexus,
             &mut files,
             &mut warnings,
             &mut root_package_imports,
@@ -139,7 +127,6 @@ fn generate_tree_node(
     support: &crate::SupportFiles,
     mode: GenerationMode,
     model_hoists: &PythonModelHoists,
-    system_nexus: bool,
     files: &mut BTreeMap<PathBuf, String>,
     warnings: &mut Vec<String>,
     root_package_imports: &mut RootPackageImports,
@@ -152,7 +139,6 @@ fn generate_tree_node(
                 &support_fragments,
                 mode,
                 model_hoists,
-                system_nexus,
             )?;
             extend_root_package_imports(root_package_imports, generated.root_package_imports);
             warnings.extend(generated.generated_files.warnings);
@@ -170,7 +156,6 @@ fn generate_tree_node(
                     support,
                     mode,
                     model_hoists,
-                    system_nexus,
                     files,
                     warnings,
                     root_package_imports,
@@ -525,7 +510,6 @@ impl<'a> ApiPlanner<'a> {
         mut self,
         support_fragments: &[SupportFragmentSpec],
         mode: GenerationMode,
-        system_nexus: bool,
     ) -> Result<PythonGenerationResult> {
         let api_plan = self.api_plan;
         let services = api_plan
@@ -580,13 +564,8 @@ impl<'a> ApiPlanner<'a> {
             self.render_model_fragments(model_refs.as_slice(), variant_refs.as_slice())?;
         validate_python_generated_names(self.api_plan, &model_fragments.generated_names)?;
 
-        let (generated_files, exported_names) = self.render_package(
-            &model_fragments,
-            &services,
-            support_fragments,
-            mode,
-            system_nexus,
-        )?;
+        let (generated_files, exported_names) =
+            self.render_package(&model_fragments, &services, support_fragments, mode)?;
         Ok(PythonGenerationResult {
             generated_files,
             root_package_imports: model_fragments.root_package_imports,
@@ -609,7 +588,6 @@ impl<'a> ApiPlanner<'a> {
         services: &[RenderedService<'_>],
         support_fragments: &[SupportFragmentSpec],
         mode: GenerationMode,
-        system_nexus: bool,
     ) -> Result<(GeneratedFiles, BTreeSet<String>)> {
         let mut files = BTreeMap::new();
         render_support_package(&mut files, support_fragments)?;
@@ -755,7 +733,7 @@ impl<'a> ApiPlanner<'a> {
                 render_operations_package_init(),
             )?;
         }
-        if system_nexus && mode == GenerationMode::NativeApi {
+        if crate::nexgen_config::current().system_nexus && mode == GenerationMode::NativeApi {
             insert_generated_file(
                 &mut files,
                 "_system_nexus_interceptor.py",
@@ -4697,7 +4675,7 @@ fn render_system_nexus_interceptor(services: &[RenderedService<'_>]) -> String {
 
     output.push_str("\n\nclass _SystemNexusWorkflowOutboundInterceptorBase(abc.ABC):\n");
     output.push_str("    @abc.abstractmethod\n    def _next_system_nexus_interceptor(\n        self,\n    ) -> _SystemNexusWorkflowOutboundInterceptorBase:\n        ...\n");
-    for (service, operation) in &operations {
+    for (_service, operation) in &operations {
         let output_type = system_nexus_type_expr(&operation.output_type_expr);
         output.push_str("\n    async def start_");
         output.push_str(&operation.attr_name);
@@ -4706,10 +4684,8 @@ fn render_system_nexus_interceptor(services: &[RenderedService<'_>]) -> String {
         output.push_str("\n    ) -> temporalio.workflow.NexusOperationHandle[");
         output.push_str(&output_type);
         output.push_str("]:\n");
-        output.push_str("        \"\"\"Intercept the System Nexus ");
-        output.push_str(service.wire_name);
-        output.push('/');
-        output.push_str(operation.wire_name);
+        output.push_str("        \"\"\"Intercept the ");
+        output.push_str(operation.name);
         output.push_str(" operation.\"\"\"\n");
         output.push_str("        return await self._next_system_nexus_interceptor().start_");
         output.push_str(&operation.attr_name);
@@ -7800,6 +7776,7 @@ mod tests {
         generate_files_for_tree_with_mode_and_options, generate_source,
     };
     use crate::language::Language;
+    use crate::nexgen_config::{NexgenConfig, current, with_nexgen_config};
     use crate::spec::ApiSpecTree;
     use crate::spec::{LanguageImportSpec, LanguageImportStyle};
 
@@ -8037,15 +8014,20 @@ class Example(enum.Enum):
         let descriptors =
             DescriptorIndex::load(&root.join("advanced/samples/descriptors/temporal_api.bin"))
                 .unwrap();
-        let generated = generate_files_for_tree_with_mode_and_options(
-            Language::Python,
-            ApiSpecTree::single(spec.clone()),
-            &descriptors,
-            &crate::SupportFiles::default(),
-            GenerationMode::NativeApi,
-            GenerateFilesOptions {
+        let generated = with_nexgen_config(
+            NexgenConfig {
                 system_nexus: true,
-                ..GenerateFilesOptions::default()
+                ..current()
+            },
+            || {
+                generate_files_for_tree_with_mode_and_options(
+                    Language::Python,
+                    ApiSpecTree::single(spec.clone()),
+                    &descriptors,
+                    &crate::SupportFiles::default(),
+                    GenerationMode::NativeApi,
+                    GenerateFilesOptions::default(),
+                )
             },
         )
         .unwrap();
