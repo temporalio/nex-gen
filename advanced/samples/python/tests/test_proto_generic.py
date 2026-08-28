@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import dataclasses
+import typing
 
 import temporalio.converter
 import temporalio.nexus.system
+from typing_extensions import assert_type
 
 from wit.proto_generic_python import (
     PayloadBackedContext,
@@ -27,6 +29,7 @@ def test_proto_backed_generic_type_hints_are_preserved() -> None:
         provider=PayloadBackedOutput(details=EchoOutput(value="hello")),
         scaler=PayloadBackedContext(details=MyCtx(neat="very")),
     )
+    _ = assert_type(model, PayloadBackedEnvelope[EchoOutput, MyCtx])
     converter = temporalio.nexus.system._SystemNexusPayloadConverter(
         temporalio.converter.PayloadConverter.default,
         temporalio.converter.FailureConverter.default,
@@ -56,6 +59,9 @@ def test_unparameterized_proto_backed_generic_decodes_payload_values() -> None:
     )
 
     payload = converter.to_payload(model)
-    decoded = converter.from_payload(payload, PayloadBackedEnvelope)
+    decoded = typing.cast(
+        PayloadBackedEnvelope[typing.Any, typing.Any],
+        converter.from_payload(payload, PayloadBackedEnvelope),
+    )
 
     assert decoded == model

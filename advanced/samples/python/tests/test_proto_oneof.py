@@ -34,7 +34,7 @@ def test_proto_oneof_success_round_trip(monkeypatch: pytest.MonkeyPatch) -> None
         "_current_user_payload_converter",
         lambda: PayloadConverter.default,
     )
-    converter = _OutcomeTransferTypeConverter()
+    converter = _OutcomeTransferTypeConverter[SuccessfulOutput]()
     model: Outcome[SuccessfulOutput] = Outcome(
         value=OutcomeValueSuccess(SuccessfulOutput(message="hello"))
     )
@@ -72,7 +72,7 @@ def test_proto_oneof_success_payload_converter_round_trip(
 
 
 def test_required_proto_oneof_failure_round_trip() -> None:
-    converter = _OutcomeTransferTypeConverter()
+    converter = _OutcomeTransferTypeConverter[SuccessfulOutput]()
 
     wire = converter.to_transfer_type(
         Outcome(value=OutcomeValueFailure(RuntimeError("boom")))
@@ -104,7 +104,7 @@ def test_proto_oneof_failure_payload_converter_round_trip(
 
 
 def test_required_proto_oneof_rejects_unset_wire_and_runtime_none() -> None:
-    converter = _OutcomeTransferTypeConverter()
+    converter = _OutcomeTransferTypeConverter[typing.Any]()
 
     with pytest.raises(ValueError, match="missing required field Outcome.value"):
         _ = converter.from_transfer_type(ProtoOutcome(), Outcome)
@@ -136,7 +136,7 @@ def test_optional_proto_oneof_round_trips_unset_as_none() -> None:
 
 
 def test_proto_oneof_rejects_unsupported_public_value() -> None:
-    converter = _OutcomeTransferTypeConverter()
+    converter = _OutcomeTransferTypeConverter[typing.Any]()
     invalid_value = typing.cast(typing.Any, object())
 
     with pytest.raises(TypeError, match="unsupported variant case Outcome.value"):

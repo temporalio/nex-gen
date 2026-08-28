@@ -217,6 +217,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Python proto-backed models now consistently register their Temporal transfer
+  type converters after the model and converter definitions. Generic models
+  preserve static type information without casting class decorators to `Any`.
 - JSON Schema: Go and Java now enforce constraints from nullable schemas, and
   Java supports nested nullable array elements. Recursive `allOf` merges no
   longer discard `$ref` or `oneOf` children.

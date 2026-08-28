@@ -2148,13 +2148,13 @@ fn render_record_models(
             .unwrap_or_else(|| panic!("planned model should exist for {}", model.full_name));
         let wire_block =
             external_models.render_record_wire_block(api_plan, model, planned_model)?;
+        render_record_model(&mut body, model, wire_block.as_ref());
         if let Some(wire_block) = &wire_block {
-            for line in &wire_block.pre_class_lines {
+            for line in &wire_block.post_class_lines {
                 body.push_str(line);
                 body.push('\n');
             }
         }
-        render_record_model(&mut body, model, wire_block.as_ref());
         if let Some(wire_block) = wire_block {
             wire_blocks.insert(model.full_name.clone(), wire_block);
         }
@@ -2194,16 +2194,8 @@ fn render_record_model(
     wire_block: Option<&RenderedRecordWireBlock>,
 ) {
     if model_needs_keyword_only_dataclass(model) {
-        if let Some(decorator) = wire_block.and_then(|block| block.decorator.as_deref()) {
-            output.push_str(decorator);
-            output.push('\n');
-        }
         output.push_str("@dataclasses.dataclass(slots=True, kw_only=True)\n");
     } else {
-        if let Some(decorator) = wire_block.and_then(|block| block.decorator.as_deref()) {
-            output.push_str(decorator);
-            output.push('\n');
-        }
         output.push_str("@dataclasses.dataclass(slots=True)\n");
     }
     output.push_str("class ");
@@ -2676,9 +2668,8 @@ pub(in crate::generator) struct RenderedField {
 #[derive(Debug, Default)]
 pub(in crate::generator) struct RenderedRecordWireBlock {
     pub(in crate::generator) imports: PythonImports,
-    pub(in crate::generator) pre_class_lines: Vec<String>,
-    pub(in crate::generator) decorator: Option<String>,
     pub(in crate::generator) class_body_lines: Vec<String>,
+    pub(in crate::generator) post_class_lines: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -24,9 +24,17 @@ from ._support import (
 )
 
 
+@dataclasses.dataclass(slots=True, kw_only=True)
+class ActivityOptions:
+    task_queue: str | None = None
+    retry_policy: temporalio.common.RetryPolicy
+    schedule_to_close_timeout: datetime.timedelta | None = None
+    priority: temporalio.common.Priority | None = None
+
+
 class _ActivityOptionsTransferTypeConverter(
     temporalio.converter.TransferTypeConverter[
-        "ActivityOptions", temporalio.api.activity.v1.message_pb2.ActivityOptions
+        ActivityOptions, temporalio.api.activity.v1.message_pb2.ActivityOptions
     ]
 ):
     transfer_type: (
@@ -37,8 +45,8 @@ class _ActivityOptionsTransferTypeConverter(
     def from_transfer_type(
         self,
         value: temporalio.api.activity.v1.message_pb2.ActivityOptions,
-        type_hint: type["ActivityOptions"],
-    ) -> "ActivityOptions":
+        type_hint: type[ActivityOptions],
+    ) -> ActivityOptions:
         if not value.HasField("retry_policy"):
             raise ValueError("missing required field ActivityOptions.retry_policy")
         retry_policy = retry_policy_from_proto(value.retry_policy)
@@ -60,7 +68,7 @@ class _ActivityOptionsTransferTypeConverter(
     @typing_extensions.override
     def to_transfer_type(
         self,
-        value: "ActivityOptions",
+        value: ActivityOptions,
     ) -> temporalio.api.activity.v1.message_pb2.ActivityOptions:
         message = temporalio.api.activity.v1.message_pb2.ActivityOptions()
         if value.task_queue is not None:
@@ -75,18 +83,19 @@ class _ActivityOptionsTransferTypeConverter(
         return message
 
 
-@temporalio.converter.transfer_type_convertible(_ActivityOptionsTransferTypeConverter)
-@dataclasses.dataclass(slots=True, kw_only=True)
-class ActivityOptions:
-    task_queue: str | None = None
-    retry_policy: temporalio.common.RetryPolicy
-    schedule_to_close_timeout: datetime.timedelta | None = None
-    priority: temporalio.common.Priority | None = None
+_ = temporalio.converter.transfer_type_convertible(
+    _ActivityOptionsTransferTypeConverter
+)(ActivityOptions)
+
+
+@dataclasses.dataclass(slots=True)
+class FailureContainer:
+    failure: BaseException | None = None
 
 
 class _FailureContainerTransferTypeConverter(
     temporalio.converter.TransferTypeConverter[
-        "FailureContainer",
+        FailureContainer,
         temporalio.api.command.v1.message_pb2.FailWorkflowExecutionCommandAttributes,
     ]
 ):
@@ -101,8 +110,8 @@ class _FailureContainerTransferTypeConverter(
     def from_transfer_type(
         self,
         value: temporalio.api.command.v1.message_pb2.FailWorkflowExecutionCommandAttributes,
-        type_hint: type["FailureContainer"],
-    ) -> "FailureContainer":
+        type_hint: type[FailureContainer],
+    ) -> FailureContainer:
         return FailureContainer(
             failure=failure_from_proto(value.failure)
             if value.HasField("failure")
@@ -112,7 +121,7 @@ class _FailureContainerTransferTypeConverter(
     @typing_extensions.override
     def to_transfer_type(
         self,
-        value: "FailureContainer",
+        value: FailureContainer,
     ) -> temporalio.api.command.v1.message_pb2.FailWorkflowExecutionCommandAttributes:
         message = temporalio.api.command.v1.message_pb2.FailWorkflowExecutionCommandAttributes()
         if value.failure is not None:
@@ -120,7 +129,6 @@ class _FailureContainerTransferTypeConverter(
         return message
 
 
-@temporalio.converter.transfer_type_convertible(_FailureContainerTransferTypeConverter)
-@dataclasses.dataclass(slots=True)
-class FailureContainer:
-    failure: BaseException | None = None
+_ = temporalio.converter.transfer_type_convertible(
+    _FailureContainerTransferTypeConverter
+)(FailureContainer)

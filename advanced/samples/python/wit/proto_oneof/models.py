@@ -21,9 +21,14 @@ from ._support import (
 OutputT = typing.TypeVar("OutputT")
 
 
+@dataclasses.dataclass(slots=True)
+class Outcome(typing.Generic[OutputT]):
+    value: OutcomeValue[OutputT]
+
+
 class _OutcomeTransferTypeConverter(
     temporalio.converter.TransferTypeConverter[
-        "Outcome[typing.Any]", temporalio.api.update.v1.message_pb2.Outcome
+        Outcome[OutputT], temporalio.api.update.v1.message_pb2.Outcome
     ]
 ):
     transfer_type: type[temporalio.api.update.v1.message_pb2.Outcome] | None = (
@@ -34,15 +39,17 @@ class _OutcomeTransferTypeConverter(
     def from_transfer_type(
         self,
         value: temporalio.api.update.v1.message_pb2.Outcome,
-        type_hint: type["Outcome[typing.Any]"],
-    ) -> "Outcome[typing.Any]":
+        type_hint: type[Outcome[OutputT]],
+    ) -> Outcome[OutputT]:
         (output_type,) = typing.get_args(type_hint) or (typing.Any,)
         _oneof_value_case = value.WhichOneof("value")
         if _oneof_value_case is None:
             raise ValueError("missing required field Outcome.value")
         elif _oneof_value_case == "success":
             _oneof_value = OutcomeValueSuccess(
-                payloads_from_proto(value.success, [output_type])[0]
+                typing.cast(
+                    OutputT, payloads_from_proto(value.success, [output_type])[0]
+                )
             )
         elif _oneof_value_case == "failure":
             _oneof_value = OutcomeValueFailure(failure_from_proto(value.failure))
@@ -57,7 +64,7 @@ class _OutcomeTransferTypeConverter(
     @typing_extensions.override
     def to_transfer_type(
         self,
-        value: "Outcome[typing.Any]",
+        value: Outcome[OutputT],
     ) -> temporalio.api.update.v1.message_pb2.Outcome:
         runtime_value: typing.Any = value
         message = temporalio.api.update.v1.message_pb2.Outcome()
@@ -75,18 +82,24 @@ class _OutcomeTransferTypeConverter(
         return message
 
 
-@typing.cast(
-    typing.Any,
-    temporalio.converter.transfer_type_convertible(_OutcomeTransferTypeConverter),
-)
-@dataclasses.dataclass(slots=True)
-class Outcome(typing.Generic[OutputT]):
-    value: OutcomeValue[OutputT]
+_ = temporalio.converter.transfer_type_convertible(
+    _OutcomeTransferTypeConverter[typing.Any]
+)(Outcome)
+
+
+@dataclasses.dataclass(slots=True, kw_only=True)
+class PauseActivityRequest:
+    namespace: str
+    execution: WorkflowExecution | None = None
+    identity: str
+    activity: ActivitySelection | None = None
+    reason: str
+    request_id: str
 
 
 class _PauseActivityRequestTransferTypeConverter(
     temporalio.converter.TransferTypeConverter[
-        "PauseActivityRequest",
+        PauseActivityRequest,
         temporalio.api.workflowservice.v1.request_response_pb2.PauseActivityRequest,
     ]
 ):
@@ -101,8 +114,8 @@ class _PauseActivityRequestTransferTypeConverter(
     def from_transfer_type(
         self,
         value: temporalio.api.workflowservice.v1.request_response_pb2.PauseActivityRequest,
-        type_hint: type["PauseActivityRequest"],
-    ) -> "PauseActivityRequest":
+        type_hint: type[PauseActivityRequest],
+    ) -> PauseActivityRequest:
         if not value.namespace:
             raise ValueError("missing required field PauseActivityRequest.namespace")
         namespace = value.namespace
@@ -142,7 +155,7 @@ class _PauseActivityRequestTransferTypeConverter(
     @typing_extensions.override
     def to_transfer_type(
         self,
-        value: "PauseActivityRequest",
+        value: PauseActivityRequest,
     ) -> temporalio.api.workflowservice.v1.request_response_pb2.PauseActivityRequest:
         message = temporalio.api.workflowservice.v1.request_response_pb2.PauseActivityRequest()
         message.namespace = value.namespace
@@ -168,22 +181,20 @@ class _PauseActivityRequestTransferTypeConverter(
         return message
 
 
-@temporalio.converter.transfer_type_convertible(
+_ = temporalio.converter.transfer_type_convertible(
     _PauseActivityRequestTransferTypeConverter
-)
-@dataclasses.dataclass(slots=True, kw_only=True)
-class PauseActivityRequest:
-    namespace: str
-    execution: WorkflowExecution | None = None
-    identity: str
-    activity: ActivitySelection | None = None
-    reason: str
-    request_id: str
+)(PauseActivityRequest)
+
+
+@dataclasses.dataclass(slots=True)
+class WorkflowExecution:
+    workflow_id: str
+    run_id: str
 
 
 class _WorkflowExecutionTransferTypeConverter(
     temporalio.converter.TransferTypeConverter[
-        "WorkflowExecution", temporalio.api.common.v1.message_pb2.WorkflowExecution
+        WorkflowExecution, temporalio.api.common.v1.message_pb2.WorkflowExecution
     ]
 ):
     transfer_type: (
@@ -194,8 +205,8 @@ class _WorkflowExecutionTransferTypeConverter(
     def from_transfer_type(
         self,
         value: temporalio.api.common.v1.message_pb2.WorkflowExecution,
-        type_hint: type["WorkflowExecution"],
-    ) -> "WorkflowExecution":
+        type_hint: type[WorkflowExecution],
+    ) -> WorkflowExecution:
         if not value.workflow_id:
             raise ValueError("missing required field WorkflowExecution.workflow_id")
         workflow_id = value.workflow_id
@@ -210,7 +221,7 @@ class _WorkflowExecutionTransferTypeConverter(
     @typing_extensions.override
     def to_transfer_type(
         self,
-        value: "WorkflowExecution",
+        value: WorkflowExecution,
     ) -> temporalio.api.common.v1.message_pb2.WorkflowExecution:
         message = temporalio.api.common.v1.message_pb2.WorkflowExecution()
         message.workflow_id = value.workflow_id
@@ -218,11 +229,9 @@ class _WorkflowExecutionTransferTypeConverter(
         return message
 
 
-@temporalio.converter.transfer_type_convertible(_WorkflowExecutionTransferTypeConverter)
-@dataclasses.dataclass(slots=True)
-class WorkflowExecution:
-    workflow_id: str
-    run_id: str
+_ = temporalio.converter.transfer_type_convertible(
+    _WorkflowExecutionTransferTypeConverter
+)(WorkflowExecution)
 
 
 @dataclasses.dataclass(slots=True)

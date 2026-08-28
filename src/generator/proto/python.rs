@@ -682,7 +682,7 @@ fn generic_carrier_from_proto_expr(
     proto_expr: &str,
     type_arguments: &[(String, String)],
 ) -> String {
-    match carrier {
+    let converted = match carrier {
         ProtoGenericCarrier::Payload => format!(
             "payload_from_proto({proto_expr}, {})",
             concrete_type_hint(&resolved_type.annotation, type_arguments)
@@ -691,7 +691,8 @@ fn generic_carrier_from_proto_expr(
             "payloads_from_proto({proto_expr}, [{}])[0]",
             concrete_type_hint(&resolved_type.annotation, type_arguments)
         ),
-    }
+    };
+    format!("typing.cast({}, {converted})", resolved_type.annotation)
 }
 
 fn concrete_type_hint(annotation: &str, type_arguments: &[(String, String)]) -> String {
@@ -851,14 +852,7 @@ fn repeated_from_proto_expr(
     match resolved_type.kind {
         ResolvedFieldKind::Message => format!(
             "[{} for item in value.{proto_name}]",
-            resolved_type
-                .wire_conversion
-                .as_ref()
-                .expect("message conversion should be present")
-                .from_wire_expr_with_type_hint(
-                    "item",
-                    &concrete_type_hint(&resolved_type.annotation, type_arguments),
-                )
+            message_from_proto_expr(resolved_type, "item", type_arguments)
         ),
         ResolvedFieldKind::Enum => format!(
             "[{} for item in value.{proto_name}]",
@@ -876,14 +870,7 @@ fn map_value_from_proto_expr(
     match map_value_type.kind {
         ResolvedFieldKind::Message => format!(
             "{{key: {} for key, item in value.{proto_name}.items()}}",
-            map_value_type
-                .wire_conversion
-                .as_ref()
-                .expect("message conversion should be present")
-                .from_wire_expr_with_type_hint(
-                    "item",
-                    &concrete_type_hint(&map_value_type.annotation, type_arguments),
-                )
+            message_from_proto_expr(map_value_type, "item", type_arguments)
         ),
         ResolvedFieldKind::Enum => format!(
             "{{key: {} for key, item in value.{proto_name}.items()}}",
@@ -899,16 +886,37 @@ fn from_proto_value_expr(
     type_arguments: &[(String, String)],
 ) -> String {
     match resolved_type.kind {
-        ResolvedFieldKind::Message => resolved_type
-            .wire_conversion
-            .as_ref()
-            .expect("message conversion should be present")
-            .from_wire_expr_with_type_hint(
-                proto_expr,
-                &concrete_type_hint(&resolved_type.annotation, type_arguments),
-            ),
+        ResolvedFieldKind::Message => {
+            message_from_proto_expr(resolved_type, proto_expr, type_arguments)
+        }
         ResolvedFieldKind::Enum => enum_from_proto_expr(resolved_type, proto_expr),
         _ => proto_expr.to_string(),
+    }
+}
+
+fn message_from_proto_expr(
+    resolved_type: &ResolvedFieldType,
+    proto_expr: &str,
+    type_arguments: &[(String, String)],
+) -> String {
+    let converted = resolved_type
+        .wire_conversion
+        .as_ref()
+        .expect("message conversion should be present")
+        .from_wire_expr_with_type_hint(
+            proto_expr,
+            &concrete_type_hint(&resolved_type.annotation, type_arguments),
+        );
+    let uses_type_parameter = type_arguments.iter().any(|(parameter, _)| {
+        resolved_type
+            .annotation
+            .split(|character: char| !(character.is_ascii_alphanumeric() || character == '_'))
+            .any(|identifier| identifier == parameter)
+    });
+    if uses_type_parameter {
+        format!("typing.cast({}, {converted})", resolved_type.annotation)
+    } else {
+        converted
     }
 }
 
@@ -1082,19 +1090,13 @@ fn render_record_wire_block(
         .collect::<Result<Vec<_>>>()?;
     let type_arguments = runtime_type_arguments(model);
     let converter_model_annotation = if model.type_parameters.is_empty() {
-        format!("\"{}\"", model.name)
+        model.name.clone()
     } else {
-        format!(
-            "\"{}[{}]\"",
-            model.name,
-            std::iter::repeat_n("typing.Any", model.type_parameters.len())
-                .collect::<Vec<_>>()
-                .join(", ")
-        )
+        format!("{}[{}]", model.name, model.type_parameters.join(", "))
     };
     let mut output = String::new();
     let converter_name = format!("_{}TransferTypeConverter", model.name);
-    let mut pre_class_lines = vec![
+    let mut converter_lines = vec![
         format!(
             "class {converter_name}(temporalio.converter.TransferTypeConverter[{}, {}]):",
             converter_model_annotation, proto_ref.type_ref
@@ -1315,20 +1317,30 @@ fn render_record_wire_block(
             }
         }
     }
+    converter_lines.extend(output.lines().map(str::to_string));
+    let converter_registration_type = if model.type_parameters.is_empty() {
+        converter_name.clone()
+    } else {
+        format!(
+            "{converter_name}[{}]",
+            std::iter::repeat_n("typing.Any", model.type_parameters.len())
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    };
+    let mut post_class_lines = vec![String::new()];
+    post_class_lines.extend(converter_lines);
+    post_class_lines.extend([
+        String::new(),
+        format!(
+            "_ = temporalio.converter.transfer_type_convertible({converter_registration_type})({})",
+            model.name
+        ),
+    ]);
     Ok(Some(RenderedRecordWireBlock {
         imports,
-        pre_class_lines: {
-            pre_class_lines.extend(output.lines().map(str::to_string));
-            pre_class_lines
-        },
-        decorator: Some(if model.type_parameters.is_empty() {
-            format!("@temporalio.converter.transfer_type_convertible({converter_name})")
-        } else {
-            format!(
-                "@typing.cast(typing.Any, temporalio.converter.transfer_type_convertible({converter_name}))"
-            )
-        }),
         class_body_lines: Vec::new(),
+        post_class_lines,
     }))
 }
 
