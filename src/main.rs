@@ -168,33 +168,12 @@ fn main() -> ExitCode {
             Default::default(),
             Some(args.package_name),
         )),
-        Commands::Python(args) => {
-            #[cfg(feature = "advanced")]
-            {
-                let system_nexus = args.system_nexus;
-                let config = NexgenConfig {
-                    mode: if args.generate_native_api {
-                        nexgen::generator::GenerationMode::NativeApi
-                    } else {
-                        nexgen::generator::GenerationMode::DefinitionsOnly
-                    },
-                    system_nexus,
-                };
-                let mut request =
-                    generate_request(Language::Python, args, Default::default(), None);
-                request.config = config;
-                generate_to_file(&request)
-            }
-            #[cfg(not(feature = "advanced"))]
-            {
-                generate_to_file(&generate_request(
-                    Language::Python,
-                    args,
-                    Default::default(),
-                    None,
-                ))
-            }
-        }
+        Commands::Python(args) => generate_to_file(&generate_request(
+            Language::Python,
+            args,
+            Default::default(),
+            None,
+        )),
         Commands::Typescript(args) => generate_to_file(&generate_request(
             Language::TypeScript,
             args.common,
@@ -242,7 +221,7 @@ fn generate_request(
             } else {
                 nexgen::generator::GenerationMode::DefinitionsOnly
             },
-            ..Default::default()
+            system_nexus: args.system_nexus,
         },
         #[cfg(not(feature = "advanced"))]
         config: Default::default(),

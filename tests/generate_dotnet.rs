@@ -177,6 +177,9 @@ fn generate_dotnet_output(root: &Path, example_id: &str, output_path: &Path) {
             output_path.to_str().unwrap(),
             "--native-api",
         ]);
+    if example_id == WORKFLOW_SERVICE_EXAMPLE_ID {
+        command.arg("--system-nexus");
+    }
     let status = command.status().unwrap();
     assert!(status.success());
 }
@@ -209,6 +212,78 @@ fn dotnet_examples_generation_matches_checked_in_output() {
         assert_eq!(rendered, expected, "snapshot mismatch for {example_id}");
         fs::remove_dir_all(output_path).unwrap();
     }
+}
+
+#[test]
+fn dotnet_system_nexus_generation_emits_typed_outbound_interceptor() {
+    let root = project_root();
+    let output_path = unique_output_path("dotnet-system-nexus-interceptor");
+    generate_dotnet_output(&root, WORKFLOW_SERVICE_EXAMPLE_ID, &output_path);
+    let interceptor =
+        fs::read_to_string(output_path.join("SystemNexusWorkflowOutboundInterceptor.cs")).unwrap();
+
+    assert!(interceptor.contains("namespace Temporalio.Worker.Interceptors"));
+    assert!(interceptor.contains("public partial class WorkflowOutboundInterceptor"));
+    assert!(interceptor.contains(
+        "Task<NexusWorkflowOperationHandle<SignalWithStartWorkflowResponse>> SignalWithStartWorkflowAsync(SignalWithStartWorkflowRequest request)"
+    ));
+    assert!(interceptor.contains("Next.SignalWithStartWorkflowAsync(request)"));
+
+    let project_path = unique_output_path("dotnet-system-nexus-interceptor-build");
+    fs::create_dir_all(&project_path).unwrap();
+    fs::write(project_path.join("Generated.cs"), interceptor).unwrap();
+    fs::write(
+        project_path.join("SdkStubs.cs"),
+        r#"
+using System.Threading.Tasks;
+
+namespace Temporalio.Workflows
+{
+    public sealed class SignalWithStartWorkflowRequest { }
+    public sealed class SignalWithStartWorkflowResponse { }
+    public class NexusWorkflowOperationHandle<TResult> { }
+}
+
+namespace Temporalio.Worker.Interceptors
+{
+    public partial class WorkflowOutboundInterceptor
+    {
+        protected WorkflowOutboundInterceptor Next { get; }
+
+        protected WorkflowOutboundInterceptor(WorkflowOutboundInterceptor next) => Next = next;
+    }
+
+    public sealed class TestInterceptor : WorkflowOutboundInterceptor
+    {
+        public TestInterceptor(WorkflowOutboundInterceptor next) : base(next) { }
+
+        public override Task<Temporalio.Workflows.NexusWorkflowOperationHandle<Temporalio.Workflows.SignalWithStartWorkflowResponse>> SignalWithStartWorkflowAsync(
+            Temporalio.Workflows.SignalWithStartWorkflowRequest request) =>
+            base.SignalWithStartWorkflowAsync(request);
+    }
+}
+"#,
+    )
+    .unwrap();
+    fs::write(
+        project_path.join("GeneratedInterceptor.csproj"),
+        "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net8.0</TargetFramework><LangVersion>9.0</LangVersion></PropertyGroup></Project>",
+    )
+    .unwrap();
+    let (_dotnet_guard, mut command) = dotnet_command();
+    let output = command
+        .current_dir(&project_path)
+        .args(["build", "--nologo"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    fs::remove_dir_all(output_path).unwrap();
+    fs::remove_dir_all(project_path).unwrap();
 }
 
 #[test]
@@ -357,6 +432,7 @@ fn dotnet_renders_proto_backed_temporal_types() {
         &example_input_paths(&root, WORKFLOW_SERVICE_EXAMPLE_ID),
         &[descriptor_path(&root)],
     );
+    assert!(!files.contains_key(&PathBuf::from("SystemNexusWorkflowOutboundInterceptor.cs")));
     let services = files.get(&PathBuf::from("Services.cs")).unwrap().clone();
     let operations = files.get(&PathBuf::from("Operations.cs")).unwrap().clone();
     let rendered = render_output_files(files);

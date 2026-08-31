@@ -2299,6 +2299,12 @@ fn generate_leaf(
             generator.render_operations_file(&namespace),
         );
     }
+    if mode == GenerationMode::NativeApi && crate::nexgen_config::current().system_nexus {
+        files.insert(
+            "SystemNexusWorkflowOutboundInterceptor.cs".into(),
+            generator.render_system_nexus_workflow_outbound_interceptor_file(),
+        );
+    }
     if api_plan
         .services
         .iter()
@@ -2316,6 +2322,56 @@ fn generate_leaf(
         );
     }
     Ok(GeneratedFiles::directory(files))
+}
+
+impl<'a> ApiPlanner<'a> {
+    fn render_system_nexus_workflow_outbound_interceptor_file(&self) -> String {
+        let mut output = generated_file_prelude(
+            "Temporalio.Worker.Interceptors",
+            &[
+                "System.CodeDom.Compiler",
+                "System.Threading.Tasks",
+                "Temporalio.Workflows",
+            ],
+        );
+        output.push_str(GENERATED_CODE_ATTRIBUTE);
+        output.push('\n');
+        output.push_str("public partial class WorkflowOutboundInterceptor\n{\n");
+        for service in &self.api_plan.services {
+            for operation in &service.operations {
+                let request_type = if self.operation_has_input(operation) {
+                    self.dotnet_erased_model_type(operation.input_model())
+                } else {
+                    "object".to_string()
+                };
+                let response_type = self.operation_registry_response_type(operation);
+                output.push_str("    /// <summary>\n");
+                output.push_str("    /// Intercept the ");
+                output.push_str(&operation.name);
+                output.push_str(" operation.\n");
+                output.push_str("    /// </summary>\n");
+                output.push_str(
+                    "    /// <param name=\"request\">Request for the operation.</param>\n",
+                );
+                output.push_str("    /// <returns>Operation handle.</returns>\n");
+                output.push_str("    ");
+                output.push_str(GENERATED_CODE_ATTRIBUTE);
+                output.push('\n');
+                output.push_str("    public virtual Task<NexusWorkflowOperationHandle<");
+                output.push_str(&response_type);
+                output.push_str(">> ");
+                output.push_str(&csharp_type_name(&operation.name));
+                output.push_str("Async(");
+                output.push_str(&request_type);
+                output.push_str(" request) => Next.");
+                output.push_str(&csharp_type_name(&operation.name));
+                output.push_str("Async(request);\n\n");
+            }
+        }
+        output.push_str("}\n");
+        close_namespace(&mut output);
+        output
+    }
 }
 
 fn generate_tree(

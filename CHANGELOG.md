@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- .NET System Nexus bindings now generate operation-specific workflow outbound
+  interceptor points when invoked with `--system-nexus --native-api`.
+
 ### Changed
 
 ### Deprecated
