@@ -1785,7 +1785,7 @@ fn go_rejects_single_input_output_named_definitions_with_a_remedy() {
         descriptor_paths: Vec::new(),
         output_path: temp_dir.join(output_name),
         format: false,
-        generate_native_api: false,
+        config: Default::default(),
         java_package_name: None,
         ts_date_time_types: Default::default(),
     };
@@ -3059,7 +3059,7 @@ fn go_json_bare_ref_root_is_a_runtime_alias_for_operation_io() {
         descriptor_paths: Vec::new(),
         output_path: output_path.clone(),
         format: false,
-        generate_native_api: false,
+        config: Default::default(),
         java_package_name: None,
         ts_date_time_types: Default::default(),
     })
@@ -3917,7 +3917,7 @@ properties:
         descriptor_paths: Vec::new(),
         output_path: output_path.clone(),
         format: false,
-        generate_native_api: false,
+        config: Default::default(),
         java_package_name: None,
         ts_date_time_types: Default::default(),
     })
@@ -3979,7 +3979,7 @@ properties:
         descriptor_paths: Vec::new(),
         output_path: output_path.clone(),
         format: false,
-        generate_native_api: false,
+        config: Default::default(),
         java_package_name: None,
         ts_date_time_types: Default::default(),
     })
@@ -4064,7 +4064,7 @@ fn go_json_semantic_helper_names_participate_in_p15() {
             descriptor_paths: Vec::new(),
             output_path: temp_dir.join(format!("out-{case}")),
             format: false,
-            generate_native_api: false,
+            config: Default::default(),
             java_package_name: None,
             ts_date_time_types: Default::default(),
         })

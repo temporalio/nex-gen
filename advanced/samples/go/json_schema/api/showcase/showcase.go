@@ -451,20 +451,20 @@ func unmarshalShowcaseDetail(raw json.RawMessage, path string, errs *[]Violation
 	return nil, false
 }
 
-// ShowcaseIdOrName is one of: string, integer.
-type ShowcaseIdOrName interface {
-	isShowcaseIdOrName()
+// ShowcaseIDOrName is one of: string, integer.
+type ShowcaseIDOrName interface {
+	isShowcaseIDOrName()
 	Validate() error
 }
 
-// ShowcaseIdOrNameString wraps a string value admissible in the ShowcaseIdOrName union.
-type ShowcaseIdOrNameString string
+// ShowcaseIDOrNameString wraps a string value admissible in the ShowcaseIDOrName union.
+type ShowcaseIDOrNameString string
 
-func (ShowcaseIdOrNameString) isShowcaseIdOrName() {}
+func (ShowcaseIDOrNameString) isShowcaseIDOrName() {}
 
 // Validate checks v against every constraint and returns a PayloadValidationError
 // listing any violations.
-func (v ShowcaseIdOrNameString) Validate() error {
+func (v ShowcaseIDOrNameString) Validate() error {
 	var errs []Violation
 	if n := utf8.RuneCountInString(string(v)); n < 3 {
 		errs = append(errs, Violation{"", fmt.Sprintf("must have length >= 3, got %d", n)})
@@ -475,14 +475,14 @@ func (v ShowcaseIdOrNameString) Validate() error {
 	return nil
 }
 
-// ShowcaseIdOrNameInteger wraps a int64 value admissible in the ShowcaseIdOrName union.
-type ShowcaseIdOrNameInteger int64
+// ShowcaseIDOrNameInteger wraps a int64 value admissible in the ShowcaseIDOrName union.
+type ShowcaseIDOrNameInteger int64
 
-func (ShowcaseIdOrNameInteger) isShowcaseIdOrName() {}
+func (ShowcaseIDOrNameInteger) isShowcaseIDOrName() {}
 
 // Validate checks v against every constraint and returns a PayloadValidationError
 // listing any violations.
-func (v ShowcaseIdOrNameInteger) Validate() error {
+func (v ShowcaseIDOrNameInteger) Validate() error {
 	var errs []Violation
 	if int64(v) < -integerCap || int64(v) > integerCap {
 		errs = append(errs, Violation{"", "exceeds ±(2^53-1) integer cap"})
@@ -496,7 +496,7 @@ func (v ShowcaseIdOrNameInteger) Validate() error {
 	return nil
 }
 
-func unmarshalShowcaseIdOrName(raw json.RawMessage, path string, errs *[]Violation) (ShowcaseIdOrName, bool) {
+func unmarshalShowcaseIDOrName(raw json.RawMessage, path string, errs *[]Violation) (ShowcaseIDOrName, bool) {
 	trimmed := bytes.TrimSpace(raw)
 	if len(trimmed) == 0 {
 		*errs = append(*errs, Violation{path, "expected one of: string, integer"})
@@ -509,7 +509,7 @@ func unmarshalShowcaseIdOrName(raw json.RawMessage, path string, errs *[]Violati
 			*errs = append(*errs, Violation{path, "expected string"})
 			return nil, false
 		}
-		v := ShowcaseIdOrNameString(s)
+		v := ShowcaseIDOrNameString(s)
 		mergeNested(errs, path, v.Validate())
 		return v, true
 	case '-', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9':
@@ -525,7 +525,7 @@ func unmarshalShowcaseIdOrName(raw json.RawMessage, path string, errs *[]Violati
 			*errs = append(*errs, Violation{path, err.Error()})
 			return nil, false
 		}
-		v := ShowcaseIdOrNameInteger(iv)
+		v := ShowcaseIDOrNameInteger(iv)
 		mergeNested(errs, path, v.Validate())
 		return v, true
 	}
@@ -2376,10 +2376,10 @@ type Showcase struct {
 	// rewrite (Python `\Z` / Java `\z`), so a Unicode space (NBSP) and a trailing newline
 	// are rejected consistently across all four languages.
 	Phrase *string `json:"phrase,omitempty"`
-	// RequestId Optional request identifier; asserted RFC 4122 UUID via `format: uuid`.
+	// RequestID Optional request identifier; asserted RFC 4122 UUID via `format: uuid`.
 	// Stays `string`-typed (format assertion, no materialization); the pinned regex is
 	// validated identically across all four languages.
-	RequestId *string `json:"requestId,omitempty"`
+	RequestID *string `json:"requestId,omitempty"`
 	// ContactEmail Optional contact address; asserted ASCII dot-atom `format: email`
 	// (single `@`, >=2-label domain, total length <= 254, guard-before-regex).
 	ContactEmail *string `json:"contactEmail,omitempty"`
@@ -2444,13 +2444,13 @@ type Showcase struct {
 	Aliases []string `json:"aliases,omitempty"`
 	// Roles Access roles; must contain between one and two "admin" entries.
 	Roles []string `json:"roles,omitempty"`
-	// IdOrName Disjoint-kind union (oneOf sum type): the wire value is either a string of
+	// IDOrName Disjoint-kind union (oneOf sum type): the wire value is either a string of
 	// at least 3 code points or an integer of at least 1, selected by its JSON token. Not
 	// a member of a discriminated union — the token itself is the selector. Each branch
 	// also carries its **own constraints**: once the token selects a branch, the value is
 	// held to everything that branch declares, in both directions, with the union's path
 	// on the violation.
-	IdOrName ShowcaseIdOrName `json:"idOrName,omitempty"`
+	IDOrName ShowcaseIDOrName `json:"idOrName,omitempty"`
 	// Mode A union whose string branch is a **closed value set**: either one of two named
 	// modes or an unbounded non-negative integer. The branch narrows to its own admissible
 	// values (a Go/Java membership check, a TypeScript literal union, a Python `Literal`),
@@ -2687,9 +2687,9 @@ func (m Showcase) Validate() error {
 			errs = append(errs, Violation{"phrase", fmt.Sprintf("must match pattern %q, got %q", "^[^\\t\\n\\x0B\\f\\r ]+[\\t\\n\\x0B\\f\\r ][^\\t\\n\\x0B\\f\\r ]+$", *m.Phrase)})
 		}
 	}
-	if m.RequestId != nil {
-		if !_nexgenJsonSchemaUuidFormat.MatchString(*m.RequestId) {
-			errs = append(errs, Violation{"requestId", fmt.Sprintf("must be a valid uuid, got %q", *m.RequestId)})
+	if m.RequestID != nil {
+		if !_nexgenJsonSchemaUuidFormat.MatchString(*m.RequestID) {
+			errs = append(errs, Violation{"requestId", fmt.Sprintf("must be a valid uuid, got %q", *m.RequestID)})
 		}
 	}
 	if m.ContactEmail != nil {
@@ -2796,8 +2796,8 @@ func (m Showcase) Validate() error {
 			}
 		}
 	}
-	if m.IdOrName != nil {
-		mergeNested(&errs, "idOrName", m.IdOrName.Validate())
+	if m.IDOrName != nil {
+		mergeNested(&errs, "idOrName", m.IDOrName.Validate())
 	}
 	if m.Mode != nil {
 		mergeNested(&errs, "mode", m.Mode.Validate())
@@ -3148,7 +3148,7 @@ func (m *Showcase) UnmarshalJSON(data []byte) error {
 		}
 	}
 	if v, ok := parseStringField(get("requestId"), "requestId", false, false, &errs); ok {
-		m.RequestId = &v
+		m.RequestID = &v
 		if !_nexgenJsonSchemaUuidFormat.MatchString(v) {
 			errs = append(errs, Violation{"requestId", fmt.Sprintf("must be a valid uuid, got %q", v)})
 		}
@@ -3348,8 +3348,8 @@ func (m *Showcase) UnmarshalJSON(data []byte) error {
 	if raw := get("idOrName"); raw == nil {
 	} else if isNull(*raw) {
 		errs = append(errs, Violation{"idOrName", "explicit null not allowed"})
-	} else if v, ok := unmarshalShowcaseIdOrName(*raw, "idOrName", &errs); ok {
-		m.IdOrName = v
+	} else if v, ok := unmarshalShowcaseIDOrName(*raw, "idOrName", &errs); ok {
+		m.IDOrName = v
 	}
 	if raw := get("mode"); raw == nil {
 	} else if isNull(*raw) {
@@ -4015,8 +4015,8 @@ func (m Showcase) MarshalJSON() ([]byte, error) {
 	if m.Phrase != nil {
 		marshalField(out, "phrase", *m.Phrase, &errs)
 	}
-	if m.RequestId != nil {
-		marshalField(out, "requestId", *m.RequestId, &errs)
+	if m.RequestID != nil {
+		marshalField(out, "requestId", *m.RequestID, &errs)
 	}
 	if m.ContactEmail != nil {
 		marshalField(out, "contactEmail", *m.ContactEmail, &errs)
@@ -4083,8 +4083,8 @@ func (m Showcase) MarshalJSON() ([]byte, error) {
 	if m.Roles != nil {
 		marshalField(out, "roles", m.Roles, &errs)
 	}
-	if m.IdOrName != nil {
-		marshalField(out, "idOrName", m.IdOrName, &errs)
+	if m.IDOrName != nil {
+		marshalField(out, "idOrName", m.IDOrName, &errs)
 	}
 	if m.Mode != nil {
 		marshalField(out, "mode", m.Mode, &errs)
@@ -4870,8 +4870,8 @@ func (m ShowcaseRowsItem) MarshalJSON() ([]byte, error) {
 
 // GetShowcaseInput is generated from the corresponding JSON Schema definition.
 type GetShowcaseInput struct {
-	// Id corresponds to the "id" JSON property.
-	Id string `json:"id"`
+	// ID corresponds to the "id" JSON property.
+	ID string `json:"id"`
 }
 
 // Validate checks m against every constraint and returns a PayloadValidationError
@@ -4907,7 +4907,7 @@ func (m *GetShowcaseInput) UnmarshalJSON(data []byte) error {
 	}
 	_ = get
 	if v, ok := parseStringField(get("id"), "id", true, false, &errs); ok {
-		m.Id = v
+		m.ID = v
 	}
 	if len(errs) > 0 {
 		return newPayloadValidationError(errs)
@@ -4921,7 +4921,7 @@ func (m GetShowcaseInput) MarshalJSON() ([]byte, error) {
 	var errs []Violation
 	addViolations(&errs, m.Validate())
 	out := map[string]json.RawMessage{}
-	marshalField(out, "id", m.Id, &errs)
+	marshalField(out, "id", m.ID, &errs)
 	if len(errs) > 0 {
 		return nil, newPayloadValidationError(errs)
 	}
@@ -5189,8 +5189,8 @@ func (m Tokens) MarshalJSON() ([]byte, error) {
 // value outside it is rejected by the merged constraint. No allOf survives past the
 // loader.
 type Widget struct {
-	// Id corresponds to the "id" JSON property.
-	Id string `json:"id"`
+	// ID corresponds to the "id" JSON property.
+	ID string `json:"id"`
 	// Kind corresponds to the "kind" JSON property.
 	Kind *string `json:"kind,omitempty"`
 	// Name corresponds to the "name" JSON property.
@@ -5258,7 +5258,7 @@ func (m *Widget) UnmarshalJSON(data []byte) error {
 	}
 	_ = get
 	if v, ok := parseStringField(get("id"), "id", true, false, &errs); ok {
-		m.Id = v
+		m.ID = v
 	}
 	if v, ok := parseStringField(get("kind"), "kind", false, false, &errs); ok {
 		m.Kind = &v
@@ -5290,7 +5290,7 @@ func (m Widget) MarshalJSON() ([]byte, error) {
 	for k, v := range m.AdditionalProperties {
 		out[k] = v
 	}
-	marshalField(out, "id", m.Id, &errs)
+	marshalField(out, "id", m.ID, &errs)
 	if m.Kind != nil {
 		marshalField(out, "kind", *m.Kind, &errs)
 	}
@@ -5307,8 +5307,8 @@ func (m Widget) MarshalJSON() ([]byte, error) {
 // WidgetBase A base object folded into Widget via allOf. It stays its own type; Widget
 // copies its fields rather than referencing or subtyping it.
 type WidgetBase struct {
-	// Id corresponds to the "id" JSON property.
-	Id string `json:"id"`
+	// ID corresponds to the "id" JSON property.
+	ID string `json:"id"`
 	// Kind corresponds to the "kind" JSON property.
 	Kind *string `json:"kind,omitempty"`
 	// AdditionalProperties holds unknown members verbatim.
@@ -5355,7 +5355,7 @@ func (m *WidgetBase) UnmarshalJSON(data []byte) error {
 	}
 	_ = get
 	if v, ok := parseStringField(get("id"), "id", true, false, &errs); ok {
-		m.Id = v
+		m.ID = v
 	}
 	if v, ok := parseStringField(get("kind"), "kind", false, false, &errs); ok {
 		m.Kind = &v
@@ -5375,7 +5375,7 @@ func (m WidgetBase) MarshalJSON() ([]byte, error) {
 	for k, v := range m.AdditionalProperties {
 		out[k] = v
 	}
-	marshalField(out, "id", m.Id, &errs)
+	marshalField(out, "id", m.ID, &errs)
 	if m.Kind != nil {
 		marshalField(out, "kind", *m.Kind, &errs)
 	}

@@ -1994,7 +1994,7 @@ fn generate_python_schema_tree(name: &str, files: &[(&str, &str)]) -> (PathBuf, 
         descriptor_paths: Vec::new(),
         output_path: output_path.clone(),
         format: false,
-        generate_native_api: false,
+        config: Default::default(),
         java_package_name: None,
         ts_date_time_types: Default::default(),
     })
@@ -2215,7 +2215,7 @@ fn python_json_bare_ref_root_alias_is_the_target_class_at_runtime() {
         descriptor_paths: Vec::new(),
         output_path: output_path.clone(),
         format: false,
-        generate_native_api: false,
+        config: Default::default(),
         java_package_name: None,
         ts_date_time_types: Default::default(),
     })
@@ -2566,7 +2566,7 @@ $defs:
     dependentRequired:
       trigger: []
 "##,
-        false,
+        nexgen::nexgen_config::NexgenConfig::default(),
     );
 
     let models = fs::read_to_string(output_path.join("models.py")).unwrap();
@@ -2642,7 +2642,7 @@ assert services.QuoteService.__doc__ == 'Service ends with a quote "', (
 /// and `nexusrpc`'s `@service` resolves that annotation with `eval_str=True`, so
 /// `typing` has to be bound at runtime. The native-API client body imports it
 /// incidentally; a definitions-only package does not, which is why this probe
-/// runs with `generate_native_api: false` and *imports* the result.
+/// runs in definitions-only mode and *imports* the result.
 /// See `specs/json-schema/features/deprecated.md`.
 #[test]
 fn python_json_definitions_only_deprecated_operation_imports_typing() {
