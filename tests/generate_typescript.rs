@@ -1307,7 +1307,7 @@ fn typescript_json_does_not_emit_union_serializer_for_assertion_only_format() {
         descriptor_paths: Vec::new(),
         output_path: output_path.clone(),
         format: false,
-        generate_native_api: false,
+        config: Default::default(),
         java_package_name: None,
         ts_date_time_types: Default::default(),
     })
@@ -1549,7 +1549,10 @@ fn typescript_json_native_barrel_exports_validation_runtime() {
         descriptor_paths: Vec::new(),
         output_path: output_path.clone(),
         format: false,
-        generate_native_api: true,
+        config: nexgen::nexgen_config::NexgenConfig {
+            mode: nexgen::generator::GenerationMode::NativeApi,
+            ..Default::default()
+        },
         java_package_name: None,
         ts_date_time_types: Default::default(),
     })
@@ -1718,7 +1721,7 @@ fn typescript_json_bare_ref_root_alias_typechecks_and_uses_target_converter() {
         descriptor_paths: Vec::new(),
         output_path: output_path.clone(),
         format: false,
-        generate_native_api: false,
+        config: Default::default(),
         java_package_name: None,
         ts_date_time_types: Default::default(),
     })
@@ -1807,7 +1810,7 @@ $defs:
         descriptor_paths: Vec::new(),
         output_path: output_path.clone(),
         format: false,
-        generate_native_api: false,
+        config: Default::default(),
         java_package_name: None,
         ts_date_time_types: Default::default(),
     })
@@ -1880,7 +1883,7 @@ $defs:
         descriptor_paths: Vec::new(),
         output_path: temp_dir.join("output"),
         format: false,
-        generate_native_api: false,
+        config: Default::default(),
         java_package_name: None,
         ts_date_time_types: Default::default(),
     })
@@ -3234,7 +3237,7 @@ additionalProperties: true
         descriptor_paths: Vec::new(),
         output_path: output_path.clone(),
         format: false,
-        generate_native_api: false,
+        config: Default::default(),
         java_package_name: None,
         ts_date_time_types: Default::default(),
     })
@@ -3278,7 +3281,7 @@ properties:
         descriptor_paths: Vec::new(),
         output_path: output_path.clone(),
         format: false,
-        generate_native_api: false,
+        config: Default::default(),
         java_package_name: None,
         ts_date_time_types: Default::default(),
     })

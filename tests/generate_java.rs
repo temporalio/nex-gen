@@ -506,7 +506,7 @@ properties:
         descriptor_paths: Vec::new(),
         output_path: output_path.clone(),
         format: false,
-        generate_native_api: false,
+        config: Default::default(),
         java_package_name: Some("renamed".to_string()),
         ts_date_time_types: Default::default(),
     })
@@ -686,7 +686,7 @@ properties:
         descriptor_paths: Vec::new(),
         output_path: output_path.clone(),
         format: false,
-        generate_native_api: false,
+        config: Default::default(),
         java_package_name: Some("example.prose".to_string()),
         ts_date_time_types: Default::default(),
     })
@@ -767,7 +767,7 @@ $defs:
         descriptor_paths: Vec::new(),
         output_path: output_path.clone(),
         format: false,
-        generate_native_api: false,
+        config: Default::default(),
         java_package_name: Some("example.shadow".to_string()),
         ts_date_time_types: Default::default(),
     })
@@ -1201,7 +1201,7 @@ fn java_json_bare_ref_root_alias_collapses_to_the_target_class() {
         descriptor_paths: Vec::new(),
         output_path: output_path.clone(),
         format: false,
-        generate_native_api: false,
+        config: Default::default(),
         java_package_name: Some("example.aliases".to_string()),
         ts_date_time_types: Default::default(),
     })
@@ -2256,7 +2256,7 @@ properties:
         descriptor_paths: Vec::new(),
         output_path: output_path.clone(),
         format: false,
-        generate_native_api: false,
+        config: Default::default(),
         java_package_name: Some("counts".to_string()),
         ts_date_time_types: Default::default(),
     })
