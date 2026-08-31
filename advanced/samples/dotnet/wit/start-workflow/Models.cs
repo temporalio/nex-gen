@@ -14,9 +14,9 @@ namespace Nexgen.StartWorkflowService
 
     [Temporalio.Converters.TemporalTransferTypeConverter(typeof(CancelWorkflowRequest.TransferTypeConverter))]
     [GeneratedCode("nexgen", null)]
-    internal record CancelWorkflowRequest
+    public record CancelWorkflowRequest
     {
-        internal CancelWorkflowRequest(WorkflowExecution workflowExecution, string @namespace)
+        public CancelWorkflowRequest(WorkflowExecution workflowExecution, string @namespace)
         {
             WorkflowExecution = workflowExecution;
             Namespace = @namespace;
@@ -85,9 +85,9 @@ namespace Nexgen.StartWorkflowService
 
     [Temporalio.Converters.TemporalTransferTypeConverter(typeof(StartWorkflowRequest.TransferTypeConverter))]
     [GeneratedCode("nexgen", null)]
-    internal record StartWorkflowRequest
+    public record StartWorkflowRequest
     {
-        internal StartWorkflowRequest(string workflow, string workflowId, string taskQueue, string @namespace)
+        public StartWorkflowRequest(string workflow, string workflowId, string taskQueue, string @namespace)
         {
             Workflow = workflow;
             WorkflowId = workflowId;
@@ -136,7 +136,7 @@ namespace Nexgen.StartWorkflowService
 
     [Temporalio.Converters.TemporalTransferTypeConverter(typeof(StartWorkflowResult.TransferTypeConverter))]
     [GeneratedCode("nexgen", null)]
-    internal record StartWorkflowResult
+    public record StartWorkflowResult
     {
         public string? RunId { get; init; }
 

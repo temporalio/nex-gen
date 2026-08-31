@@ -14,7 +14,7 @@ namespace Temporalio.Workflows
 
     [Temporalio.Converters.TemporalTransferTypeConverter(typeof(UserMetadata.TransferTypeConverter))]
     [GeneratedCode("nexgen", null)]
-    internal record UserMetadata
+    public record UserMetadata
     {
         /// <summary>
         /// Single-line fixed summary for the workflow execution that may appear in UI and CLI. This can be in single-line Temporal Markdown format.
@@ -65,9 +65,9 @@ namespace Temporalio.Workflows
     /// <remarks>WARNING: This API is experimental and may change in the future.</remarks>
     [Temporalio.Converters.TemporalTransferTypeConverter(typeof(SignalWithStartWorkflowRequest.TransferTypeConverter))]
     [GeneratedCode("nexgen", null)]
-    internal record SignalWithStartWorkflowRequest
+    public record SignalWithStartWorkflowRequest
     {
-        internal SignalWithStartWorkflowRequest(string workflow, string id, string taskQueue, string signal, string @namespace)
+        public SignalWithStartWorkflowRequest(string workflow, string id, string taskQueue, string signal, string @namespace)
         {
             Workflow = workflow;
             Id = id;
@@ -264,7 +264,7 @@ namespace Temporalio.Workflows
     /// <remarks>WARNING: This API is experimental and may change in the future.</remarks>
     [Temporalio.Converters.TemporalTransferTypeConverter(typeof(SignalWithStartWorkflowResponse.TransferTypeConverter))]
     [GeneratedCode("nexgen", null)]
-    internal record SignalWithStartWorkflowResponse
+    public record SignalWithStartWorkflowResponse
     {
         public string? RunId { get; init; }
         public bool? Started { get; init; }

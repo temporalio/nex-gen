@@ -11,9 +11,9 @@ namespace Nexgen.UserService
 {
 
     [GeneratedCode("nexgen", null)]
-    internal record GetUserRequest
+    public record GetUserRequest
     {
-        internal GetUserRequest(string userId)
+        public GetUserRequest(string userId)
         {
             UserId = userId;
         }
@@ -22,9 +22,9 @@ namespace Nexgen.UserService
     }
 
     [GeneratedCode("nexgen", null)]
-    internal record UpdateEmailRequest
+    public record UpdateEmailRequest
     {
-        internal UpdateEmailRequest(string userId, string email)
+        public UpdateEmailRequest(string userId, string email)
         {
             UserId = userId;
             Email = email;

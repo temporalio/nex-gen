@@ -10,16 +10,37 @@ using Temporalio.Workflows;
 namespace Temporalio.Worker.Interceptors
 {
 
+[GeneratedCode("nexgen", null)]
+public partial class WorkflowOutboundInterceptor
+{
+    /// <summary>
+    /// Intercept the SignalWithStartWorkflow operation.
+    /// </summary>
+    /// <param name="request">Request for the operation.</param>
+    /// <returns>Operation handle.</returns>
     [GeneratedCode("nexgen", null)]
-    public partial class WorkflowOutboundInterceptor
+    public virtual Task<NexusWorkflowOperationHandle<SignalWithStartWorkflowResponse>> SignalWithStartWorkflowAsync(SignalWithStartWorkflowRequest request) => Next.SignalWithStartWorkflowAsync(request);
+
+}
+
+}
+
+namespace Temporalio.Worker
+{
+
+[GeneratedCode("nexgen", null)]
+internal partial class WorkflowInstance
+{
+    internal partial class OutboundImpl
     {
-        /// <summary>
-        /// Intercept the SignalWithStartWorkflow operation.
-        /// </summary>
-        /// <param name="request">Request for the operation.</param>
-        /// <returns>Operation handle.</returns>
-        [GeneratedCode("nexgen", null)]
-        public virtual Task<NexusWorkflowOperationHandle<SignalWithStartWorkflowResponse>> SignalWithStartWorkflowAsync(SignalWithStartWorkflowRequest request) => Next.SignalWithStartWorkflowAsync(request);
+        public override Task<NexusWorkflowOperationHandle<SignalWithStartWorkflowResponse>> SignalWithStartWorkflowAsync(SignalWithStartWorkflowRequest request) => ScheduleNexusOperationAsync<SignalWithStartWorkflowResponse>(new(
+            Service: "temporal.api.workflowservice.v1.WorkflowService",
+            ClientOptions: new("temporal-system"),
+            OperationName: "SignalWithStartWorkflowExecution",
+            Arg: request,
+            Options: new(),
+            Headers: null));
 
     }
+}
 }

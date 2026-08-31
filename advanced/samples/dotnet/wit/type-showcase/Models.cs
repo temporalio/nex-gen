@@ -62,9 +62,9 @@ namespace Nexgen.TypeShowcase
     }
 
     [GeneratedCode("nexgen", null)]
-    internal record DeactivateRequest
+    public record DeactivateRequest
     {
-        internal DeactivateRequest(string userId)
+        public DeactivateRequest(string userId)
         {
             UserId = userId;
         }
@@ -74,9 +74,9 @@ namespace Nexgen.TypeShowcase
     }
 
     [GeneratedCode("nexgen", null)]
-    internal record GetUserRequest
+    public record GetUserRequest
     {
-        internal GetUserRequest(string userId)
+        public GetUserRequest(string userId)
         {
             UserId = userId;
         }
@@ -102,9 +102,9 @@ namespace Nexgen.TypeShowcase
     }
 
     [GeneratedCode("nexgen", null)]
-    internal record RecordSyncRequest
+    public record RecordSyncRequest
     {
-        internal RecordSyncRequest(string userId, SyncReport report)
+        public RecordSyncRequest(string userId, SyncReport report)
         {
             UserId = userId;
             Report = report;
@@ -115,9 +115,9 @@ namespace Nexgen.TypeShowcase
     }
 
     [GeneratedCode("nexgen", null)]
-    internal record RenameRequest
+    public record RenameRequest
     {
-        internal RenameRequest(string userId, string displayName)
+        public RenameRequest(string userId, string displayName)
         {
             UserId = userId;
             DisplayName = displayName;
@@ -128,9 +128,9 @@ namespace Nexgen.TypeShowcase
     }
 
     [GeneratedCode("nexgen", null)]
-    internal record SetProfileRequest
+    public record SetProfileRequest
     {
-        internal SetProfileRequest(string userId, UserProfile profile)
+        public SetProfileRequest(string userId, UserProfile profile)
         {
             UserId = userId;
             Profile = profile;
@@ -156,9 +156,9 @@ namespace Nexgen.TypeShowcase
     }
 
     [GeneratedCode("nexgen", null)]
-    internal record UpdateEmailRequest
+    public record UpdateEmailRequest
     {
-        internal UpdateEmailRequest(string userId, string email)
+        public UpdateEmailRequest(string userId, string email)
         {
             UserId = userId;
             Email = email;

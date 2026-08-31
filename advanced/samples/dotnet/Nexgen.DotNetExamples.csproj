@@ -7,6 +7,8 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- TODO: Include workflow-service output once the SDK compiles the generated
+         interceptor partials into the Temporalio assembly. -->
     <Compile Remove="bin/**/*.cs;obj/**/*.cs;tests/**/*.cs;**/Support/*.cs;wit/workflow-service/*.cs" />
     <Compile Include="wit/workflow-service/Support/TemporalSupport.cs" />
   </ItemGroup>
