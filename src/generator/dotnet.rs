@@ -2273,20 +2273,12 @@ impl<'a> ApiPlanner<'a> {
                 output.push_str(&csharp_string_literal(&operation.wire_name));
                 output.push_str(")\n            {\n                if (arg is not ");
                 output.push_str(&request_type);
-                output.push_str(" request)\n                {\n                    throw new System.ArgumentException(\"System Nexus operation ");
-                output.push_str(&service.wire_name);
-                output.push('/');
-                output.push_str(&operation.wire_name);
-                output.push_str(" expects a ");
+                output.push_str(" request)\n                {\n                    throw new System.ArgumentException(\"System Nexus operation expects a ");
                 output.push_str(&request_type);
                 output.push_str(" request.\", nameof(arg));\n                }\n");
                 output.push_str("                if (typeof(TResult) != typeof(");
                 output.push_str(&response_type);
-                output.push_str("))\n                {\n                    throw new System.ArgumentException(\"System Nexus operation ");
-                output.push_str(&service.wire_name);
-                output.push('/');
-                output.push_str(&operation.wire_name);
-                output.push_str(" expects a ");
+                output.push_str("))\n                {\n                    throw new System.ArgumentException(\"System Nexus operation expects a ");
                 output.push_str(&response_type);
                 output.push_str(
                     " result.\");\n                }\n                var handle = outbound.Value.",

@@ -38,11 +38,11 @@ namespace Temporalio.Worker
             {
                 if (arg is not SignalWithStartWorkflowRequest request)
                 {
-                    throw new System.ArgumentException("System Nexus operation temporal.api.workflowservice.v1.WorkflowService/SignalWithStartWorkflowExecution expects a SignalWithStartWorkflowRequest request.", nameof(arg));
+                    throw new System.ArgumentException("System Nexus operation expects a SignalWithStartWorkflowRequest request.", nameof(arg));
                 }
                 if (typeof(TResult) != typeof(SignalWithStartWorkflowResponse))
                 {
-                    throw new System.ArgumentException("System Nexus operation temporal.api.workflowservice.v1.WorkflowService/SignalWithStartWorkflowExecution expects a SignalWithStartWorkflowResponse result.");
+                    throw new System.ArgumentException("System Nexus operation expects a SignalWithStartWorkflowResponse result.");
                 }
                 var handle = outbound.Value.SignalWithStartWorkflowAsync(request);
                 return (Task<NexusWorkflowOperationHandle<TResult>>)(object)handle;
