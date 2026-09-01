@@ -177,7 +177,6 @@ fn insert_branch_index_file(
         contents.push_str("';\n");
     }
     if has_json_runtime_module {
-        contents.push_str("export { payloadValidationError } from './definitions';\n");
         contents.push_str("export type { Violation } from './definitions';\n");
     }
     insert_generated_file_with_origin(
@@ -3623,7 +3622,6 @@ fn render_definitions_only_index_module(
         output.push_str("export * from './resources';\n");
     }
     if has_json_runtime_module {
-        output.push_str("export { payloadValidationError } from './definitions';\n");
         output.push_str("export type { Violation } from './definitions';\n");
     }
     output
@@ -3698,7 +3696,6 @@ fn render_index_module(
         body.push_str(" } from './models';\n");
     }
     if has_json_runtime_module {
-        body.push_str("export { payloadValidationError } from './definitions';\n");
         body.push_str("export type { Violation } from './definitions';\n");
     }
     render_generated_module(String::new(), body)

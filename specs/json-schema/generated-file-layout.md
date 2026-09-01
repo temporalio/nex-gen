@@ -444,8 +444,8 @@ bindings:
 - **TypeScript** — `index.ts` per directory: per-input barrels
   `export … from './models'` (and `./services`), intermediate barrels
   `export * from './<child>'`, and the root barrel re-exports the tree plus
-  the runtime's `payloadValidationError` compatibility helper and the
-  `Violation` type from `./definitions`.
+  the `Violation` type from `./definitions`. Runtime helpers such as
+  `payloadValidationError` remain internal to the generated modules.
 - **Go** — no aggregator; capitalized identifiers are exported from the one
   flat package.
 - **Java** — `public` class per file; runtime classes public too.

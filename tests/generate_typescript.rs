@@ -1532,7 +1532,7 @@ fn typescript_json_maps_element_position_unions() {
 }
 
 #[test]
-fn typescript_json_native_barrel_exports_validation_runtime() {
+fn typescript_json_native_barrel_exports_violation_type_only() {
     let temp_dir = unique_output_path("ts-json-native-runtime-exports");
     fs::create_dir_all(&temp_dir).unwrap();
     let input_path = temp_dir.join("probe.yaml");
@@ -1560,7 +1560,7 @@ fn typescript_json_native_barrel_exports_validation_runtime() {
     let index = fs::read_to_string(output_path.join("index.ts")).unwrap();
     let models = fs::read_to_string(output_path.join("models.ts")).unwrap();
     assert!(
-        index.contains("export { payloadValidationError } from './definitions';"),
+        !index.contains("export { payloadValidationError } from './definitions';"),
         "{index}"
     );
     assert!(
