@@ -394,7 +394,6 @@ impl ModelBackend {
             export_sort_keys,
             declared_type_parameters: type_parameters,
             allows_private_wire_access: false,
-            has_dynamic_runtime_guards: false,
         }
     }
 

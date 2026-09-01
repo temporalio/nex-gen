@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-# pyright: reportUnnecessaryComparison=false, reportUnnecessaryIsInstance=false, reportUnreachable=false
 import dataclasses
 import typing
 import typing_extensions
@@ -98,31 +97,36 @@ class _CategoryTransferTypeConverter(
 
     @typing_extensions.override
     def to_transfer_type(self, value: "Category") -> typing.Any:
-        if not isinstance(value, Category):
+        runtime_value: typing.Any = value
+        if not isinstance(runtime_value, Category):
             raise temporalio.converter.create_payload_validation_error(
                 [Violation(path="", reason="expected object")]
             )
         violations: list[Violation] = []
         out: dict[str, typing.Any] = {}
-        if value.id is None:
+        id_value: typing.Any = runtime_value.id
+        if id_value is None:
             violations.append(Violation(path="id", reason="required"))
         else:
-            if not (isinstance(value.id, str)):
+            if not (isinstance(id_value, str)):
                 violations.append(Violation(path="id", reason="expected string"))
-            out["id"] = value.id
-        if value.name is None:
+            out["id"] = id_value
+        name_value: typing.Any = runtime_value.name
+        if name_value is None:
             violations.append(Violation(path="name", reason="required"))
         else:
-            if not (isinstance(value.name, str)):
+            if not (isinstance(name_value, str)):
                 violations.append(Violation(path="name", reason="expected string"))
-            out["name"] = value.name
-        if value.children is not None:
+            out["name"] = name_value
+        children_value: typing.Any = runtime_value.children
+        if children_value is not None:
             children_violation_count = len(violations)
-            if not (isinstance(value.children, list)):
+            if not (isinstance(children_value, list)):
                 violations.append(Violation(path="children", reason="expected array"))
             if len(violations) == children_violation_count:
+                children_checked = typing.cast("list[typing.Any]", children_value)
                 children_out: list[typing.Any] = []
-                for children_index, children_element in enumerate(value.children):
+                for children_index, children_element in enumerate(children_checked):
                     try:
                         children_out.append(
                             _CategoryTransferTypeConverter().to_transfer_type(
@@ -208,19 +212,22 @@ class _PaletteTransferTypeConverter(
 
     @typing_extensions.override
     def to_transfer_type(self, value: "Palette") -> typing.Any:
-        if not isinstance(value, Palette):
+        runtime_value: typing.Any = value
+        if not isinstance(runtime_value, Palette):
             raise temporalio.converter.create_payload_validation_error(
                 [Violation(path="", reason="expected object")]
             )
         violations: list[Violation] = []
         out: dict[str, typing.Any] = {}
-        if value.swatches is None:
+        swatches_value: typing.Any = runtime_value.swatches
+        if swatches_value is None:
             violations.append(Violation(path="swatches", reason="required"))
         else:
-            if not (isinstance(value.swatches, list)):
+            if not (isinstance(swatches_value, list)):
                 violations.append(Violation(path="swatches", reason="expected array"))
             else:
-                for item_index_8, item_element_8 in enumerate(value.swatches):
+                checked_array_8 = typing.cast("list[typing.Any]", swatches_value)
+                for item_index_8, item_element_8 in enumerate(checked_array_8):
                     if not (isinstance(item_element_8, str)):
                         violations.append(
                             Violation(
@@ -228,7 +235,8 @@ class _PaletteTransferTypeConverter(
                                 reason="expected string",
                             )
                         )
-            out["swatches"] = value.swatches
+            swatches_checked = typing.cast("list[typing.Any]", swatches_value)
+            out["swatches"] = swatches_checked
         if violations:
             raise temporalio.converter.create_payload_validation_error(violations)
         return out
