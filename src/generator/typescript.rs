@@ -745,6 +745,7 @@ impl<'a> ApiPlanner<'a> {
                             .alternate_type
                             .as_ref()
                             .map(typescript_authored_type_annotation),
+                        requirements: typescript_function_requirements(function),
                     })
                     .collect()
             })
@@ -782,6 +783,7 @@ impl<'a> ApiPlanner<'a> {
                             .alternate_type
                             .as_ref()
                             .map(typescript_authored_type_annotation),
+                        requirements: typescript_function_requirements(function),
                     })
                     .collect()
             })
@@ -1519,9 +1521,9 @@ impl<'a> ApiPlanner<'a> {
                 let mut resolved = self.resolve_planned_value_type(fallback);
                 if let Some(annotation) = type_name.for_language(Language::TypeScript) {
                     resolved.annotation = annotation.to_string();
-                    if annotation.contains("Long") {
-                        resolved.requirements.long = true;
-                    }
+                    resolved.requirements = TypeScriptRequirements {
+                        long: annotation == "Long",
+                    };
                 }
                 resolved
             }
@@ -1996,12 +1998,6 @@ fn generate_leaf(
         planner.resolve_message_value_conversion(&model_type);
     }
 
-    let requirements = collect_typescript_requirements(
-        planner.variants.values().collect::<Vec<_>>().as_slice(),
-        planner.models.values().collect::<Vec<_>>().as_slice(),
-        &services,
-    );
-
     let support_source = support_source(support_fragments);
     let model_fragments = planner.render_external_models()?;
 
@@ -2013,7 +2009,6 @@ fn generate_leaf(
         &planner.external_models,
         &model_fragments,
         &services,
-        &requirements,
         &language_imports,
         support_source.as_deref(),
         api_plan,
@@ -2627,6 +2622,31 @@ fn function_constraint(function: &FunctionFieldSpec<PlannedFamily>) -> String {
     )
 }
 
+fn typescript_function_requirements(
+    function: &FunctionFieldSpec<PlannedFamily>,
+) -> TypeScriptRequirements {
+    let mut requirements = TypeScriptRequirements::default();
+    match &function.args {
+        FunctionArgsSpec::Varargs { prefix, .. } => {
+            for arg in prefix {
+                collect_typescript_value_requirements(&arg.field_type, &mut requirements);
+            }
+        }
+        FunctionArgsSpec::Fixed(args) => {
+            for arg in args {
+                collect_typescript_value_requirements(&arg.field_type, &mut requirements);
+            }
+        }
+    }
+    if let FunctionResultSpec::Authored(result) = &function.result {
+        collect_typescript_value_requirements(result, &mut requirements);
+    }
+    if let Some(alternate_type) = &function.alternate_type {
+        collect_typescript_value_requirements(alternate_type, &mut requirements);
+    }
+    requirements
+}
+
 #[derive(Debug, Clone)]
 struct RenderedFunctionTypeDescriptor {
     value_type: String,
@@ -2950,6 +2970,7 @@ struct RenderedFunctionField {
     args: RenderedFunctionArgs,
     type_parameter_name: String,
     alternate_annotation: Option<String>,
+    requirements: TypeScriptRequirements,
 }
 
 #[derive(Debug, Clone)]
@@ -2976,6 +2997,7 @@ struct RenderedWithArgumentsField {
     type_parameter_name: String,
     args_type_parameter_name: String,
     alternate_annotation: Option<String>,
+    requirements: TypeScriptRequirements,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -3041,10 +3063,9 @@ struct SupportExports {
     type_names: Vec<String>,
 }
 
-fn collect_typescript_requirements(
+fn collect_typescript_model_requirements(
     variants: &[&RenderedVariant],
     models: &[&RenderedModel],
-    services: &[RenderedService<'_>],
 ) -> TypeScriptRequirements {
     let mut requirements = TypeScriptRequirements::default();
     for variant in variants {
@@ -3056,20 +3077,39 @@ fn collect_typescript_requirements(
         for field in &model.fields {
             requirements.merge(&field.requirements);
         }
+        for function in &model.functions {
+            requirements.merge(&function.requirements);
+        }
+        for function in &model.with_arguments {
+            requirements.merge(&function.requirements);
+        }
     }
+    requirements
+}
+
+fn collect_typescript_resource_requirements(
+    services: &[RenderedService<'_>],
+) -> TypeScriptRequirements {
+    let mut requirements = TypeScriptRequirements::default();
     for service in services {
         for resource in &service.resources {
             for field in &resource.fields {
-                requirements.merge(&typescript_resource_field_requirements(&field.kind));
+                requirements.merge(&typescript_resource_field_requirements(
+                    &field.kind,
+                    field.function.as_ref(),
+                ));
             }
             for method in &resource.methods {
                 for param in &method.params {
-                    requirements.merge(&typescript_resource_field_requirements(&param.kind));
+                    requirements.merge(&typescript_resource_field_requirements(
+                        &param.kind,
+                        param.function.as_ref(),
+                    ));
                 }
                 if let Some(result) = &method.result
                     && let PlannedResourceMethodResultKind::Value(kind) = &result.kind
                 {
-                    requirements.merge(&typescript_resource_field_requirements(kind));
+                    requirements.merge(&typescript_resource_field_requirements(kind, None));
                 }
             }
         }
@@ -3086,12 +3126,13 @@ fn render_module_files(
     external_models: &TypeScriptExternalModels,
     model_fragments: &RenderedExternalModelFragments,
     services: &[RenderedService<'_>],
-    requirements: &TypeScriptRequirements,
     language_imports: &[LanguageImportSpec],
     support_source: Option<&str>,
     api_plan: &PlannedSpec,
 ) -> Result<GeneratedFiles> {
     let mode = crate::nexgen_config::current().mode;
+    let model_requirements = collect_typescript_model_requirements(variants, models);
+    let resource_requirements = collect_typescript_resource_requirements(services);
     let support_source = support_source.filter(|source| !source.trim().is_empty());
     let support_exports = support_source.map(support_exports);
     let module_model_names = model_fragments
@@ -3109,6 +3150,7 @@ fn render_module_files(
         models,
         external_models,
         model_fragments,
+        &model_requirements,
         language_imports,
         support_exports.as_ref(),
         api_plan,
@@ -3147,7 +3189,6 @@ fn render_module_files(
                 models,
                 &module_model_names,
                 services,
-                requirements,
                 language_imports,
                 mode == GenerationMode::NativeApi,
                 api_plan,
@@ -3164,7 +3205,7 @@ fn render_module_files(
                 models,
                 &module_model_names,
                 services,
-                requirements,
+                &resource_requirements,
                 language_imports,
                 support_exports.as_ref(),
                 api_plan,
@@ -3188,7 +3229,6 @@ fn render_module_files(
                         services,
                         service,
                         operation,
-                        requirements,
                         language_imports,
                         support_exports.as_ref(),
                         api_plan,
@@ -3311,123 +3351,13 @@ fn render_typescript_namespace_imports(
     }
 }
 
-fn render_typescript_default_type_import_if_used(
+fn render_typescript_requirement_imports(
     output: &mut String,
-    source: &str,
-    name: &str,
-    package: &str,
+    requirements: &TypeScriptRequirements,
 ) {
-    if !contains_identifier_outside_literals(source, name) {
-        return;
+    if requirements.long {
+        output.push_str("import type Long from 'long';\n");
     }
-    output.push_str("import type ");
-    output.push_str(name);
-    output.push_str(" from '");
-    output.push_str(package);
-    output.push_str("';\n");
-}
-
-/// Type-only default imports must be driven by emitted type expressions, not
-/// authored prose or wire literals. Generated modules use only ordinary
-/// strings/templates and regex literals, so this small lexer can distinguish a
-/// real `Long` type occurrence without treating the exact const string
-/// `"Long"` (or a pattern containing it) as a package dependency.
-fn contains_identifier_outside_literals(source: &str, identifier: &str) -> bool {
-    let chars = source.char_indices().collect::<Vec<_>>();
-    let mut index = 0;
-    let mut can_start_regex = true;
-    while index < chars.len() {
-        let (start_byte, ch) = chars[index];
-        match ch {
-            '\'' | '"' | '`' => {
-                index = skip_typescript_string(&chars, index, ch);
-                can_start_regex = false;
-                continue;
-            }
-            '/' if chars.get(index + 1).is_some_and(|(_, next)| *next == '/') => {
-                index += 2;
-                while index < chars.len() && chars[index].1 != '\n' {
-                    index += 1;
-                }
-                continue;
-            }
-            '/' if chars.get(index + 1).is_some_and(|(_, next)| *next == '*') => {
-                index += 2;
-                while index + 1 < chars.len() {
-                    if chars[index].1 == '*' && chars[index + 1].1 == '/' {
-                        index += 2;
-                        break;
-                    }
-                    index += 1;
-                }
-                continue;
-            }
-            '/' if can_start_regex => {
-                index = skip_typescript_regex(&chars, index);
-                can_start_regex = false;
-                continue;
-            }
-            '/' => {
-                index += 1;
-                can_start_regex = true;
-                continue;
-            }
-            _ => {}
-        }
-
-        if is_typescript_identifier_start(ch) {
-            let mut end = index + 1;
-            while end < chars.len() && is_typescript_identifier_char(chars[end].1) {
-                end += 1;
-            }
-            let end_byte = chars
-                .get(end)
-                .map(|(byte, _)| *byte)
-                .unwrap_or(source.len());
-            let token = &source[start_byte..end_byte];
-            if token == identifier {
-                return true;
-            }
-            can_start_regex = matches!(
-                token,
-                "return"
-                    | "throw"
-                    | "case"
-                    | "delete"
-                    | "void"
-                    | "typeof"
-                    | "instanceof"
-                    | "in"
-                    | "of"
-                    | "yield"
-                    | "await"
-                    | "else"
-                    | "do"
-            );
-            index = end;
-            continue;
-        }
-
-        if ch.is_ascii_digit() {
-            index += 1;
-            while index < chars.len()
-                && (chars[index].1.is_ascii_alphanumeric() || matches!(chars[index].1, '.' | '_'))
-            {
-                index += 1;
-            }
-            can_start_regex = false;
-            continue;
-        }
-
-        if ch.is_whitespace() {
-            index += 1;
-            continue;
-        }
-
-        can_start_regex = !matches!(ch, ')' | ']' | '}' | '.');
-        index += 1;
-    }
-    false
 }
 
 fn contains_identifier(source: &str, identifier: &str) -> bool {
@@ -3514,34 +3444,6 @@ fn skip_typescript_string(chars: &[(usize, char)], start: usize, quote: char) ->
             escaped = true;
         } else if ch == quote {
             return index + 1;
-        }
-        index += 1;
-    }
-    index
-}
-
-fn skip_typescript_regex(chars: &[(usize, char)], start: usize) -> usize {
-    let mut index = start + 1;
-    let mut escaped = false;
-    let mut in_class = false;
-    while index < chars.len() {
-        let ch = chars[index].1;
-        if escaped {
-            escaped = false;
-        } else if ch == '\\' {
-            escaped = true;
-        } else if ch == '[' {
-            in_class = true;
-        } else if ch == ']' {
-            in_class = false;
-        } else if ch == '/' && !in_class {
-            index += 1;
-            while index < chars.len() && is_typescript_identifier_char(chars[index].1) {
-                index += 1;
-            }
-            return index;
-        } else if ch == '\n' || ch == '\r' {
-            return index;
         }
         index += 1;
     }
@@ -3866,6 +3768,7 @@ fn render_models_module(
     models: &[&RenderedModel],
     external_models: &TypeScriptExternalModels,
     model_fragments: &RenderedExternalModelFragments,
+    requirements: &TypeScriptRequirements,
     language_imports: &[LanguageImportSpec],
     support_exports: Option<&SupportExports>,
     api_plan: &PlannedSpec,
@@ -3957,7 +3860,7 @@ fn render_models_module(
         &model_language_imports,
         &generated_value_imports,
     );
-    render_typescript_default_type_import_if_used(&mut imports, &body, "Long", "long");
+    render_typescript_requirement_imports(&mut imports, requirements);
     render_support_imports(&mut imports, support_exports, "./support", &body);
     if !model_fragments.imports.is_empty() {
         if !imports.is_empty() && !imports.ends_with('\n') {
@@ -4057,7 +3960,6 @@ fn render_service_module(
     models: &[&RenderedModel],
     external_model_names: &BTreeSet<String>,
     services: &[RenderedService<'_>],
-    _requirements: &TypeScriptRequirements,
     language_imports: &[LanguageImportSpec],
     include_native_api: bool,
     api_plan: &PlannedSpec,
@@ -4081,7 +3983,6 @@ fn render_service_module(
         language_imports,
         &[("nexus", "nexus-rpc"), ("workflow", "@temporalio/workflow")],
     );
-    render_typescript_default_type_import_if_used(&mut imports, &body, "Long", "long");
     // Operation type info references converter *values*, so they import alongside
     // (and before) the type-only model imports.
     render_value_imports(
@@ -4141,7 +4042,7 @@ fn render_resources_module(
     models: &[&RenderedModel],
     external_model_names: &BTreeSet<String>,
     services: &[RenderedService<'_>],
-    _requirements: &TypeScriptRequirements,
+    requirements: &TypeScriptRequirements,
     language_imports: &[LanguageImportSpec],
     support_exports: Option<&SupportExports>,
     api_plan: &PlannedSpec,
@@ -4160,7 +4061,7 @@ fn render_resources_module(
         language_imports,
         &[("workflow", "@temporalio/workflow")],
     );
-    render_typescript_default_type_import_if_used(&mut imports, &body, "Long", "long");
+    render_typescript_requirement_imports(&mut imports, requirements);
     render_type_imports(
         &mut imports,
         "./models",
@@ -4210,7 +4111,6 @@ fn render_operation_module(
     services: &[RenderedService<'_>],
     service: &RenderedService<'_>,
     operation: &RenderedOperation<'_>,
-    _requirements: &TypeScriptRequirements,
     language_imports: &[LanguageImportSpec],
     support_exports: Option<&SupportExports>,
     api_plan: &PlannedSpec,
@@ -4225,7 +4125,6 @@ fn render_operation_module(
         language_imports,
         &[("workflow", "@temporalio/workflow")],
     );
-    render_typescript_default_type_import_if_used(&mut imports, &body, "Long", "long");
     render_value_imports(&mut imports, "../services", &[service.attr_name.clone()]);
     let mut model_values = model_to_wire_function_names(models);
     model_values.push("requiredField".to_string());
@@ -5513,20 +5412,15 @@ fn typescript_resource_value_annotation(value: &PlannedType) -> String {
     }
 }
 
-fn typescript_resource_field_requirements(kind: &PlannedType) -> TypeScriptRequirements {
-    let mut requirements = TypeScriptRequirements::default();
-    match kind {
-        PlannedType::List(value) => {
-            collect_typescript_value_requirements(value, &mut requirements);
-        }
-        PlannedType::Map(key, value) => {
-            collect_typescript_value_requirements(key, &mut requirements);
-            collect_typescript_value_requirements(value, &mut requirements);
-        }
-        value => {
-            collect_typescript_value_requirements(value, &mut requirements);
-        }
+fn typescript_resource_field_requirements(
+    kind: &PlannedType,
+    function: Option<&FunctionFieldSpec<PlannedFamily>>,
+) -> TypeScriptRequirements {
+    if let Some(function) = function {
+        return typescript_function_requirements(function);
     }
+    let mut requirements = TypeScriptRequirements::default();
+    collect_typescript_value_requirements(kind, &mut requirements);
     requirements
 }
 
@@ -5538,7 +5432,13 @@ fn collect_typescript_value_requirements(
         PlannedType::Int(IntSpec::I64) => {
             requirements.long = true;
         }
-        PlannedType::Int(IntSpec::I32) => {}
+        PlannedType::Option(inner) | PlannedType::List(inner) => {
+            collect_typescript_value_requirements(inner, requirements);
+        }
+        PlannedType::Map(key, value) => {
+            collect_typescript_value_requirements(key, requirements);
+            collect_typescript_value_requirements(value, requirements);
+        }
         PlannedType::Tuple(items) => {
             for item in items {
                 collect_typescript_value_requirements(item, requirements);
@@ -5557,13 +5457,11 @@ fn collect_typescript_value_requirements(
             target: fallback,
             ..
         })) => {
-            if type_name
-                .for_language(Language::TypeScript)
-                .is_some_and(|type_name| type_name.contains("Long"))
-            {
-                requirements.long = true;
+            if let Some(annotation) = type_name.for_language(Language::TypeScript) {
+                requirements.long |= annotation == "Long";
+            } else {
+                collect_typescript_value_requirements(fallback, requirements);
             }
-            collect_typescript_value_requirements(fallback, requirements);
         }
         _ => {}
     }
@@ -6275,7 +6173,10 @@ fn is_typescript_keyword(name: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::contains_identifier_outside_literals;
+    use super::{
+        TypeScriptRequirements, collect_typescript_value_requirements,
+        render_typescript_requirement_imports,
+    };
     use std::collections::BTreeMap;
     use std::fs;
     use std::path::Path;
@@ -6290,35 +6191,26 @@ mod tests {
         generate_files_for_tree_with_mode_and_options, generate_source,
     };
     use crate::language::Language;
+    use crate::planning::PlannedType;
     use crate::spec::ApiSpecTree;
+    use crate::spec::IntSpec;
     use crate::spec::SupportFragmentSpec;
 
     #[test]
-    fn default_type_import_scanner_ignores_literals_and_comments() {
-        for source in [
-            "const value = 'Long';",
-            "const value = \"Long\";",
-            "const value = `Long`;",
-            "const value = /Long/;",
-            "const value = /[L]ong\\//u;",
-            "// Long\nconst value = 1;",
-            "/* Long */ const value = 1;",
-        ] {
-            assert!(
-                !contains_identifier_outside_literals(source, "Long"),
-                "literal/comment was treated as code: {source}"
-            );
-        }
-        for source in [
-            "let value: Long;",
-            "return Long.fromValue(value);",
-            "const ratio = value / Long.MAX_VALUE;",
-        ] {
-            assert!(
-                contains_identifier_outside_literals(source, "Long"),
-                "code identifier was missed: {source}"
-            );
-        }
+    fn requirement_imports_are_structural() {
+        let nested_long = PlannedType::List(Box::new(PlannedType::Option(Box::new(
+            PlannedType::Int(IntSpec::I64),
+        ))));
+        let mut requirements = TypeScriptRequirements::default();
+        collect_typescript_value_requirements(&nested_long, &mut requirements);
+
+        let mut imports = String::new();
+        render_typescript_requirement_imports(&mut imports, &requirements);
+        assert_eq!(imports, "import type Long from 'long';\n");
+
+        let mut imports = String::new();
+        render_typescript_requirement_imports(&mut imports, &TypeScriptRequirements::default());
+        assert!(imports.is_empty());
     }
 
     fn sample_input_path(root: &std::path::Path) -> PathBuf {
