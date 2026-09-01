@@ -203,6 +203,7 @@ interface model {
   ///   typescript-import="@temporalio/common"
   type workflow-id-conflict-policy = placeholder;
 
+  /// @nexus.doc "Static metadata for a workflow execution."
   /// @nexus.proto "temporal.api.sdk.v1.UserMetadata" typescript-import="@temporalio/proto"
   /// @nexus.flatten-in-api
   record user-metadata {

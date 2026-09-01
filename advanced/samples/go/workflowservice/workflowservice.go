@@ -387,9 +387,13 @@ func userMetadataFromProto(ctx workflow.Context, proto *sdk.UserMetadata) (UserM
 }
 
 type SignalWithStartWorkflowResponse struct {
-	// RunID - Optional.
+	// RunID - Run ID of the started workflow.
+	//
+	// Optional.
 	RunID *string
-	// Started - Optional.
+	// Started - Whether the workflow was started.
+	//
+	// Optional.
 	Started *bool
 }
 

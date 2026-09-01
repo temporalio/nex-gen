@@ -108,10 +108,13 @@ interface workflow-service {
     time-skipping-config: placeholder,
   }
 
+  /// @nexus.doc "Result of signaling a workflow and starting it if needed."
   /// @nexus.experimental
   /// @nexus.proto "temporal.api.workflowservice.v1.SignalWithStartWorkflowExecutionResponse" typescript-import="@temporalio/proto"
   record signal-with-start-workflow-response {
+    /// @nexus.doc "Run ID of the started workflow."
     run-id: option<string>,
+    /// @nexus.doc "Whether the workflow was started."
     started: option<bool>,
     /// @nexus.omit
     signal-link: placeholder,

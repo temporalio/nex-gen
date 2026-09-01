@@ -80,7 +80,13 @@ function requestArgsToPayloads(
  * @experimental This API is experimental and subject to change.
  */
 export interface SignalWithStartWorkflowResponse {
+  /**
+   * Run ID of the started workflow.
+   */
   runId?: string;
+  /**
+   * Whether the workflow was started.
+   */
   started?: boolean;
 }
 

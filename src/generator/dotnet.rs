@@ -613,8 +613,7 @@ impl<'a> ApiPlanner<'a> {
         }
         output.push_str(GENERATED_CODE_ATTRIBUTE);
         output.push('\n');
-        let access = self.model_access(model);
-        output.push_str(access);
+        output.push_str("public");
         output.push_str(" record ");
         let type_name = csharp_type_name(&model.name);
         output.push_str(&type_name);
@@ -633,7 +632,7 @@ impl<'a> ApiPlanner<'a> {
             output.push('>');
         }
         output.push_str("\n{\n");
-        self.render_model_constructor(output, access, &type_name, model);
+        self.render_model_constructor(output, "public", &type_name, model);
         for (field_name, field) in model.model_fields() {
             render_field_xml_doc(output, "    ", field);
             output.push_str("    public ");
@@ -1225,10 +1224,6 @@ impl<'a> ApiPlanner<'a> {
         } else {
             "public"
         }
-    }
-
-    fn model_access(&self, _model: &PlannedModel) -> &'static str {
-        "public"
     }
 
     fn operation_has_input(&self, operation: &PlannedOperation) -> bool {
@@ -2214,14 +2209,11 @@ fn generate_leaf(
 impl<'a> ApiPlanner<'a> {
     fn render_system_nexus_workflow_outbound_interceptor_file(&self) -> String {
         let mut output = String::from(GENERATED_HEADER);
-        output.push_str("\n#nullable enable\n#pragma warning disable CS1591\n\n");
+        output.push_str("\n#nullable enable\n\n");
         output.push_str("using System.CodeDom.Compiler;\n");
         output.push_str("using System.Threading.Tasks;\n");
         output.push_str("using Temporalio.Workflows;\n\n");
-        output.push_str("namespace Temporalio.Worker.Interceptors\n{\n\n    ");
-        output.push_str(GENERATED_CODE_ATTRIBUTE);
-        output.push('\n');
-        output.push_str("    public partial class WorkflowOutboundInterceptor\n    {\n");
+        output.push_str("namespace Temporalio.Worker.Interceptors\n{\n\n    public partial class WorkflowOutboundInterceptor\n    {\n");
         for service in &self.api_plan.services {
             for operation in &service.operations {
                 let request_type = if self.operation_has_input(operation) {
@@ -2255,10 +2247,7 @@ impl<'a> ApiPlanner<'a> {
         }
         output.push_str("    }\n\n");
         output.push_str("}\n\n");
-        output.push_str("namespace Temporalio.Worker\n{\n\n    ");
-        output.push_str(GENERATED_CODE_ATTRIBUTE);
-        output.push('\n');
-        output.push_str("    internal partial class WorkflowInstance\n    {\n");
+        output.push_str("namespace Temporalio.Worker\n{\n\n    internal partial class WorkflowInstance\n    {\n");
         output.push_str("        private Task<NexusWorkflowOperationHandle<TResult>> StartSystemNexusOperationAsync<TResult>(\n            string service,\n            string operationName,\n            object? arg)\n        {\n");
         for service in &self.api_plan.services {
             for operation in &service.operations {
@@ -2266,14 +2255,30 @@ impl<'a> ApiPlanner<'a> {
                     continue;
                 }
                 let request_type = self.dotnet_erased_model_type(operation.input_model());
+                let response_type = self.operation_registry_response_type(operation);
                 output.push_str("            if (service == ");
                 output.push_str(&csharp_string_literal(&service.wire_name));
                 output.push_str(" &&\n                operationName == ");
                 output.push_str(&csharp_string_literal(&operation.wire_name));
-                output.push_str(" &&\n                arg is ");
+                output.push_str(")\n            {\n                if (arg is not ");
                 output.push_str(&request_type);
+                output.push_str(" request)\n                {\n                    throw new System.ArgumentException(\"System Nexus operation ");
+                output.push_str(&service.wire_name);
+                output.push('/');
+                output.push_str(&operation.wire_name);
+                output.push_str(" expects a ");
+                output.push_str(&request_type);
+                output.push_str(" request.\", nameof(arg));\n                }\n");
+                output.push_str("                if (typeof(TResult) != typeof(");
+                output.push_str(&response_type);
+                output.push_str("))\n                {\n                    throw new System.ArgumentException(\"System Nexus operation ");
+                output.push_str(&service.wire_name);
+                output.push('/');
+                output.push_str(&operation.wire_name);
+                output.push_str(" expects a ");
+                output.push_str(&response_type);
                 output.push_str(
-                    " request)\n            {\n                var handle = outbound.Value.",
+                    " result.\");\n                }\n                var handle = outbound.Value.",
                 );
                 output.push_str(&csharp_type_name(&operation.name));
                 output.push_str("Async(request);\n                return (Task<NexusWorkflowOperationHandle<TResult>>)(object)handle;\n            }\n");

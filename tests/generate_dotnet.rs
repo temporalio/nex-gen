@@ -221,13 +221,27 @@ fn dotnet_system_nexus_generation_emits_typed_outbound_interceptor() {
     generate_dotnet_output(&root, WORKFLOW_SERVICE_EXAMPLE_ID, &output_path);
     let interceptor =
         fs::read_to_string(output_path.join("SystemNexusWorkflowOutboundInterceptor.cs")).unwrap();
+    let models = fs::read_to_string(output_path.join("Models.cs")).unwrap();
 
     assert!(interceptor.contains("namespace Temporalio.Worker.Interceptors"));
     assert!(interceptor.contains("public partial class WorkflowOutboundInterceptor"));
+    assert!(!interceptor.contains("#pragma warning disable CS1591"));
+    assert!(!interceptor.contains(
+        "[GeneratedCode(\"nexgen\", null)]\n    public partial class WorkflowOutboundInterceptor"
+    ));
+    assert!(!interceptor.contains(
+        "[GeneratedCode(\"nexgen\", null)]\n    internal partial class WorkflowInstance"
+    ));
     assert!(interceptor.contains(
         "private Task<NexusWorkflowOperationHandle<TResult>> StartSystemNexusOperationAsync<TResult>"
     ));
     assert!(interceptor.contains("outbound.Value.SignalWithStartWorkflowAsync(request)"));
+    assert!(interceptor.contains("if (arg is not SignalWithStartWorkflowRequest request)"));
+    assert!(
+        interceptor.contains("if (typeof(TResult) != typeof(SignalWithStartWorkflowResponse))")
+    );
+    assert!(interceptor.contains("expects a SignalWithStartWorkflowRequest request."));
+    assert!(interceptor.contains("expects a SignalWithStartWorkflowResponse result."));
     assert!(interceptor.contains(
         "Task<NexusWorkflowOperationHandle<SignalWithStartWorkflowResponse>> SignalWithStartWorkflowAsync(SignalWithStartWorkflowRequest request)"
     ));
@@ -237,6 +251,8 @@ fn dotnet_system_nexus_generation_emits_typed_outbound_interceptor() {
     assert!(interceptor.contains(
         "SignalWithStartWorkflowAsync(SignalWithStartWorkflowRequest request) => instance.outbound.Value.ScheduleSystemNexusOperationAsync<SignalWithStartWorkflowResponse>"
     ));
+    assert!(models.contains("/// Static metadata for a workflow execution."));
+    assert!(models.contains("/// Result of signaling a workflow and starting it if needed."));
 
     let project_path = unique_output_path("dotnet-system-nexus-interceptor-build");
     fs::create_dir_all(&project_path).unwrap();

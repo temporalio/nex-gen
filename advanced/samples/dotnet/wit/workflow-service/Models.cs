@@ -12,6 +12,9 @@ using Nexgen.Support;
 namespace Temporalio.Workflows
 {
 
+    /// <summary>
+    /// Static metadata for a workflow execution.
+    /// </summary>
     [Temporalio.Converters.TemporalTransferTypeConverter(typeof(UserMetadata.TransferTypeConverter))]
     [GeneratedCode("nexgen", null)]
     public record UserMetadata
@@ -261,12 +264,21 @@ namespace Temporalio.Workflows
 
     }
 
+    /// <summary>
+    /// Result of signaling a workflow and starting it if needed.
+    /// </summary>
     /// <remarks>WARNING: This API is experimental and may change in the future.</remarks>
     [Temporalio.Converters.TemporalTransferTypeConverter(typeof(SignalWithStartWorkflowResponse.TransferTypeConverter))]
     [GeneratedCode("nexgen", null)]
     public record SignalWithStartWorkflowResponse
     {
+        /// <summary>
+        /// Run ID of the started workflow.
+        /// </summary>
         public string? RunId { get; init; }
+        /// <summary>
+        /// Whether the workflow was started.
+        /// </summary>
         public bool? Started { get; init; }
 
         internal static SignalWithStartWorkflowResponse FromTransferType(Temporalio.Api.WorkflowService.V1.SignalWithStartWorkflowExecutionResponse wire)
