@@ -225,7 +225,7 @@ fn insert_file(
         path,
         contents,
         origin,
-        "rename the conflicting declaration with `x-java-name`, or rename its input module, so the generated Java paths differ",
+        "rename the conflicting declaration or its input module so the generated Java paths differ",
     )
 }
 
