@@ -1635,6 +1635,50 @@ fn python_rejects_support_namespace() {
     assert!(err.to_string().contains("support namespace"));
 }
 
+#[test]
+fn python_support_fragments_with_same_module_name_collide() {
+    let root = project_root();
+    let spec = nexgen::parser::load_api_spec_from_wit_for_language_with_inputs(
+        nexgen::language::Language::Python,
+        &example_input_paths(&root, PRIMARY_EXAMPLE_ID),
+    )
+    .unwrap();
+    let descriptors = nexgen::descriptors::DescriptorIndex::load(&descriptor_path(&root)).unwrap();
+    let error = generate_source(
+        nexgen::language::Language::Python,
+        spec,
+        &descriptors,
+        &SupportFiles {
+            fragments: vec![
+                SupportFragmentSpec {
+                    path: "first/helpers.py".to_string(),
+                    contents: String::new(),
+                    namespace: None,
+                },
+                SupportFragmentSpec {
+                    path: "second/helpers.py".to_string(),
+                    contents: String::new(),
+                    namespace: None,
+                },
+            ],
+        },
+    )
+    .unwrap_err();
+
+    let nexgen::error::Error::GeneratedFileOriginConflict {
+        path,
+        first_origin,
+        second_origin,
+        remedy: _,
+    } = error
+    else {
+        panic!("expected generated-file origin conflict, got {error}");
+    };
+    assert_eq!(path, PathBuf::from("_support/helpers.py"));
+    assert_eq!(first_origin, PathBuf::from("first/helpers.py"));
+    assert_eq!(second_origin, PathBuf::from("second/helpers.py"));
+}
+
 /// An inline **structured** object `oneOf` branch on a property: the branch is
 /// named `<Union>Object` and emitted as a module-level dataclass, which the
 /// union's dispatcher selects for the object member of the union.

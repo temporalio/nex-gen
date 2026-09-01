@@ -214,7 +214,7 @@ fn insert_generated_file(
         path,
         contents,
         origin,
-        "rename one input file or directory, or rename the conflicting declaration with `x-py-name`, so the generated Python paths differ",
+        "rename one input file or directory so the generated Python paths differ",
     )
 }
 
