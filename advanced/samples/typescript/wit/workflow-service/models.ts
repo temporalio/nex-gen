@@ -232,6 +232,9 @@ export type SignalWithStartWorkflowRequest<
      * fixed on the workflow execution and cannot be updated.
      */
     staticDetails?: string;
+    /**
+     * Headers for the request.
+     */
     headers?: common.Headers;
   },
   (

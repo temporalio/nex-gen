@@ -345,6 +345,9 @@ impl<'a> ApiPlanner<'a> {
             .operations_class
             .for_language(Language::Dotnet)
             .is_some();
+        output.push_str("/// <summary>\n");
+        output.push_str("/// Provides generated workflow operation helpers.\n");
+        output.push_str("/// </summary>\n");
         if !explicit_operations_class {
             output.push_str(GENERATED_CODE_ATTRIBUTE);
             output.push('\n');
@@ -932,6 +935,11 @@ impl<'a> ApiPlanner<'a> {
         if required_fields.is_empty() && sourced_fields.is_empty() {
             return;
         }
+        output.push_str("    /// <summary>\n");
+        output.push_str("    /// Initializes a new instance of the <see cref=\"");
+        output.push_str(type_name);
+        output.push_str("\"/> class.\n");
+        output.push_str("    /// </summary>\n");
         output.push_str("    ");
         output.push_str(access);
         output.push(' ');
@@ -2557,7 +2565,7 @@ fn generated_file_prelude(namespace: &str, imports: &[&str]) -> String {
     let mut output = String::new();
     output.push_str(GENERATED_HEADER);
     output.push_str("\n#nullable enable\n");
-    output.push_str("#pragma warning disable CS1591\n\n");
+    output.push('\n');
     for import in imports {
         output.push_str("using ");
         output.push_str(import);
@@ -3168,6 +3176,11 @@ fn render_operation_options_constructor(
     if required_fields.is_empty() {
         return;
     }
+    output.push_str("    /// <summary>\n");
+    output.push_str("    /// Initializes a new instance of the <see cref=\"");
+    output.push_str(type_name);
+    output.push_str("\"/> class.\n");
+    output.push_str("    /// </summary>\n");
     output.push_str("    public ");
     output.push_str(type_name);
     output.push('(');

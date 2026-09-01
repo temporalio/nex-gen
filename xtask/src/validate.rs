@@ -110,6 +110,16 @@ fn validate_dotnet(repo_root: &Path) -> Result<()> {
     for root in sample_roots(repo_root, "dotnet") {
         run(&root, "dotnet", &["test", "tests/", "--nologo"])?;
     }
+    let workflow_service_docs_root = repo_root.join("advanced/samples/dotnet");
+    run(
+        &workflow_service_docs_root,
+        "dotnet",
+        &[
+            "build",
+            "Nexgen.DotNetWorkflowServiceDocs.csproj",
+            "--nologo",
+        ],
+    )?;
     Ok(())
 }
 

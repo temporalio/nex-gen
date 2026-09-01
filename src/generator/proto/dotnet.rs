@@ -531,15 +531,23 @@ fn render_model_transfer_converter(
     output.push_str("        return proto;\n");
     output.push_str("    }\n\n");
     let type_name = csharp_type_name(&model.name);
+    output.push_str("    /// <summary>\n");
+    output.push_str("    /// Converts this model to and from its generated transfer type.\n");
+    output.push_str("    /// </summary>\n");
     output.push_str("    public sealed class TransferTypeConverter : Temporalio.Converters.ITemporalTransferTypeConverter\n    {\n");
+    output.push_str("        /// <summary>Gets the generated transfer type.</summary>\n");
     output.push_str("        public System.Type TransferType => typeof(");
     output.push_str(&raw_type);
     output.push_str(");\n\n");
+    output
+        .push_str("        /// <summary>Converts a model value to its transfer type.</summary>\n");
     output.push_str(
         "        public object? ToTransferType(object? value) => value is null ? null : ((",
     );
     output.push_str(&type_name);
     output.push_str(")value).ToTransferType();\n\n");
+    output
+        .push_str("        /// <summary>Converts a transfer-type value to this model.</summary>\n");
     output.push_str("        public object? FromTransferType(object? transferType) => transferType is null ? null : ");
     output.push_str(&type_name);
     output.push_str(".FromTransferType((");

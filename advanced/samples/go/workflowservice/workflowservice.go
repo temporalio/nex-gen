@@ -485,7 +485,9 @@ type SignalWithStartWorkflowOptions struct {
 	//
 	// Optional.
 	StartDelay time.Duration
-	// UserMetadata - Optional.
+	// UserMetadata - Static metadata for the workflow execution.
+	//
+	// Optional.
 	UserMetadata
 }
 
