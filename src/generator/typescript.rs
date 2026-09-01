@@ -94,15 +94,18 @@ fn generate_tree(
     let mut files = BTreeMap::new();
     let mut origins = BTreeMap::new();
     let mut warnings = Vec::new();
-    let tree_support_files = render_tree_support_files(branch);
-    let has_json_runtime_module = tree_support_files.contains_key(&PathBuf::from("definitions.ts"));
-    insert_branch_index_file(&mut files, &mut origins, branch, has_json_runtime_module)?;
-    insert_files(
-        &mut files,
-        &mut origins,
-        tree_support_files,
-        PathBuf::from("<generated TypeScript JSON runtime>"),
-    )?;
+    let additional_exports: &[&str] = if branch_has_json_models(branch) {
+        insert_files(
+            &mut files,
+            &mut origins,
+            render_tree_support_files(branch),
+            PathBuf::from("<generated TypeScript JSON runtime>"),
+        )?;
+        &["export type { Violation } from './definitions';"]
+    } else {
+        &[]
+    };
+    insert_branch_index_file(&mut files, &mut origins, branch, additional_exports)?;
     for node in branch.children.values() {
         generate_tree_node(
             node,
@@ -152,7 +155,7 @@ fn generate_tree_node(
             Ok(())
         }
         ApiSpecNode::Branch(branch) => {
-            insert_branch_index_file(files, origins, branch, false)?;
+            insert_branch_index_file(files, origins, branch, &[])?;
             for node in branch.children.values() {
                 generate_tree_node(node, support, ts_date_time_types, files, origins, warnings)?;
             }
@@ -165,7 +168,7 @@ fn insert_branch_index_file(
     files: &mut BTreeMap<PathBuf, String>,
     origins: &mut BTreeMap<PathBuf, PathBuf>,
     branch: &ApiSpecBranch<PlannedFamily>,
-    has_json_runtime_module: bool,
+    additional_exports: &[&str],
 ) -> Result<()> {
     let mut path = branch.module_path.to_path_buf();
     path.push("index.ts");
@@ -176,8 +179,9 @@ fn insert_branch_index_file(
         contents.push_str(name);
         contents.push_str("';\n");
     }
-    if has_json_runtime_module {
-        contents.push_str("export type { Violation } from './definitions';\n");
+    for export in additional_exports {
+        contents.push_str(export);
+        contents.push('\n');
     }
     insert_generated_file_with_origin(
         files,
