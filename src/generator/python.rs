@@ -4628,7 +4628,7 @@ fn render_system_nexus_interceptor(services: &[RenderedService<'_>]) -> String {
         .collect::<Vec<_>>();
     let mut output = String::new();
     render_generated_file_header(&mut output);
-    output.push_str("\n\nimport abc\nimport typing\n\nfrom temporalio.nexus.system import TEMPORAL_SYSTEM_ENDPOINT\n\nfrom . import models\n\nif typing.TYPE_CHECKING:\n    import temporalio.workflow\n    from temporalio.worker._interceptor import StartNexusOperationInput\n\n\n__all__ = [\n    \"_start_system_nexus_operation\",\n    \"_SystemNexusWorkflowOutboundInterceptorBase\",\n    \"_SystemNexusWorkflowOutboundInterceptorTerminal\",\n]\n\n\n_InputT = typing.TypeVar(\"_InputT\")\n_OutputT = typing.TypeVar(\"_OutputT\")\n\n\n");
+    output.push_str("\n\nimport abc\nimport typing\n\nfrom . import models\n\nif typing.TYPE_CHECKING:\n    import temporalio.workflow\n    from temporalio.worker._interceptor import StartNexusOperationInput\n\n\n__all__ = [\n    \"_start_system_nexus_operation\",\n    \"_SystemNexusWorkflowOutboundInterceptorBase\",\n    \"_SystemNexusWorkflowOutboundInterceptorTerminal\",\n]\n\n\n_InputT = typing.TypeVar(\"_InputT\")\n_OutputT = typing.TypeVar(\"_OutputT\")\n\n\n");
     output.push_str(
         "async def _start_system_nexus_operation(\n    interceptor: _SystemNexusWorkflowOutboundInterceptorBase,\n    input: StartNexusOperationInput[_InputT, _OutputT],\n) -> temporalio.workflow.NexusOperationHandle[_OutputT]:\n",
     );
@@ -4670,7 +4670,7 @@ fn render_system_nexus_interceptor(services: &[RenderedService<'_>]) -> String {
     }
 
     output.push_str("\n\nclass _SystemNexusWorkflowOutboundInterceptorTerminal(abc.ABC):\n");
-    output.push_str("    @abc.abstractmethod\n    async def _outbound_start_nexus_operation(\n        self,\n        input: StartNexusOperationInput[_InputT, _OutputT],\n    ) -> temporalio.workflow.NexusOperationHandle[_OutputT]:\n        ...\n");
+    output.push_str("    @abc.abstractmethod\n    async def _intercept_system_nexus_operation(\n        self,\n        input: StartNexusOperationInput[_InputT, _OutputT],\n    ) -> temporalio.workflow.NexusOperationHandle[_OutputT]:\n        ...\n");
     for (service, operation) in operations {
         let output_type = system_nexus_type_expr(&operation.output_type_expr);
         output.push_str("\n    async def start_");
@@ -4683,9 +4683,10 @@ fn render_system_nexus_interceptor(services: &[RenderedService<'_>]) -> String {
         output.push_str(
             "        from temporalio.worker._interceptor import StartNexusOperationInput\n",
         );
+        output.push_str("        from temporalio.nexus.system import TEMPORAL_SYSTEM_ENDPOINT\n");
         output
             .push_str("        from temporalio.workflow import NexusOperationCancellationType\n\n");
-        output.push_str("        return await self._outbound_start_nexus_operation(\n");
+        output.push_str("        return await self._intercept_system_nexus_operation(\n");
         output.push_str("            StartNexusOperationInput(\n                endpoint=TEMPORAL_SYSTEM_ENDPOINT,\n                service=");
         output.push_str(&python_string_literal(service.wire_name));
         output.push_str(",\n                operation=");

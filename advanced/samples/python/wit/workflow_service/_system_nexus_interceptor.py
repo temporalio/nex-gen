@@ -6,8 +6,6 @@ from __future__ import annotations
 import abc
 import typing
 
-from temporalio.nexus.system import TEMPORAL_SYSTEM_ENDPOINT
-
 from . import models
 
 if typing.TYPE_CHECKING:
@@ -67,7 +65,7 @@ class _SystemNexusWorkflowOutboundInterceptorBase(abc.ABC):
 
 class _SystemNexusWorkflowOutboundInterceptorTerminal(abc.ABC):
     @abc.abstractmethod
-    async def _outbound_start_nexus_operation(
+    async def _intercept_system_nexus_operation(
         self,
         input: StartNexusOperationInput[_InputT, _OutputT],
     ) -> temporalio.workflow.NexusOperationHandle[_OutputT]: ...
@@ -78,9 +76,10 @@ class _SystemNexusWorkflowOutboundInterceptorTerminal(abc.ABC):
         models.SignalWithStartWorkflowResponse
     ]:
         from temporalio.worker._interceptor import StartNexusOperationInput
+        from temporalio.nexus.system import TEMPORAL_SYSTEM_ENDPOINT
         from temporalio.workflow import NexusOperationCancellationType
 
-        return await self._outbound_start_nexus_operation(
+        return await self._intercept_system_nexus_operation(
             StartNexusOperationInput(
                 endpoint=TEMPORAL_SYSTEM_ENDPOINT,
                 service="temporal.api.workflowservice.v1.WorkflowService",

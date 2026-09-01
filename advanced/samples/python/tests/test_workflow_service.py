@@ -12,11 +12,18 @@ import temporalio.common
 import temporalio.converter
 from temporalio import workflow
 from temporalio.testing import WorkflowEnvironment
-from temporalio.worker import UnsandboxedWorkflowRunner, Worker
-from typing_extensions import assert_type
+from temporalio.worker import (
+    StartNexusOperationInput,
+    UnsandboxedWorkflowRunner,
+    Worker,
+)
+from typing_extensions import assert_type, override
 import pytest
 import wit.workflow_service as workflow_service
 import wit.workflow_service.models as workflow_service_models
+from wit.workflow_service._system_nexus_interceptor import (
+    _SystemNexusWorkflowOutboundInterceptorTerminal,
+)
 
 APP_ROOT = Path(__file__).resolve().parent
 OUTPUT_PATH = APP_ROOT.parent / "wit" / "workflow_service"
@@ -28,6 +35,20 @@ SIGNAL_WITH_START_OPERATION_INFO = workflow_service.__nexus_operation_registry__
     )
 ]
 SIGNAL_WITH_START_OPERATION = SIGNAL_WITH_START_OPERATION_INFO.operation
+
+
+class CapturingSystemNexusTerminal(_SystemNexusWorkflowOutboundInterceptorTerminal):
+    def __init__(self) -> None:
+        self.input: StartNexusOperationInput[typing.Any, typing.Any] | None = None
+
+    @override
+    async def _intercept_system_nexus_operation(
+        self,
+        input: StartNexusOperationInput[typing.Any, typing.Any],
+    ) -> workflow.NexusOperationHandle[typing.Any]:
+        self.input = input
+        return typing.cast(workflow.NexusOperationHandle[typing.Any], object())
+
 
 TASK_QUEUE = "demo-task-queue"
 CRON_SCHEDULE = ""
@@ -53,6 +74,25 @@ HIGH_ARITY_SIGNAL_INPUT = [
     "six",
     "seven",
 ]
+
+
+async def test_generated_system_nexus_terminal_enters_interception_boundary() -> None:
+    terminal = CapturingSystemNexusTerminal()
+    request = workflow_service_models.SignalWithStartWorkflowRequest(
+        workflow="workflow",
+        id="workflow-id",
+        task_queue="task-queue",
+        signal="signal",
+        namespace="default",
+    )
+
+    _ = await terminal.start_signal_with_start_workflow(request)
+
+    assert terminal.input is not None
+    assert terminal.input.endpoint == "__temporal_system"
+    assert terminal.input.service == "temporal.api.workflowservice.v1.WorkflowService"
+    assert terminal.input.operation_name == "SignalWithStartWorkflowExecution"
+    assert terminal.input.input is request
 
 
 @workflow.defn
