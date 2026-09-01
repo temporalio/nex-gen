@@ -1,12 +1,13 @@
 # A pure JSON Schema input exercising the four MATERIALIZED temporal `format`s
 # (date-time / date / time / duration) across required, optional, and nullable
 # members. Each format becomes an idiomatic language-native typed field (Go
-# time.Time / time.Duration, Java OffsetDateTime / LocalDate / OffsetTime /
+# time.Time / time.Duration, Java OffsetDateTime / LocalDate / String /
 # Duration, Python datetime / date / time / timedelta, and — per
-# `--js-temporal-repr` — a TS string / Date / Temporal type). The wire is
-# produced by the generator-owned serializer (RFC 3339, original offset
-# preserved, `+00:00`/`-00:00` → `Z`, trailing fractional zeros trimmed;
-# duration canonicalized to time-only `PT…H…M…S`). See
+# `--date-time-types` — a TS string / Date / Temporal type). The wire is
+# produced by the generator-owned serializer (RFC 3339 with materialized
+# offsets limited to -18:00 through +18:00, original offset preserved,
+# `+00:00`/`-00:00` → `Z`, trailing fractional zeros trimmed; duration
+# canonicalized to time-only `PT…H…M…S`). See
 # json-schema/features/format.md (Materialization).
 $schema: https://json-schema.org/draft/2020-12/schema
 title: Temporal

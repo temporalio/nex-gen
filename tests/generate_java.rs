@@ -637,7 +637,7 @@ fn java_json_emits_runtime_support_for_nested_materialized_values() {
     // The serialize-side representability predicate exists for **every**
     // materialized kind, not just the calendar year floor (`09#3`).
     for expected in [
-        "public static void checkDateTime(DateTime value, String path, List<Violation> violations) {",
+        "public static void checkDateTime(OffsetDateTime value, String path, List<Violation> violations) {",
         "public static void checkDate(LocalDate value, String path, List<Violation> violations) {",
         "public static void checkTime(String value, String path, List<Violation> violations) {",
         "public static void checkDuration(Duration value, String path, List<Violation> violations) {",
@@ -703,7 +703,7 @@ properties:
 }
 
 #[test]
-fn java_json_authored_datetime_does_not_shadow_temporal_carrier() {
+fn java_json_authored_datetime_does_not_shadow_offset_date_time() {
     let temp_dir = unique_output_path("java-json-datetime-shadow");
     let gradle_root = temp_dir.join("project");
     fs::create_dir_all(&gradle_root).unwrap();
@@ -774,24 +774,21 @@ $defs:
     .unwrap();
 
     let event = fs::read_to_string(output_path.join("Event.java")).unwrap();
+    assert!(event.contains("OffsetDateTime timestamp"), "{event}");
     assert!(
-        event.contains("TemporalSupport.DateTime timestamp"),
-        "{event}"
-    );
-    assert!(
-        event.contains("TemporalSupport.@Nullable DateTime optionalTimestamp"),
+        event.contains("@Nullable OffsetDateTime optionalTimestamp"),
         "{event}"
     );
     for declaration in [
-        "@Nullable List<TemporalSupport.DateTime> optionalCollection",
-        "@Nullable List<TemporalSupport.DateTime> nullableCollection",
-        "List<TemporalSupport.@Nullable DateTime> nullableElement",
-        "@Nullable List<TemporalSupport.@Nullable DateTime> bothCombined",
+        "@Nullable List<OffsetDateTime> optionalCollection",
+        "@Nullable List<OffsetDateTime> nullableCollection",
+        "List<@Nullable OffsetDateTime> nullableElement",
+        "@Nullable List<@Nullable OffsetDateTime> bothCombined",
     ] {
         assert!(event.contains(declaration), "{declaration}\n{event}");
     }
     assert!(event.contains("DateTime authored"), "{event}");
-    assert!(!event.contains("import example.shadow.TemporalSupport.DateTime;"));
+    assert!(event.contains("import java.time.OffsetDateTime;"));
 
     let test_package = gradle_root.join("src/test/java/example/shadow");
     fs::create_dir_all(&test_package).unwrap();
@@ -802,13 +799,14 @@ $defs:
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.time.OffsetDateTime;
 import org.junit.jupiter.api.Test;
 
 final class DateTimeTypeIdentityTest {
     @Test
     void authoredAndTemporalDateTimesRemainDistinct() throws Exception {
         assertEquals(DateTime.class, Event.class.getMethod("getAuthored").getReturnType());
-        assertEquals(TemporalSupport.DateTime.class, Event.class.getMethod("getTimestamp").getReturnType());
+        assertEquals(OffsetDateTime.class, Event.class.getMethod("getTimestamp").getReturnType());
     }
 
     @Test
@@ -837,6 +835,81 @@ final class DateTimeTypeIdentityTest {
         .status()
         .expect("run Gradle DateTime identity test");
     assert!(status.success());
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+#[test]
+fn java_json_rejects_model_shadowing_schema_dependent_offset_date_time_import() {
+    let temp_dir = unique_output_path("java-json-offset-date-time-import");
+    fs::create_dir_all(&temp_dir).unwrap();
+    let colliding_input = temp_dir.join("colliding.yaml");
+    fs::write(
+        &colliding_input,
+        r##"$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  value: { $ref: "#/$defs/OffsetDateTime" }
+$defs:
+  OffsetDateTime:
+    type: object
+    properties:
+      timestamp: { type: string, format: date-time }
+"##,
+    )
+    .unwrap();
+
+    let error = generate_to_file(&GenerateRequest {
+        config: Default::default(),
+        language: nexgen::language::Language::Java,
+        input_paths: vec![colliding_input],
+        support_paths: Vec::new(),
+        descriptor_paths: Vec::new(),
+        output_path: temp_dir.join("colliding"),
+        format: false,
+        java_package_name: Some("example.collision".to_string()),
+        ts_date_time_types: Default::default(),
+    })
+    .unwrap_err()
+    .to_string();
+    assert!(
+        error.contains("type `OffsetDateTime`")
+            && error.contains("java.time.OffsetDateTime")
+            && error.contains("x-java-name"),
+        "{error}"
+    );
+
+    let plain_input = temp_dir.join("plain.yaml");
+    fs::write(
+        &plain_input,
+        r##"$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  value: { $ref: "#/$defs/OffsetDateTime" }
+$defs:
+  OffsetDateTime:
+    type: object
+    properties:
+      timestamp: { type: string }
+"##,
+    )
+    .unwrap();
+    let output_path = temp_dir.join("plain");
+    generate_to_file(&GenerateRequest {
+        config: Default::default(),
+        language: nexgen::language::Language::Java,
+        input_paths: vec![plain_input],
+        support_paths: Vec::new(),
+        descriptor_paths: Vec::new(),
+        output_path: output_path.clone(),
+        format: false,
+        java_package_name: Some("example.plain".to_string()),
+        ts_date_time_types: Default::default(),
+    })
+    .expect("a non-temporal OffsetDateTime model emits no conflicting import");
+    let plain_model = fs::read_to_string(output_path.join("OffsetDateTime.java")).unwrap();
+    assert!(plain_model.contains("public final class OffsetDateTime"));
+    assert!(!plain_model.contains("import java.time.OffsetDateTime;"));
+
     fs::remove_dir_all(temp_dir).unwrap();
 }
 
@@ -2293,19 +2366,43 @@ properties:
 #[test]
 fn java_json_truncates_an_over_long_fractional_second() {
     let temp_dir = unique_output_path("java-json-fractional-second");
-    fs::create_dir_all(&temp_dir).unwrap();
+    let gradle_root = temp_dir.join("project");
+    fs::create_dir_all(&gradle_root).unwrap();
+    fs::copy(
+        project_root().join("samples/java/build.gradle"),
+        gradle_root.join("build.gradle"),
+    )
+    .unwrap();
+    fs::copy(
+        project_root().join("samples/java/settings.gradle"),
+        gradle_root.join("settings.gradle"),
+    )
+    .unwrap();
     let input_path = temp_dir.join("fracsec.yaml");
     fs::write(
         &input_path,
         r##"$schema: https://json-schema.org/draft/2020-12/schema
+title: Fractional Defaults
 type: object
 properties:
   ts: { type: string, format: date-time }
   tod: { type: string, format: time }
+  wideDefault:
+    type: string
+    format: date-time
+    default: "2021-06-15t12:30:45.123456789012+18:00"
+  plusBoundary:
+    type: string
+    format: date-time
+    default: "2021-06-15T12:30:45+18:00"
+  minusBoundary:
+    type: string
+    format: date-time
+    default: "2021-06-15T12:30:45-18:00"
 "##,
     )
     .unwrap();
-    let output_path = temp_dir.join("fracsec");
+    let output_path = gradle_root.join("src/main/java/fracsec");
 
     generate_to_file(&GenerateRequest {
         config: Default::default(),
@@ -2327,12 +2424,13 @@ properties:
         support.contains("(\\\\.[0-9]+)?"),
         "the pinned fraction must stay unbounded\n{support}"
     );
-    // The typed date-time carrier truncates to LocalDateTime's nanoseconds;
+    // The typed date-time truncates to OffsetDateTime's nanoseconds;
     // string-carried time keeps every digit and uses owned string arithmetic.
     for expected in [
         "private static String truncateFraction(String value) {",
-        "String upper = truncateFraction(value).toUpperCase();",
-        "return new DateTime(LocalDateTime.parse(local), offsetSeconds);",
+        "public static OffsetDateTime parseDateTimeLiteral(String value) {",
+        "return OffsetDateTime.parse(truncateFraction(value).toUpperCase());",
+        "return parseDateTimeLiteral(value);",
         "return canonicalTime(value);",
     ] {
         assert!(support.contains(expected), "{expected}\n{support}");
@@ -2340,6 +2438,83 @@ properties:
     assert!(
         !support.contains("LocalDate.parse(truncateFraction("),
         "a date carries no fraction\n{support}"
+    );
+
+    let model = &rendered[&PathBuf::from("Fracsec.java")];
+    assert!(
+        model.contains(
+            "TemporalSupport.parseDateTimeLiteral(\"2021-06-15T12:30:45.123456789012+18:00\")"
+        ),
+        "{model}"
+    );
+
+    let test_package = gradle_root.join("src/test/java/fracsec");
+    fs::create_dir_all(&test_package).unwrap();
+    fs::write(
+        test_package.join("FractionalDefaultsTest.java"),
+        r#"package fracsec;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
+import java.util.Collections;
+import org.junit.jupiter.api.Test;
+
+final class FractionalDefaultsTest {
+    @Test
+    void dateTimeDefaultsUseTheMaterializedParser() {
+        Fracsec value = new Fracsec(null, null, null, null, null, Collections.emptyMap());
+        assertEquals(
+            OffsetDateTime.parse("2021-06-15T12:30:45.123456789+18:00"),
+            value.getWideDefaultOrDefault());
+        assertEquals(ZoneOffset.ofHours(18), value.getPlusBoundaryOrDefault().getOffset());
+        assertEquals(ZoneOffset.ofHours(-18), value.getMinusBoundaryOrDefault().getOffset());
+    }
+}
+"#,
+    )
+    .unwrap();
+    let status = Command::new(project_root().join("samples/java/gradlew"))
+        .args([
+            "test",
+            "--no-daemon",
+            "--tests",
+            "fracsec.FractionalDefaultsTest",
+        ])
+        .current_dir(&gradle_root)
+        .status()
+        .expect("run Gradle fractional date-time default test");
+    assert!(status.success());
+
+    let invalid_input = temp_dir.join("invalid-default.yaml");
+    fs::write(
+        &invalid_input,
+        r#"$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  invalid:
+    type: string
+    format: date-time
+    default: "2021-06-15T12:30:45+18:01"
+"#,
+    )
+    .unwrap();
+    let error = generate_to_file(&GenerateRequest {
+        config: Default::default(),
+        language: nexgen::language::Language::Java,
+        input_paths: vec![invalid_input],
+        support_paths: Vec::new(),
+        descriptor_paths: Vec::new(),
+        output_path: temp_dir.join("invalid"),
+        format: false,
+        java_package_name: Some("invalid".to_string()),
+        ts_date_time_types: Default::default(),
+    })
+    .unwrap_err()
+    .to_string();
+    assert!(
+        error.contains("is not a valid date-time") && error.contains("+18:01"),
+        "{error}"
     );
     fs::remove_dir_all(temp_dir).unwrap();
 }

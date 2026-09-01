@@ -20,7 +20,7 @@ predicate**, all plain arithmetic.
 
 Beyond validation, the temporal formats (`date-time`, `date`, `time`,
 `duration`) are **materialized** as idiomatic typed model fields (Go
-`time.Time`, Java `TemporalSupport.DateTime`, Python `datetime`, …) rather than a bare
+`time.Time`, Java `OffsetDateTime`, Python `datetime`, …) rather than a bare
 `string` — see **Materialization (type mapping)**. That is the one place
 `format` departs from a pure assertion: the field carries a language-native
 value, and the wire is produced by **re-serializing** it — with **no
@@ -107,7 +107,7 @@ what is missing is the machine-readable declaration of it.
   materialized** (below): `date`, `date-time`, `time`, `duration` — RFC 3339
   profile; the pattern pins the offset's numeric range and the predicate
   enforces the year floor, day-in-month and the Gregorian leap-year rule
-  (`json-schema/corpora/format_conformance/`, 124 pairs, 7/7 agree).
+  (`json-schema/corpora/format_conformance/`, 136 pairs, 7/7 agree).
 
 **Deferred (rejected at load, "not yet supported"):** `idn-email`,
 `idn-hostname`, `iri`, `iri-reference` (all need **IDNA / Unicode** handling
@@ -165,8 +165,13 @@ node (below):
   fixed-duration type (`time.Duration`, `timedelta`, `java.time.Duration`,
   `TimeSpan`) can represent calendar-variable years/months without a
   reference date. A **string-opt-out** node keeps the full duration grammar.
+- **`date-time` / `time` offsets are narrowed to `-18:00..+18:00` inclusive**
+  — at hour 18, only minute 00 is admitted. This is the single materialized
+  offset domain in every target and lets Java use its idiomatic
+  `OffsetDateTime`. A future string opt-out
+  keeps RFC 3339's wider numeric offset grammar.
 
-Both narrowings are strictly *more* restrictive (no previously-rejected value
+All three narrowings are strictly *more* restrictive (no previously-rejected value
 becomes accepted) and are the price of the idiomatic typed field.
 
 **RFC 3339 edge decisions (pinned, temporal formats).** All targets follow
@@ -174,9 +179,11 @@ these because we own the check:
 - **`date-time` offset is required** (`Z` or `±HH:MM`); a bare local
   `date-time` is invalid. `-00:00` is accepted. **`time` offset is optional**
   (RFC 3339 `partial-time`); an offset, when present, is range-checked.
-- **Offset range** is enforced by the pinned pattern's own alternation: hours
-  `00–23`, minutes `00–59`, so `+24:00` / `+01:60` are rejected. (The
-  serialize-side range check over a native offset is separate — below.)
+- **Offset range** is enforced by the pinned pattern's own alternation:
+  `00:00–17:59` plus `18:00`, with either sign. Thus `±18:00` is accepted,
+  while `±18:01`, `±23:59`, and malformed minutes such as `+01:60` are
+  rejected. (The serialize-side range check over a native offset is separate
+  — below.)
 - **Case** — `T` / `Z` separators are accepted in either case (RFC 3339
   §5.6). Materialized nodes **uppercase on the parse path** before the native
   parse (Go / Python / Ruby native parsers reject lowercase; safe because the
@@ -243,7 +250,7 @@ represent a value must not be made to drop it.
 
 | Format | Go | Java | Python | TS (per `--date-time-types`) | Wire form |
 |---|---|---|---|---|---|
-| `date-time` | `time.Time` | generated `TemporalSupport.DateTime` (`LocalDateTime` + owned offset seconds) | `datetime` (aware) | `string` / `Date` / `Temporal.ZonedDateTime` | RFC 3339, **original offset & sub-second precision preserved** (per-target loss below) |
+| `date-time` | `time.Time` | `OffsetDateTime` | `datetime` (aware) | `string` / `Date` / `Temporal.ZonedDateTime` | materialized RFC 3339 subset, **original offset & sub-second precision preserved** (per-target loss below) |
 | `date` | `time.Time`† | `LocalDate` | `date` | `string` / `Temporal.PlainDate` | `YYYY-MM-DD` (lossless) |
 | `time` | `time.Time`† | `String` (validated and canonicalized) | `time` (aware / naive) | `string` (all modes) | `HH:MM:SS[.f…]` + **offset preserved when present** |
 | `duration` | `time.Duration` | `Duration` | `timedelta` | `string` / `Temporal.Duration` | `PTnHnMnS` (time-only; omit zero components; `PT0S` for zero) |
@@ -278,7 +285,7 @@ rules above.
 | Target | In-memory type | Round-trip |
 |---|---|---|
 | Go | `time.Time` | offset + **nanosecond** preserved; **sub-nanosecond truncated** (the type's resolution) |
-| Java | `TemporalSupport.DateTime` | full ±23:59 offset + **nanosecond** preserved; **sub-nanosecond truncated** (`LocalDateTime` resolution) |
+| Java | `OffsetDateTime` | offset + **nanosecond** preserved; **sub-nanosecond truncated** (the type's resolution) |
 | Python | `datetime` (aware) | offset preserved, **sub-microsecond truncated** (the type's resolution) |
 | TS `--date-time-types=string` (default) | `string` | serialized form stored — lossless at every width |
 | TS `--date-time-types=date` | `Date` | UTC instant at **millisecond** — offset folded to UTC, sub-ms lost |
@@ -408,8 +415,8 @@ materialized, `:60`-rejecting grammar):
 | Format | Pinned pattern (materialized node) |
 |---|---|
 | `date` | `^[0-9]{4}-(0[1-9]\|1[0-2])-(0[1-9]\|[12][0-9]\|3[01])$` + calendar predicate (year `0001–9999`) |
-| `time` | `^([01][0-9]\|2[0-3]):[0-5][0-9]:[0-5][0-9](\.[0-9]+)?([Zz]\|[+-]([01][0-9]\|2[0-3]):[0-5][0-9])?$` (offset optional; no `\|60`) |
-| `date-time` | full-date `[Tt]` full-time, **offset required**, no `\|60` + calendar + range |
+| `time` | `^([01][0-9]\|2[0-3]):[0-5][0-9]:[0-5][0-9](\.[0-9]+)?([Zz]\|[+-]((0[0-9]\|1[0-7]):[0-5][0-9]\|18:00))?$` (offset optional; no `\|60`) |
+| `date-time` | full-date `[Tt]` full-time, **offset required**, no `\|60`, offset `00:00–17:59` or `18:00` + calendar + range |
 | `duration` | `^PT(?:[0-9]+H(?:[0-9]+M(?:[0-9]+S)?)?\|[0-9]+M(?:[0-9]+S)?\|[0-9]+S)$` (time-only) |
 
 *(A string-opt-out temporal node keeps the wider grammar: `time` / `date-time`
@@ -421,7 +428,7 @@ add back the `|60` seconds alternative; `duration` uses the full
 | Go | Parse adapter: run the pinned regex + `validRFC3339(...)` over the wire string, pushing a `Violation` on failure; else `t, _ := time.Parse(time.RFC3339Nano, strings.ToUpper(s))` → store `t` **as parsed** (offset and nanoseconds retained; no `UTC()`, no truncation) for `date-time`, or `time.Parse("2006-01-02", s)` (`date`); `duration` parses the `PT…` components into a `time.Duration`. Encode adapter: `t.Format(time.RFC3339Nano)` (offset preserved, `Z` for zero offset, trailing-zero fractional trimmed). `regexp.MustCompile` compiled once at init. |
 | TypeScript | Parse adapter: pinned regex (`/…/u`) + calendar/range check, then per `--date-time-types`: **`string`** (default) store the generator-serialized string for every temporal; **`date`** `new Date(s)` for `date-time` (others string); **`temporal`** `Temporal.ZonedDateTime.from` (`date-time`, in the wire's offset zone) / `PlainDate.from` (`date`) / `Duration.from` (`duration`), with `time` staying a string. Encode adapter: **`string`** emit the stored string; **`date`** `date-time` → `.toISOString()` (UTC, ms, 3 digits); **`temporal`** `ZonedDateTime.toString({ timeZoneName: 'never' })` (offset kept, then `+00:00`→`Z`), `PlainDate.toString()`, and for `Duration` a generator-owned formatter over `value.total({unit: 'seconds'})` so component-equivalent values canonicalize. |
 | Python | Parse: the `_parse_date_time` / `_parse_date` / `_parse_time` / `_parse_duration` runtime helpers, called from the transfer type converter (PRINCIPLES Python §3) — regex + calendar over the wire string, then `datetime.fromisoformat(s.upper())` **retaining the parsed offset** (`date-time`; `datetime`'s native microsecond resolution truncates any finer input — the one Python-side loss), `date.fromisoformat(s)` (`date`), `time.fromisoformat(s)` **retaining any offset** as an aware `time` (`time`), or parse `PT…` into a `timedelta` (`duration`). Each appends a `Violation` and returns `None` on failure so the rest of the object still validates. Encode: the matching generator-owned `_format_*` helper (offset preserved, fractional trimmed). The dataclass field is the plain `datetime.datetime` / `date` / `time` / `timedelta`, so no library's own coercion is in the path (native coercions typically accept a missing offset and normalize differently). |
-| Java | The per-POJO collecting deserializer (PRINCIPLES Java §5): regex + calendar over the `String`, then owned offset parsing into `TemporalSupport.DateTime` (`LocalDateTime` plus offset seconds, retaining the full ±23:59 range and nanoseconds) (`date-time`), `LocalDate.parse` (`date`), generator-owned string arithmetic for `time` that retains every accepted fractional digit and offset, or checked component parsing plus `Duration.ofSeconds` for the `PT…` form. The `Serializer` emits the **generator-owned** string (offset preserved, fractional trimmed) — **not** `Duration.toString()` for `.NET` parity and **not** the BCL serializer (`.NET XmlConvert` rolls `PT24H`→`P1D`). |
+| Java | The per-POJO collecting deserializer (PRINCIPLES Java §5): regex + calendar over the `String`, then generator-owned `parseDateTimeLiteral` applies case normalization and fraction truncation before `OffsetDateTime.parse`, **retaining the offset and up to nanoseconds** (`date-time`; defaults use the same helper), `LocalDate.parse` (`date`), generator-owned string arithmetic for `time` that retains every accepted fractional digit and offset, or checked component parsing plus `Duration.ofSeconds` for the `PT…` form. The `Serializer` emits the **generator-owned** string (offset preserved, fractional trimmed) — **not** `Duration.toString()` for `.NET` parity and **not** the BCL serializer (`.NET XmlConvert` rolls `PT24H`→`P1D`). |
 
 There is **no common truncation floor**, and the resolution is a property of the
 *carrier*, not of the target:
@@ -431,8 +438,7 @@ There is **no common truncation floor**, and the resolution is a property of the
   validation step that borrows an intermediary's limit is a defect rather than a
   bounded loss.
 * A **materialized native carrier retains its type's genuine resolution** — Go
-  `time.Time`, Java's `LocalDateTime`-backed carrier and TypeScript `Temporal`
-  are nanosecond;
+  `time.Time`, Java `OffsetDateTime` and TypeScript `Temporal` are nanosecond;
   Python `datetime`/`time` are microsecond; the legacy TypeScript `Date` mode is
   millisecond.
 
@@ -472,6 +478,10 @@ compiled constant; the load gate proves it compiles, so the emitted
     in whole minutes, while Go's `time.FixedZone("", 30)` and Java's
     `ZoneOffset.ofTotalSeconds(30)` carry seconds — a sub-minute offset is a
     violation, not something to round or drop.
+  - **Offset magnitude** (`date-time` / `time`): the materialized grammar is
+    limited to `-18:00..+18:00`; a constructible Go/Python value outside that
+    domain is a violation. Java `OffsetDateTime` enforces the same bound in its
+    type, while Java/TypeScript string-carried `time` re-runs the pinned regex.
   - **Duration sign** (`duration`): the pinned grammar has no sign, but
     `time.Duration`, `java.time.Duration`, `timedelta` and
     `Temporal.Duration` are all signed. A negative duration is a violation —
@@ -603,7 +613,7 @@ which the 63-per-label guard refuses.
 ### Runtime fixtures (validator + round-trip)
 
 Per-format accept/reject is exercised by `tests/json_schema_corpus_runtime.rs`
-over `json-schema/corpora/format_conformance/` (124 pairs, covering `date`,
+over `json-schema/corpora/format_conformance/` (136 pairs, covering `date`,
 `time`, `date-time`, `ipv4`, `ipv6`, `uuid`), `json-schema/corpora/format_email/`
 (56), `json-schema/corpora/format_hostname/` (41) and
 `json-schema/corpora/format_uri/` (72, driven as `uri`). The materialization
@@ -639,7 +649,8 @@ Representative cases:
 - **`date`**: `2020-02-29` OK; `2021-02-29` / `2021-13-01` → fail.
 - **`time`**: `12:30:45+02:00` → `12:30:45+02:00` (**offset preserved** in every
   language and mode, trailing-zero fractional trimmed; a `string` in TS
-  including `--date-time-types=temporal`).
+  including `--date-time-types=temporal`); `±18:00` is accepted, while
+  `±18:01` and `±23:59` are rejected, as for `date-time`.
 - **`duration`**: `PT90M` → `PT1H30M`; `PT0S` OK; `P1Y` / `P4W` / `P1D` →
   **runtime parse reject** (materialized time-only); overflow `PT<huge>H` →
   `Violation`.

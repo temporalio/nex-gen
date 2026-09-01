@@ -14,7 +14,8 @@
 //! formats — `date-time`, `date`, `time`, `duration` — are *materialized* into
 //! a language-native typed field (Go `time.Time`, Java `OffsetDateTime`, Python
 //! `datetime`, …) and asserted with a **narrowed** grammar (leap second `:60`
-//! rejected; `duration` time-only; calendar year floor 0001); their wire form is
+//! rejected; clock offsets limited to `-18:00..+18:00`; `duration` time-only;
+//! calendar year floor 0001); their wire form is
 //! produced by a generator-owned serializer, so a literal is canonicalized
 //! through [`canonicalize`] rather than echoed verbatim. Every other standard
 //! format is **deferred** (rejected "not yet supported"); anything else is an
@@ -64,7 +65,8 @@ pub const SUPPORTED_FORMATS: [&str; 11] = [
 /// The RFC-3339 temporal formats. These are **materialized** as idiomatic
 /// native typed model fields (Go `time.Time`, Java `OffsetDateTime`, Python
 /// `datetime`, …) rather than a bare `string`, and asserted with a **narrowed**
-/// grammar (leap second `:60` rejected; `duration` is time-only). See
+/// grammar (leap second `:60` rejected; clock offsets limited to ±18 hours;
+/// `duration` is time-only). See
 /// `specs/json-schema/features/format.md` (Materialization) and `TemporalKind`.
 pub const TEMPORAL_FORMATS: [&str; 4] = ["date-time", "date", "time", "duration"];
 
@@ -129,7 +131,8 @@ impl TemporalKind {
 
     /// The pinned, anchored (`^…$`) **materialized** regex for this kind — the
     /// narrowed grammar (leap second `:60` excluded by the `[0-5][0-9]` seconds
-    /// group; `date-time` offset required; `duration` time-only). `T`/`Z`
+    /// group; `date-time` offset required; materialized offsets limited to
+    /// `-18:00..+18:00`; `duration` time-only). `T`/`Z`
     /// separators are accepted in either case. Emitted (with the per-target
     /// end-anchor rewrite) into each generator's parse adapter, where the wire
     /// string's `:60` / offset / precision are still observable.
@@ -160,10 +163,10 @@ pub fn materialized_pattern(kind: TemporalKind) -> &'static str {
     match kind {
         TemporalKind::Date => "^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$",
         TemporalKind::Time => {
-            "^([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](\\.[0-9]+)?([Zz]|[+-]([01][0-9]|2[0-3]):[0-5][0-9])?$"
+            "^([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](\\.[0-9]+)?([Zz]|[+-]((0[0-9]|1[0-7]):[0-5][0-9]|18:00))?$"
         }
         TemporalKind::DateTime => {
-            "^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])[Tt]([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](\\.[0-9]+)?([Zz]|[+-]([01][0-9]|2[0-3]):[0-5][0-9])$"
+            "^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])[Tt]([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](\\.[0-9]+)?([Zz]|[+-]((0[0-9]|1[0-7]):[0-5][0-9]|18:00))$"
         }
         TemporalKind::Duration => {
             "^PT(?:[0-9]+H(?:[0-9]+M(?:[0-9]+S)?)?|[0-9]+M(?:[0-9]+S)?|[0-9]+S)$"
@@ -673,11 +676,10 @@ mod tests {
     }
 
     /// The materialized temporal grammar agrees with `format_conformance`
-    /// row for row. There is no exception list: the corpus previously marked the
-    /// two leap-second rows (`:60`) valid and this test force-flipped them to
-    /// `false`, hiding a data error behind a code workaround. The rows now
-    /// declare `expect_valid: false` — measured, all four runtimes reject
-    /// `23:59:60Z` — so the assertion reads the corpus verbatim.
+    /// row for row. There is no exception list: every invalid temporal row,
+    /// including leap seconds and offsets outside the materialized domain,
+    /// declares `expect_valid: false`, so the assertion reads the corpus
+    /// verbatim.
     #[test]
     fn materialized_temporal_matches_the_conformance_corpus() {
         let corpus: serde_json::Value = serde_json::from_str(include_str!(
@@ -893,11 +895,33 @@ mod tests {
     }
 
     #[test]
+    fn materialized_offsets_are_limited_to_eighteen_hours() {
+        for kind in [TemporalKind::DateTime, TemporalKind::Time] {
+            let render = |offset: &str| match kind {
+                TemporalKind::DateTime => format!("2021-01-15T12:30:45{offset}"),
+                _ => format!("12:30:45{offset}"),
+            };
+            for offset in ["+18:00", "-18:00"] {
+                assert!(
+                    is_valid_materialized(kind, &render(offset)),
+                    "{kind:?} must accept {offset}"
+                );
+            }
+            for offset in ["+18:01", "-18:01", "+23:59", "-23:59"] {
+                assert!(
+                    !is_valid_materialized(kind, &render(offset)),
+                    "{kind:?} must reject {offset}"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn materialized_clock_roundtrip_values_are_valid() {
         // Every wire in the clock corpus must pass the materialized check so the
         // parse adapter never rejects a round-trip case — unless the row declares
-        // `expect_valid: false` (the two leap-second wires, which no target's
-        // native temporal type can hold). An absent field means valid.
+        // `expect_valid: false`, for example for leap seconds or offsets outside
+        // the materialized domain. An absent field means valid.
         let corpus: serde_json::Value = serde_json::from_str(include_str!(
             "../../specs/json-schema/corpora/format_materialize_clock/corpus.json"
         ))

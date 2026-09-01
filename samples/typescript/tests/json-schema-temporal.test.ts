@@ -27,8 +27,8 @@ function load(name: string): unknown {
   return loadFixtureFrom(wireFixtureDir, name);
 }
 
-// --- --js-temporal-repr=string (default): all four temporals are string. ---
-describe("json-schema temporal (--js-temporal-repr=string, default)", () => {
+// --- --date-time-types=string (default): all four temporals are string. ---
+describe("json-schema temporal (--date-time-types=string, default)", () => {
   test("materialized temporals round-trip losslessly as canonical strings", () => {
     const { value, serialized } = roundTripFixture(
       stringTemporalTransferTypeConverter,
@@ -67,6 +67,10 @@ describe("json-schema temporal (--js-temporal-repr=string, default)", () => {
       { createdAt: "2021-06-15T12:30:45", timeout: "PT0S" },
       { createdAt: "0000-01-01T00:00:00Z", timeout: "PT0S" },
       { createdAt: "2021-06-15T12:30:45Z", birthday: "0000-01-01", timeout: "PT0S" },
+      { createdAt: "2021-06-15T12:30:45+18:01", timeout: "PT0S" },
+      { createdAt: "2021-06-15T12:30:45-23:59", timeout: "PT0S" },
+      { createdAt: "2021-06-15T12:30:45Z", alarm: "09:00:00+18:01", timeout: "PT0S" },
+      { createdAt: "2021-06-15T12:30:45Z", alarm: "09:00:00-23:59", timeout: "PT0S" },
     ]) {
       const body = { birthday: "2000-01-01", alarm: "09:00:00", ...bad };
       expect(() => converter.fromTransferType(body)).toThrow();
@@ -84,10 +88,46 @@ describe("json-schema temporal (--js-temporal-repr=string, default)", () => {
       birthday: "0001-01-01",
     });
   });
+
+  test("offset boundaries are enforced on parse and serialize", () => {
+    for (const offset of ["+18:00", "-18:00"]) {
+      const value = stringTemporalTransferTypeConverter.fromTransferType({
+        createdAt: `2021-06-15T12:30:45${offset}`,
+        birthday: "2000-01-01",
+        alarm: `09:00:00${offset}`,
+        timeout: "PT0S",
+      });
+      expect(encodeModel(stringTemporalTransferTypeConverter, value)).toMatchObject({
+        createdAt: `2021-06-15T12:30:45${offset}`,
+        alarm: `09:00:00${offset}`,
+      });
+    }
+
+    const valid = stringTemporalTransferTypeConverter.fromTransferType({
+      createdAt: "2021-06-15T12:30:45Z",
+      birthday: "2000-01-01",
+      alarm: "09:00:00",
+      timeout: "PT0S",
+    });
+    for (const offset of ["+18:01", "-18:01", "+23:59", "-23:59"]) {
+      expect(() =>
+        encodeModel(stringTemporalTransferTypeConverter, {
+          ...valid,
+          createdAt: `2021-06-15T12:30:45${offset}`,
+        }),
+      ).toThrow(/createdAt.*valid date-time/);
+      expect(() =>
+        encodeModel(stringTemporalTransferTypeConverter, {
+          ...valid,
+          alarm: `09:00:00${offset}`,
+        }),
+      ).toThrow(/alarm.*valid time/);
+    }
+  });
 });
 
-// --- --js-temporal-repr=date: date-time -> Date (UTC ms fold); others string. ---
-describe("json-schema temporal (--js-temporal-repr=date)", () => {
+// --- --date-time-types=date: date-time -> Date (UTC ms fold); others string. ---
+describe("json-schema temporal (--date-time-types=date)", () => {
   test("date-time materializes to a Date and folds to a UTC instant on re-serialize", () => {
     const value = decodeFixture(
       dateTemporalTransferTypeConverter,
@@ -116,8 +156,8 @@ describe("json-schema temporal (--js-temporal-repr=date)", () => {
   });
 });
 
-// --- --js-temporal-repr=temporal: Temporal.* types; time stays string. ---
-describe("json-schema temporal (--js-temporal-repr=temporal)", () => {
+// --- --date-time-types=temporal: Temporal.* types; time stays string. ---
+describe("json-schema temporal (--date-time-types=temporal)", () => {
   test("temporals materialize to Temporal types and round-trip losslessly", () => {
     const { value, serialized } = roundTripFixture(
       temporalTemporalTransferTypeConverter,

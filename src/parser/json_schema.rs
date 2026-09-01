@@ -8653,6 +8653,7 @@ struct NsModel {
     full_name: String,
     type_ident: String,
     schema: Schema,
+    imports_java_offset_date_time: bool,
 }
 
 /// Resolved emitted-name manifest for one target language. Built once by
@@ -8787,6 +8788,8 @@ pub(crate) fn build_name_manifest(
             full_name: model.full_name.clone(),
             type_ident,
             schema,
+            imports_java_offset_date_time: language == Language::Java
+                && java::schema_imports_offset_date_time(&model.schema),
         });
     }
 
@@ -8838,6 +8841,7 @@ pub(crate) fn build_name_manifest(
                 model.full_name.as_str(),
                 &model.type_ident,
                 &model.schema,
+                model.imports_java_offset_date_time,
                 &mut top,
             )?;
             validate_member_scope(language, model.full_name.as_str(), &model.schema)?;
@@ -9317,10 +9321,16 @@ fn collect_synthesized_top_level(
     model_full_name: &str,
     type_ident: &str,
     schema: &Schema,
+    imports_java_offset_date_time: bool,
     top: &mut Namespace,
 ) -> Result<()> {
     if language == Language::Java {
-        return collect_java_nested_scope(model_full_name, schema);
+        return collect_java_nested_scope(
+            model_full_name,
+            type_ident,
+            schema,
+            imports_java_offset_date_time,
+        );
     }
     if language != Language::Go {
         return Ok(());
@@ -9415,18 +9425,23 @@ fn collect_synthesized_top_level(
 /// pre-language fold check in `validate_const_enum` steps aside for an override
 /// in **any** constant-synthesizing target and defers to this pass.
 ///
-/// Two scopes, because Java keeps them apart:
+/// Three scopes, because Java keeps them apart:
+/// - the compilation unit, holding the top-level model and any schema-dependent
+///   bare imports;
 /// - the model class's **member type** scope, holding one value class per
 ///   closed-value member plus the generated `Serializer`/`Deserializer`, and
-///   shadowing the runtime classes imported by simple name; and
+///   shadowing the runtime and schema-dependent classes imported by simple
+///   name; and
 /// - each value class's **constant** scope.
-fn collect_java_nested_scope(model_full_name: &str, schema: &Schema) -> Result<()> {
+fn collect_java_nested_scope(
+    model_full_name: &str,
+    type_ident: &str,
+    schema: &Schema,
+    imports_offset_date_time: bool,
+) -> Result<()> {
     let language = Language::Java;
-    let Some(properties) = &schema.properties else {
-        return Ok(());
-    };
     let mut nested = Namespace::default();
-    for (json_name, property) in properties {
+    for (json_name, property) in schema.properties.iter().flatten() {
         if is_sum_type_union(property) {
             let member = member_identifier(language, json_name, property);
             let interface = java_upper_first(&member);
@@ -9517,6 +9532,20 @@ fn collect_java_nested_scope(model_full_name: &str, schema: &Schema) -> Result<(
             (*ident).to_string(),
             format!("generated runtime identifier `{ident}`"),
         )?;
+    }
+    if imports_offset_date_time {
+        // Java imports are compilation-unit scoped. Reserve the simple name
+        // against the file's top-level model and nested type declarations, but
+        // not against unrelated model files in the same package.
+        let origin = "generated model-file import `java.time.OffsetDateTime`";
+        let mut compilation_unit = Namespace::default();
+        compilation_unit.insert(
+            language,
+            type_ident.to_string(),
+            format!("type `{model_full_name}`"),
+        )?;
+        compilation_unit.insert(language, "OffsetDateTime".to_string(), origin.to_string())?;
+        nested.insert(language, "OffsetDateTime".to_string(), origin.to_string())?;
     }
     Ok(())
 }
@@ -18787,6 +18816,42 @@ $defs:
             error.contains("collision") && error.contains("Violation"),
             "{error}"
         );
+    }
+
+    #[test]
+    fn java_reserves_schema_dependent_offset_date_time_import() {
+        let colliding = r##"
+$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  value: { $ref: "#/$defs/OffsetDateTime" }
+$defs:
+  OffsetDateTime:
+    type: object
+    properties:
+      timestamp: { type: string, format: date-time }
+"##;
+        let error = reject_for(Language::Java, colliding);
+        assert!(
+            error.contains("type `OffsetDateTime`")
+                && error.contains("java.time.OffsetDateTime")
+                && error.contains("x-java-name"),
+            "{error}"
+        );
+
+        let renamed = colliding.replace(
+            "  OffsetDateTime:\n    type: object",
+            "  OffsetDateTime:\n    x-java-name: TimestampedValue\n    type: object",
+        );
+        parse_for(Language::Java, &renamed)
+            .expect("x-java-name must move the model away from the imported simple name");
+
+        let plain = colliding.replace(
+            "      timestamp: { type: string, format: date-time }",
+            "      timestamp: { type: string }",
+        );
+        parse_for(Language::Java, &plain)
+            .expect("OffsetDateTime remains available when its file emits no such import");
     }
 
     #[test]
