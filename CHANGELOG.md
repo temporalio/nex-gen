@@ -36,11 +36,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Breaking Changes
 
-- Materialized JSON Schema `date-time` fields in Java now use the generated
-  `TemporalSupport.DateTime` carrier instead of `OffsetDateTime`. The carrier
-  keeps a `LocalDateTime` plus the owned offset seconds so valid RFC 3339
-  offsets through `+23:59` and `-23:59` round-trip without Java's `ZoneOffset`
-  ±18-hour restriction.
+- Materialized JSON Schema `time` and `date-time` offsets are now limited
+  uniformly to `-18:00` through `+18:00`; at hour 18, only minute 00 is valid.
+  Java `date-time` fields use the idiomatic `OffsetDateTime` type.
+  Deserialization and serialization enforce the same offset domain in every
+  target.
 - JSON Schema TypeScript generation now rejects two default-bearing members
   that would both export the same stable `DEFAULT_<FIELD>` constant, including
   declarations in different input files. The generator no longer changes an

@@ -331,9 +331,9 @@ func marshalField(out map[string]json.RawMessage, key string, v any, errs *[]Vio
 	out[key] = b
 }
 
-var jsonTemporalDateTimeRE = regexp.MustCompile(`^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])[Tt]([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](\.[0-9]+)?([Zz]|[+-]([01][0-9]|2[0-3]):[0-5][0-9])$`)
+var jsonTemporalDateTimeRE = regexp.MustCompile(`^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])[Tt]([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](\.[0-9]+)?([Zz]|[+-]((0[0-9]|1[0-7]):[0-5][0-9]|18:00))$`)
 var jsonTemporalDateRE = regexp.MustCompile(`^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$`)
-var jsonTemporalTimeRE = regexp.MustCompile(`^([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](\.[0-9]+)?([Zz]|[+-]([01][0-9]|2[0-3]):[0-5][0-9])?$`)
+var jsonTemporalTimeRE = regexp.MustCompile(`^([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](\.[0-9]+)?([Zz]|[+-]((0[0-9]|1[0-7]):[0-5][0-9]|18:00))?$`)
 var jsonTemporalDurationRE = regexp.MustCompile(`^PT(?:[0-9]+H(?:[0-9]+M(?:[0-9]+S)?)?|[0-9]+M(?:[0-9]+S)?|[0-9]+S)$`)
 
 // daysInTemporalMonth returns the Gregorian day count of a 1-based month.
@@ -570,14 +570,15 @@ func checkTemporalYear(name string, v time.Time, path string, errs *[]Violation)
 	return false
 }
 
-// checkTemporalOffset asserts the wire's whole-minute offset range. A Go
-// Location carries arbitrary seconds and magnitude, both wider than RFC 3339.
+// checkTemporalOffset asserts the wire's whole-minute, +/-18-hour offset range.
+// A Go Location carries arbitrary seconds and magnitude, both wider than the
+// materialized wire grammar.
 func checkTemporalOffset(name string, v time.Time, path string, errs *[]Violation) {
 	_, offset := v.Zone()
 	if offset%60 != 0 {
 		*errs = append(*errs, Violation{path, fmt.Sprintf("must be a valid %s, got %v: the UTC offset %d seconds is not a whole number of minutes", name, v, offset)})
-	} else if offset < -(23*60+59)*60 || offset > (23*60+59)*60 {
-		*errs = append(*errs, Violation{path, fmt.Sprintf("must be a valid %s, got %v: the UTC offset is outside -23:59 through +23:59", name, v)})
+	} else if offset < -18*60*60 || offset > 18*60*60 {
+		*errs = append(*errs, Violation{path, fmt.Sprintf("must be a valid %s, got %v: the UTC offset is outside -18:00 through +18:00", name, v)})
 	}
 }
 

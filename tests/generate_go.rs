@@ -3727,6 +3727,7 @@ properties:
   blob: { type: string, contentEncoding: base64, minLength: 4, maxLength: 8 }
   blobConst: { type: string, contentEncoding: base64, const: "aGk=" }
   when: { type: string, format: date-time }
+  clock: { type: string, format: time }
   dur: { type: string, format: duration }
   times:
     type: array
@@ -3798,9 +3799,12 @@ func TestMaterializedSerializeChecks(t *testing.T) {
     }
 
     subMinuteOffset := time.Date(2021, 6, 15, 12, 30, 45, 0, time.FixedZone("", 30))
-    outOfRangeOffset := time.Date(2021, 6, 15, 12, 30, 45, 0, time.FixedZone("", 24*60*60))
+    justOutOfRangeOffset := time.Date(2021, 6, 15, 12, 30, 45, 0, time.FixedZone("", 18*60*60+60))
+    negativeJustOutOfRangeOffset := time.Date(2021, 6, 15, 12, 30, 45, 0, time.FixedZone("", -(18*60*60+60)))
+    wideOutOfRangeOffset := time.Date(2021, 6, 15, 12, 30, 45, 0, time.FixedZone("", 23*60*60+59*60))
+    negativeWideOutOfRangeOffset := time.Date(2021, 6, 15, 12, 30, 45, 0, time.FixedZone("", -(23*60*60+59*60)))
     overflowYear := time.Date(10000, 1, 1, 0, 0, 0, 0, time.UTC)
-    for name, value := range map[string]time.Time{"sub-minute offset": subMinuteOffset, "offset +24:00": outOfRangeOffset, "year 10000": overflowYear} {
+    for name, value := range map[string]time.Time{"sub-minute offset": subMinuteOffset, "offset +18:01": justOutOfRangeOffset, "offset -18:01": negativeJustOutOfRangeOffset, "offset +23:59": wideOutOfRangeOffset, "offset -23:59": negativeWideOutOfRangeOffset, "year 10000": overflowYear} {
         model := base
         model.When = &value
         if _, err := json.Marshal(model); err == nil {
@@ -3808,16 +3812,27 @@ func TestMaterializedSerializeChecks(t *testing.T) {
         }
     }
 
-    maxOffset := time.Date(2021, 6, 15, 12, 30, 45, 0, time.FixedZone("", 23*60*60+59*60))
-    maxModel := base
-    maxModel.When = &maxOffset
-    maxWire, err := json.Marshal(maxModel)
-    if err != nil {
-        t.Fatalf("+23:59 rejected on serialize: %v", err)
+    for _, seconds := range []int{18 * 60 * 60, -18 * 60 * 60} {
+        boundary := time.Date(2021, 6, 15, 12, 30, 45, 0, time.FixedZone("", seconds))
+        boundaryModel := base
+        boundaryModel.When = &boundary
+        boundaryModel.Clock = &boundary
+        boundaryWire, err := json.Marshal(boundaryModel)
+        if err != nil {
+            t.Fatalf("%d-second boundary rejected on serialize: %v", seconds, err)
+        }
+        var boundaryRoundTrip Mat
+        if err := json.Unmarshal(boundaryWire, &boundaryRoundTrip); err != nil {
+            t.Fatalf("%d-second boundary output rejected on parse: %v", seconds, err)
+        }
     }
-    var maxRoundTrip Mat
-    if err := json.Unmarshal(maxWire, &maxRoundTrip); err != nil {
-        t.Fatalf("+23:59 output rejected on parse: %v", err)
+
+    for name, value := range map[string]time.Time{"offset +18:01": justOutOfRangeOffset, "offset -18:01": negativeJustOutOfRangeOffset, "offset +23:59": wideOutOfRangeOffset, "offset -23:59": negativeWideOutOfRangeOffset} {
+        model := base
+        model.Clock = &value
+        if _, err := json.Marshal(model); err == nil {
+            t.Errorf("%s time serialized", name)
+        }
     }
 
     duplicate := time.Date(2021, 6, 15, 12, 30, 45, 0, time.UTC)

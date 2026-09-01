@@ -3,7 +3,8 @@ package json_schema.api.showcase;
 
 import java.time.Duration;
 import java.time.LocalDate;
-import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.time.format.DateTimeParseException;
 import java.util.List;
 import java.util.regex.Pattern;
@@ -13,52 +14,11 @@ import org.jspecify.annotations.Nullable;
 public final class TemporalSupport {
     private TemporalSupport() {}
 
-    private static final Pattern DATE_TIME = Pattern.compile("^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])[Tt]([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](\\.[0-9]+)?([Zz]|[+-]([01][0-9]|2[0-3]):[0-5][0-9])\\z");
+    private static final Pattern DATE_TIME = Pattern.compile("^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])[Tt]([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](\\.[0-9]+)?([Zz]|[+-]((0[0-9]|1[0-7]):[0-5][0-9]|18:00))\\z");
     private static final Pattern DATE = Pattern.compile("^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])\\z");
-    private static final Pattern TIME = Pattern.compile("^([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](\\.[0-9]+)?([Zz]|[+-]([01][0-9]|2[0-3]):[0-5][0-9])?\\z");
+    private static final Pattern TIME = Pattern.compile("^([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](\\.[0-9]+)?([Zz]|[+-]((0[0-9]|1[0-7]):[0-5][0-9]|18:00))?\\z");
     private static final Pattern DURATION = Pattern.compile("^PT(?:[0-9]+H(?:[0-9]+M(?:[0-9]+S)?)?|[0-9]+M(?:[0-9]+S)?|[0-9]+S)\\z");
     private static final long MAX_DURATION_SECONDS = Long.MAX_VALUE / 1_000_000_000L;
-
-    /**
-     * Materialized date-time retaining the local fields and the schema's full
-     * minute offset range. java.time.ZoneOffset stops at +/-18:00.
-     */
-    public static final class DateTime {
-        private final LocalDateTime localDateTime;
-        private final int offsetSeconds;
-
-        public DateTime(LocalDateTime localDateTime, int offsetSeconds) {
-            if (localDateTime == null) {
-                throw new NullPointerException("localDateTime");
-            }
-            this.localDateTime = localDateTime;
-            this.offsetSeconds = offsetSeconds;
-        }
-
-        public LocalDateTime getLocalDateTime() { return localDateTime; }
-        public int getOffsetSeconds() { return offsetSeconds; }
-        public int getYear() { return localDateTime.getYear(); }
-        public int getMonthValue() { return localDateTime.getMonthValue(); }
-        public int getDayOfMonth() { return localDateTime.getDayOfMonth(); }
-        public int getHour() { return localDateTime.getHour(); }
-        public int getMinute() { return localDateTime.getMinute(); }
-        public int getSecond() { return localDateTime.getSecond(); }
-        public int getNano() { return localDateTime.getNano(); }
-
-        @Override
-        public boolean equals(Object other) {
-            if (this == other) return true;
-            if (!(other instanceof DateTime)) return false;
-            DateTime that = (DateTime) other;
-            return offsetSeconds == that.offsetSeconds && localDateTime.equals(that.localDateTime);
-        }
-
-        @Override
-        public int hashCode() { return 31 * localDateTime.hashCode() + offsetSeconds; }
-
-        @Override
-        public String toString() { return TemporalSupport.formatDateTime(this); }
-    }
 
     private static int daysInMonth(int year, int month) {
         switch (month) {
@@ -139,45 +99,27 @@ public final class TemporalSupport {
         return value.substring(0, dot + 10) + value.substring(end);
     }
 
-    private static DateTime dateTimeValue(String value) {
-        String upper = truncateFraction(value).toUpperCase();
-        int offsetSeconds;
-        String local;
-        if (upper.endsWith("Z")) {
-            offsetSeconds = 0;
-            local = upper.substring(0, upper.length() - 1);
-        } else {
-            int offsetStart = upper.length() - 6;
-            int sign = upper.charAt(offsetStart) == '-' ? -1 : 1;
-            int hours = Integer.parseInt(upper.substring(offsetStart + 1, offsetStart + 3));
-            int minutes = Integer.parseInt(upper.substring(offsetStart + 4));
-            offsetSeconds = sign * (hours * 3600 + minutes * 60);
-            local = upper.substring(0, offsetStart);
-        }
-        return new DateTime(LocalDateTime.parse(local), offsetSeconds);
+    public static OffsetDateTime parseDateTimeLiteral(String value) {
+        return OffsetDateTime.parse(truncateFraction(value).toUpperCase());
     }
 
-    public static DateTime parseDateTimeLiteral(String value) {
-        return dateTimeValue(value);
-    }
-
-    public static @Nullable DateTime parseDateTime(String value, String path, List<Violation> violations) {
+    public static @Nullable OffsetDateTime parseDateTime(String value, String path, List<Violation> violations) {
         if (!DATE_TIME.matcher(value).matches() || !validCalendar(value)) {
             violations.add(new Violation(path, "must be a valid date-time, got \"" + value + "\""));
             return null;
         }
         try {
-            return dateTimeValue(value);
-        } catch (DateTimeParseException | NumberFormatException e) {
+            return parseDateTimeLiteral(value);
+        } catch (DateTimeParseException e) {
             violations.add(new Violation(path, "must be a valid date-time, got \"" + value + "\""));
             return null;
         }
     }
 
-    public static String formatDateTime(DateTime value) {
+    public static String formatDateTime(OffsetDateTime value) {
         return String.format("%04d-%02d-%02dT%02d:%02d:%02d", value.getYear(), value.getMonthValue(),
                 value.getDayOfMonth(), value.getHour(), value.getMinute(), value.getSecond())
-                + frac(value.getNano()) + offset(value.getOffsetSeconds());
+                + frac(value.getNano()) + offset(value.getOffset().getTotalSeconds());
     }
 
     public static @Nullable LocalDate parseDate(String value, String path, List<Violation> violations) {
@@ -267,13 +209,14 @@ public final class TemporalSupport {
     // counterpart of the matching `parse*` above: without it the emitted wire
     // is a string this module's own parser rejects.
 
-    private static void checkOffset(String name, Object value, int offsetSeconds, String path, List<Violation> violations) {
+    private static void checkOffset(String name, Object value, ZoneOffset offset, String path, List<Violation> violations) {
+        int offsetSeconds = offset.getTotalSeconds();
         if (offsetSeconds % 60 != 0) {
             violations.add(new Violation(path, "must be a valid " + name + ", got " + value
-                    + ": the UTC offset is not a whole number of minutes"));
-        } else if (offsetSeconds < -(23 * 60 + 59) * 60 || offsetSeconds > (23 * 60 + 59) * 60) {
+                    + ": the UTC offset " + offset + " is not a whole number of minutes"));
+        } else if (offsetSeconds < -18 * 60 * 60 || offsetSeconds > 18 * 60 * 60) {
             violations.add(new Violation(path, "must be a valid " + name + ", got " + value
-                    + ": the UTC offset is outside -23:59 through +23:59"));
+                    + ": the UTC offset is outside -18:00 through +18:00"));
         }
     }
 
@@ -285,9 +228,9 @@ public final class TemporalSupport {
         }
     }
 
-    public static void checkDateTime(DateTime value, String path, List<Violation> violations) {
+    public static void checkDateTime(OffsetDateTime value, String path, List<Violation> violations) {
         checkYear("date-time", value, value.getYear(), path, violations);
-        checkOffset("date-time", value, value.getOffsetSeconds(), path, violations);
+        checkOffset("date-time", value, value.getOffset(), path, violations);
     }
 
     public static void checkDate(LocalDate value, String path, List<Violation> violations) {

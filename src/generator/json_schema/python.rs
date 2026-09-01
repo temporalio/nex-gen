@@ -1348,8 +1348,10 @@ def _check_temporal_offset(
     path: str,
     violations: list[Violation],
 ) -> None:
-    """Asserts a UTC offset is a whole number of minutes, the finest the wire
-    form spells (`tzinfo` allows seconds, which the offset would silently lose).
+    """Asserts a UTC offset is a whole number of minutes in -18:00..+18:00.
+
+    `tzinfo` allows seconds and offsets up to almost 24 hours, both wider than
+    the materialized wire grammar.
     """
 
     if offset % datetime.timedelta(minutes=1):
@@ -1359,6 +1361,16 @@ def _check_temporal_offset(
                 reason=(
                     f"must be a valid {name}, got {_quote(str(value))}: "
                     f"the UTC offset {offset} is not a whole number of minutes"
+                ),
+            )
+        )
+    elif abs(offset) > datetime.timedelta(hours=18):
+        violations.append(
+            Violation(
+                path=path,
+                reason=(
+                    f"must be a valid {name}, got {_quote(str(value))}: "
+                    "the UTC offset is outside -18:00 through +18:00"
                 ),
             )
         )

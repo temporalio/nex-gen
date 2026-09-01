@@ -159,6 +159,10 @@ def test_unknown_member_is_rejected() -> None:
         ("timeout", "P1Y", "duration"),  # calendar duration
         ("birthday", "2021-02-29", "date"),  # invalid calendar date
         ("createdAt", "2021-06-15T12:30:45", "date-time"),  # missing offset
+        ("createdAt", "2021-06-15T12:30:45+18:01", "date-time"),
+        ("createdAt", "2021-06-15T12:30:45-23:59", "date-time"),
+        ("alarm", "09:00:00+18:01", "time"),
+        ("alarm", "09:00:00-23:59", "time"),
     ],
 )
 def test_temporal_materialized_narrowing_rejects(
@@ -362,6 +366,39 @@ def test_serialize_rejects_temporal_values_the_wire_form_cannot_carry() -> None:
     assert serialize_violations(alarm=offset_time) == [
         ("alarm", unrepresentable("time", offset_time, sub_minute_detail))
     ]
+
+    # Both materialized clock formats use the same inclusive +/-18:00 domain.
+    for seconds in (
+        18 * 3600 + 60,
+        -(18 * 3600 + 60),
+        23 * 3600 + 59 * 60,
+        -(23 * 3600 + 59 * 60),
+    ):
+        zone = datetime.timezone(datetime.timedelta(seconds=seconds))
+        for field, value in (
+            ("created_at", datetime.datetime(2021, 6, 15, 12, 30, 45, tzinfo=zone)),
+            ("alarm", datetime.time(9, 0, tzinfo=zone)),
+        ):
+            violations = serialize_violations(**{field: value})
+            assert violations[0][0] == (
+                "createdAt" if field == "created_at" else "alarm"
+            )
+            assert violations[0][1].endswith(
+                "the UTC offset is outside -18:00 through +18:00"
+            )
+
+    for seconds, suffix in ((18 * 3600, "+18:00"), (-18 * 3600, "-18:00")):
+        zone = datetime.timezone(datetime.timedelta(seconds=seconds))
+        model = dataclasses.replace(
+            parse(),
+            created_at=datetime.datetime(2021, 6, 15, 12, 30, 45, tzinfo=zone),
+            alarm=datetime.time(9, 0, tzinfo=zone),
+        )
+        wire = typing.cast(
+            "dict[str, typing.Any]", converter_for(Temporal).to_transfer_type(model)
+        )
+        assert wire["createdAt"] == f"2021-06-15T12:30:45{suffix}"
+        assert wire["alarm"] == f"09:00:00{suffix}"
 
     # Independent failures at different members aggregate into one error (P11).
     assert serialize_violations(created_at=naive, timeout=negative) == [
