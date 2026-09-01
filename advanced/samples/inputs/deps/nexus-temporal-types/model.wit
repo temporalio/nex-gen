@@ -206,6 +206,7 @@ interface model {
   /// @nexus.doc "Static metadata for a workflow execution."
   /// @nexus.proto "temporal.api.sdk.v1.UserMetadata" typescript-import="@temporalio/proto"
   /// @nexus.flatten-in-api
+  /// @nexus.experimental
   record user-metadata {
     /// @nexus.doc "Single-line fixed summary for the workflow execution that may appear in UI and CLI. This can be in single-line Temporal Markdown format."
     /// @nexus.proto-field "summary"

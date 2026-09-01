@@ -534,6 +534,9 @@ fn render_model_transfer_converter(
     output.push_str("    /// <summary>\n");
     output.push_str("    /// Converts this model to and from its generated transfer type.\n");
     output.push_str("    /// </summary>\n");
+    if model.experimental {
+        output.push_str("    /// <remarks>WARNING: This API is experimental and may change in the future.</remarks>\n");
+    }
     output.push_str("    public sealed class TransferTypeConverter : Temporalio.Converters.ITemporalTransferTypeConverter\n    {\n");
     output.push_str("        /// <summary>Gets the generated transfer type.</summary>\n");
     output.push_str("        public System.Type TransferType => typeof(");

@@ -345,9 +345,12 @@ impl<'a> ApiPlanner<'a> {
             .operations_class
             .for_language(Language::Dotnet)
             .is_some();
-        output.push_str("/// <summary>\n");
-        output.push_str("/// Provides generated workflow operation helpers.\n");
-        output.push_str("/// </summary>\n");
+        render_xml_summary(
+            output,
+            "",
+            Some("Provides generated workflow operation helpers."),
+            service.experimental,
+        );
         if !explicit_operations_class {
             output.push_str(GENERATED_CODE_ATTRIBUTE);
             output.push('\n');

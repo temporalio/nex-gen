@@ -14,6 +14,7 @@ namespace Temporalio.Workflows
     /// <summary>
     /// Static metadata for a workflow execution.
     /// </summary>
+    /// <remarks>WARNING: This API is experimental and may change in the future.</remarks>
     [Temporalio.Converters.TemporalTransferTypeConverter(typeof(UserMetadata.TransferTypeConverter))]
     [GeneratedCode("nexgen", null)]
     public record UserMetadata
@@ -53,6 +54,7 @@ namespace Temporalio.Workflows
         /// <summary>
         /// Converts this model to and from its generated transfer type.
         /// </summary>
+        /// <remarks>WARNING: This API is experimental and may change in the future.</remarks>
         public sealed class TransferTypeConverter : Temporalio.Converters.ITemporalTransferTypeConverter
         {
             /// <summary>Gets the generated transfer type.</summary>
@@ -273,6 +275,7 @@ namespace Temporalio.Workflows
         /// <summary>
         /// Converts this model to and from its generated transfer type.
         /// </summary>
+        /// <remarks>WARNING: This API is experimental and may change in the future.</remarks>
         public sealed class TransferTypeConverter : Temporalio.Converters.ITemporalTransferTypeConverter
         {
             /// <summary>Gets the generated transfer type.</summary>
@@ -330,6 +333,7 @@ namespace Temporalio.Workflows
         /// <summary>
         /// Converts this model to and from its generated transfer type.
         /// </summary>
+        /// <remarks>WARNING: This API is experimental and may change in the future.</remarks>
         public sealed class TransferTypeConverter : Temporalio.Converters.ITemporalTransferTypeConverter
         {
             /// <summary>Gets the generated transfer type.</summary>

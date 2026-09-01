@@ -99,6 +99,7 @@ namespace Temporalio.Workflows
     /// <summary>
     /// Provides generated workflow operation helpers.
     /// </summary>
+    /// <remarks>WARNING: This API is experimental and may change in the future.</remarks>
     [GeneratedCode("nexgen", null)]
     public static class Operations
     {

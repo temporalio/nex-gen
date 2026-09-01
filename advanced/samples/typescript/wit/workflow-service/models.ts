@@ -515,6 +515,9 @@ export function signalWithStartWorkflowRequestToProto<
   };
 }
 
+/**
+ * @experimental This API is experimental and subject to change.
+ */
 export interface UserMetadata {
   /**
    * Single-line fixed summary for the workflow execution that may appear in UI and CLI.
