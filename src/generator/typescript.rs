@@ -13,8 +13,7 @@ use crate::generator::proto::typescript::{
 };
 use crate::generator::render_request_plan;
 use crate::generator::{
-    ExternalModelBackend, GeneratedFiles, GenerationMode, TsDateTimeTypes,
-    insert_generated_file_with_origin,
+    ExternalModelBackend, GeneratedFileMap, GeneratedFiles, GenerationMode, TsDateTimeTypes,
 };
 use crate::language::Language;
 use crate::planning::{
@@ -91,34 +90,25 @@ fn generate_tree(
     support: &crate::SupportFiles,
     ts_date_time_types: TsDateTimeTypes,
 ) -> Result<GeneratedFiles> {
-    let mut files = BTreeMap::new();
-    let mut origins = BTreeMap::new();
+    let mut files = GeneratedFileMap::default();
     let mut warnings = Vec::new();
     let additional_exports: &[&str] = if branch_has_json_models(branch) {
         insert_files(
             &mut files,
-            &mut origins,
             render_tree_support_files(branch),
-            PathBuf::from("<generated TypeScript JSON runtime>"),
+            "<generated TypeScript JSON runtime>",
         )?;
         &["export type { Violation } from './definitions';"]
     } else {
         &[]
     };
-    insert_branch_index_file(&mut files, &mut origins, branch, additional_exports)?;
+    insert_branch_index_file(&mut files, branch, additional_exports)?;
     for node in branch.children.values() {
-        generate_tree_node(
-            node,
-            support,
-            ts_date_time_types,
-            &mut files,
-            &mut origins,
-            &mut warnings,
-        )?;
+        generate_tree_node(node, support, ts_date_time_types, &mut files, &mut warnings)?;
     }
     Ok(GeneratedFiles {
         layout: crate::generator::GeneratedOutputLayout::Directory,
-        files,
+        files: files.into_files(),
         warnings,
     })
 }
@@ -127,8 +117,7 @@ fn generate_tree_node(
     node: &ApiSpecNode<PlannedFamily>,
     support: &crate::SupportFiles,
     ts_date_time_types: TsDateTimeTypes,
-    files: &mut BTreeMap<PathBuf, String>,
-    origins: &mut BTreeMap<PathBuf, PathBuf>,
+    files: &mut GeneratedFileMap,
     warnings: &mut Vec<String>,
 ) -> Result<()> {
     match node {
@@ -143,21 +132,19 @@ fn generate_tree_node(
                 {
                     contents.push_str("export {};\n");
                 }
-                insert_generated_file_with_origin(
-                    files,
-                    origins,
+                files.insert(
                     prefix.join(path),
                     contents,
-                    leaf.source_path.clone(),
+                    leaf.source_path.display().to_string(),
                     "rename one input file or directory so the generated module paths differ",
                 )?;
             }
             Ok(())
         }
         ApiSpecNode::Branch(branch) => {
-            insert_branch_index_file(files, origins, branch, &[])?;
+            insert_branch_index_file(files, branch, &[])?;
             for node in branch.children.values() {
-                generate_tree_node(node, support, ts_date_time_types, files, origins, warnings)?;
+                generate_tree_node(node, support, ts_date_time_types, files, warnings)?;
             }
             Ok(())
         }
@@ -165,8 +152,7 @@ fn generate_tree_node(
 }
 
 fn insert_branch_index_file(
-    files: &mut BTreeMap<PathBuf, String>,
-    origins: &mut BTreeMap<PathBuf, PathBuf>,
+    files: &mut GeneratedFileMap,
     branch: &ApiSpecBranch<PlannedFamily>,
     additional_exports: &[&str],
 ) -> Result<()> {
@@ -183,32 +169,27 @@ fn insert_branch_index_file(
         contents.push_str(export);
         contents.push('\n');
     }
-    insert_generated_file_with_origin(
-        files,
-        origins,
+    files.insert(
         path,
         contents,
-        PathBuf::from(format!(
+        format!(
             "<generated TypeScript barrel for module {}>",
             branch.module_path.as_module_key()
-        )),
+        ),
         "rename one input file or directory so a module and barrel do not claim the same path",
     )
 }
 
 fn insert_files(
-    files: &mut BTreeMap<PathBuf, String>,
-    origins: &mut BTreeMap<PathBuf, PathBuf>,
+    files: &mut GeneratedFileMap,
     generated: BTreeMap<PathBuf, String>,
-    origin: PathBuf,
+    source: &str,
 ) -> Result<()> {
     for (path, contents) in generated {
-        insert_generated_file_with_origin(
-            files,
-            origins,
+        files.insert(
             path,
             contents,
-            origin.clone(),
+            source,
             "rename the input module that conflicts with the generated TypeScript runtime file",
         )?;
     }

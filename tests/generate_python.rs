@@ -1665,18 +1665,18 @@ fn python_support_fragments_with_same_module_name_collide() {
     )
     .unwrap_err();
 
-    let nexgen::error::Error::GeneratedFileOriginConflict {
+    let nexgen::error::Error::GeneratedFileSourceConflict {
         path,
-        first_origin,
-        second_origin,
+        first_source,
+        second_source,
         remedy: _,
     } = error
     else {
-        panic!("expected generated-file origin conflict, got {error}");
+        panic!("expected generated-file source conflict, got {error}");
     };
     assert_eq!(path, PathBuf::from("_support/helpers.py"));
-    assert_eq!(first_origin, PathBuf::from("first/helpers.py"));
-    assert_eq!(second_origin, PathBuf::from("second/helpers.py"));
+    assert_eq!(first_source, "first/helpers.py");
+    assert_eq!(second_source, "second/helpers.py");
 }
 
 /// An inline **structured** object `oneOf` branch on a property: the branch is

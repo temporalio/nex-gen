@@ -31,12 +31,12 @@ pub enum Error {
     GeneratedFileConflict { path: PathBuf },
 
     #[error(
-        "generated file path `{path}` is claimed by both `{first_origin}` and `{second_origin}`; {remedy}"
+        "generated file path `{path}` is claimed by both `{first_source}` and `{second_source}`; {remedy}"
     )]
-    GeneratedFileOriginConflict {
+    GeneratedFileSourceConflict {
         path: PathBuf,
-        first_origin: PathBuf,
-        second_origin: PathBuf,
+        first_source: String,
+        second_source: String,
         remedy: String,
     },
 
