@@ -2222,25 +2222,6 @@ impl<'a> ApiPlanner<'a> {
         output.push_str(GENERATED_CODE_ATTRIBUTE);
         output.push('\n');
         output.push_str("public partial class WorkflowOutboundInterceptor\n{\n");
-        output.push_str("    internal static Task<NexusWorkflowOperationHandle<TResult>> StartSystemNexusOperationAsync<TResult>(\n        WorkflowOutboundInterceptor interceptor,\n        string service,\n        string operationName,\n        object? arg)\n    {\n");
-        for service in &self.api_plan.services {
-            for operation in &service.operations {
-                if !self.operation_has_input(operation) {
-                    continue;
-                }
-                let request_type = self.dotnet_erased_model_type(operation.input_model());
-                output.push_str("        if (service == ");
-                output.push_str(&csharp_string_literal(&service.wire_name));
-                output.push_str(" &&\n            operationName == ");
-                output.push_str(&csharp_string_literal(&operation.wire_name));
-                output.push_str(" &&\n            arg is ");
-                output.push_str(&request_type);
-                output.push_str(" request)\n        {\n            var handle = interceptor.");
-                output.push_str(&csharp_type_name(&operation.name));
-                output.push_str("Async(request);\n            return (Task<NexusWorkflowOperationHandle<TResult>>)(object)handle;\n        }\n");
-            }
-        }
-        output.push_str("        throw new System.ArgumentException($\"Unsupported System Nexus operation: {service}/{operationName}\");\n    }\n\n");
         for service in &self.api_plan.services {
             for operation in &service.operations {
                 let request_type = if self.operation_has_input(operation) {
@@ -2278,6 +2259,25 @@ impl<'a> ApiPlanner<'a> {
         output.push_str(GENERATED_CODE_ATTRIBUTE);
         output.push('\n');
         output.push_str("internal partial class WorkflowInstance\n{\n");
+        output.push_str("    private Task<NexusWorkflowOperationHandle<TResult>> StartSystemNexusOperationAsync<TResult>(\n        string service,\n        string operationName,\n        object? arg)\n    {\n");
+        for service in &self.api_plan.services {
+            for operation in &service.operations {
+                if !self.operation_has_input(operation) {
+                    continue;
+                }
+                let request_type = self.dotnet_erased_model_type(operation.input_model());
+                output.push_str("        if (service == ");
+                output.push_str(&csharp_string_literal(&service.wire_name));
+                output.push_str(" &&\n            operationName == ");
+                output.push_str(&csharp_string_literal(&operation.wire_name));
+                output.push_str(" &&\n            arg is ");
+                output.push_str(&request_type);
+                output.push_str(" request)\n        {\n            var handle = outbound.Value.");
+                output.push_str(&csharp_type_name(&operation.name));
+                output.push_str("Async(request);\n            return (Task<NexusWorkflowOperationHandle<TResult>>)(object)handle;\n        }\n");
+            }
+        }
+        output.push_str("        throw new System.ArgumentException($\"Unsupported System Nexus operation: {service}/{operationName}\");\n    }\n\n");
         output.push_str("    internal partial class OutboundImpl\n    {\n");
         for service in &self.api_plan.services {
             for operation in &service.operations {

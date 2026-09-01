@@ -225,9 +225,9 @@ fn dotnet_system_nexus_generation_emits_typed_outbound_interceptor() {
     assert!(interceptor.contains("namespace Temporalio.Worker.Interceptors"));
     assert!(interceptor.contains("public partial class WorkflowOutboundInterceptor"));
     assert!(interceptor.contains(
-        "internal static Task<NexusWorkflowOperationHandle<TResult>> StartSystemNexusOperationAsync<TResult>"
+        "private Task<NexusWorkflowOperationHandle<TResult>> StartSystemNexusOperationAsync<TResult>"
     ));
-    assert!(interceptor.contains("interceptor.SignalWithStartWorkflowAsync(request)"));
+    assert!(interceptor.contains("outbound.Value.SignalWithStartWorkflowAsync(request)"));
     assert!(interceptor.contains(
         "Task<NexusWorkflowOperationHandle<SignalWithStartWorkflowResponse>> SignalWithStartWorkflowAsync(SignalWithStartWorkflowRequest request)"
     ));
@@ -244,6 +244,7 @@ fn dotnet_system_nexus_generation_emits_typed_outbound_interceptor() {
     fs::write(
         project_path.join("SdkStubs.cs"),
         r#"
+using System;
 using System.Threading.Tasks;
 
 namespace Temporalio.Workflows
@@ -289,6 +290,8 @@ namespace Temporalio.Worker
 {
     internal partial class WorkflowInstance
     {
+        private readonly Lazy<Temporalio.Worker.Interceptors.WorkflowOutboundInterceptor> outbound = null!;
+
         internal partial class OutboundImpl : Temporalio.Worker.Interceptors.WorkflowOutboundInterceptor
         {
             internal OutboundImpl(Temporalio.Worker.Interceptors.WorkflowOutboundInterceptor next) : base(next) { }
