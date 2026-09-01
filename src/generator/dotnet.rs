@@ -2294,17 +2294,21 @@ impl<'a> ApiPlanner<'a> {
                 output.push_str(&csharp_type_name(&operation.name));
                 output.push_str("Async(");
                 output.push_str(&request_type);
-                output.push_str(" request) => ScheduleNexusOperationAsync<");
+                output.push_str(
+                    " request) => instance.outbound.Value.ScheduleSystemNexusOperationAsync<",
+                );
                 output.push_str(&response_type);
                 output.push_str(">(new(\n                Service: ");
                 output.push_str(&csharp_string_literal(&service.wire_name));
-                output.push_str(",\n                ClientOptions: new(");
-                output.push_str(&csharp_string_literal(
-                    service.endpoint.as_deref().unwrap_or_default(),
-                ));
-                output.push_str("),\n                OperationName: ");
+                output.push_str(",\n                Operation: new(\n                    ");
                 output.push_str(&csharp_string_literal(&operation.wire_name));
-                output.push_str(",\n                Arg: request,\n                Options: new(),\n                Headers: null));\n\n");
+                output.push_str(",\n                    typeof(");
+                output.push_str(&request_type);
+                output.push_str("),\n                    typeof(");
+                output.push_str(&response_type);
+                output.push_str(
+                    ")),\n                Arg: request,\n                Headers: null));\n\n",
+                );
             }
         }
         output.push_str("        }\n    }\n}\n");

@@ -235,7 +235,7 @@ fn dotnet_system_nexus_generation_emits_typed_outbound_interceptor() {
     assert!(interceptor.contains("internal partial class WorkflowInstance"));
     assert!(interceptor.contains("internal partial class OutboundImpl"));
     assert!(interceptor.contains(
-        "SignalWithStartWorkflowAsync(SignalWithStartWorkflowRequest request) => ScheduleNexusOperationAsync<SignalWithStartWorkflowResponse>"
+        "SignalWithStartWorkflowAsync(SignalWithStartWorkflowRequest request) => instance.outbound.Value.ScheduleSystemNexusOperationAsync<SignalWithStartWorkflowResponse>"
     ));
 
     let project_path = unique_output_path("dotnet-system-nexus-interceptor-build");
@@ -246,6 +246,11 @@ fn dotnet_system_nexus_generation_emits_typed_outbound_interceptor() {
         r#"
 using System;
 using System.Threading.Tasks;
+
+namespace NexusRpc
+{
+    public sealed record OperationDefinition(string Name, System.Type InputType, System.Type OutputType);
+}
 
 namespace Temporalio.Workflows
 {
@@ -266,6 +271,12 @@ namespace Temporalio.Worker.Interceptors
         Temporalio.Workflows.NexusWorkflowOperationOptions Options,
         object? Headers);
 
+    public sealed record ScheduleSystemNexusOperationInput<TResult>(
+        string Service,
+        NexusRpc.OperationDefinition Operation,
+        object? Arg,
+        object? Headers);
+
     public partial class WorkflowOutboundInterceptor
     {
         protected WorkflowOutboundInterceptor Next { get; }
@@ -274,6 +285,9 @@ namespace Temporalio.Worker.Interceptors
 
         public virtual Task<Temporalio.Workflows.NexusWorkflowOperationHandle<TResult>> ScheduleNexusOperationAsync<TResult>(
             ScheduleNexusOperationInput input) => Next.ScheduleNexusOperationAsync<TResult>(input);
+
+        public virtual Task<Temporalio.Workflows.NexusWorkflowOperationHandle<TResult>> ScheduleSystemNexusOperationAsync<TResult>(
+            ScheduleSystemNexusOperationInput<TResult> input) => Next.ScheduleSystemNexusOperationAsync<TResult>(input);
     }
 
     public sealed class TestInterceptor : WorkflowOutboundInterceptor
@@ -294,6 +308,8 @@ namespace Temporalio.Worker
 
         internal partial class OutboundImpl : Temporalio.Worker.Interceptors.WorkflowOutboundInterceptor
         {
+            private readonly WorkflowInstance instance = null!;
+
             internal OutboundImpl(Temporalio.Worker.Interceptors.WorkflowOutboundInterceptor next) : base(next) { }
         }
     }
