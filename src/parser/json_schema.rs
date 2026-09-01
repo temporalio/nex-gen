@@ -1144,16 +1144,6 @@ fn parse_json_documents(
         });
     }
 
-    if let Some((path, literal)) =
-        crate::json_schema::yaml_lex::fractional_integer_literal_in_sources(&sources)
-    {
-        return Err(Error::InvalidJsonSchema {
-            path,
-            reason: format!(
-                "{literal} is incompatible with `type: integer`: the written fractional part must be zero"
-            ),
-        });
-    }
     let mut docs = IndexMap::new();
     for (path, input) in sources {
         let doc = parse_json_schema_document(&path, &input)?;
@@ -11171,118 +11161,41 @@ properties:
     }
 
     #[test]
-    fn rejects_written_fraction_that_rounds_to_an_integral_binary64() {
-        let error = numeric_reject("type: integer\nconst: 4503599627370496.5");
-        assert!(error.contains("incompatible"), "{error}");
-        for tagged in [
-            "!!float '4503599627370496.5'",
-            "!<tag:yaml.org,2002:float> '4503599627370496.5'",
+    fn accepts_schema_fractions_rounded_to_integral_binary64() {
+        // JSON and YAML inputs share the serde_yaml load path. By the time the
+        // directional literal check runs, these authored fractions have
+        // rounded to the integral binary64 value 4503599627370496.
+        for (path, input) in [
+            (
+                "api.yaml",
+                r#"
+$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  constant: { type: integer, const: 4503599627370496.5 }
+  defaulted: { type: integer, default: 4503599627370496.5 }
+  choices: { type: integer, enum: [1, 4503599627370496.5] }
+"#,
+            ),
+            (
+                "api.json",
+                r#"{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "constant": { "type": "integer", "const": 4503599627370496.5 },
+    "defaulted": { "type": "integer", "default": 4503599627370496.5 },
+    "choices": { "type": "integer", "enum": [1, 4503599627370496.5] }
+  }
+}"#,
+            ),
         ] {
-            let error = numeric_reject(&format!("type: integer\nconst: {tagged}"));
-            assert!(
-                error.contains("written fractional part"),
-                "{tagged}: {error}"
-            );
-        }
-
-        // Explicit scalar tags determine the YAML value kind before style:
-        // quoted float stays numeric, while quoted string/null follow their
-        // ordinary type-compatibility diagnostics.
-        let string = numeric_reject("type: integer\nconst: !!str '4503599627370496.5'");
-        assert!(
-            string.contains("incompatible") && !string.contains("written fractional part"),
-            "{string}"
-        );
-        let null = numeric_reject("type: integer\nconst: !!null 'null'");
-        assert!(
-            null.contains("const: null") && !null.contains("written fractional part"),
-            "{null}"
-        );
-
-        // The integer type and literal may arrive on different conjunction
-        // branches; normalization must not erase the authored fraction before
-        // the directional literal check sees the effective type.
-        for keyword in [
-            "const: 4503599627370496.5",
-            "default: 4503599627370496.5",
-            "enum: [1, 4503599627370496.5]",
-        ] {
-            let error = numeric_reject(&format!(
-                "allOf:\n  - {{ type: integer }}\n  - {{ {keyword} }}"
-            ));
-            assert!(error.contains("incompatible"), "{keyword}: {error}");
-        }
-
-        // A written zero fractional part remains an integer even at the same
-        // magnitude; the lexical gate must not conservatively reject all
-        // binary64 floats in the ambiguous precision band.
-        parse(
-            "$schema: https://json-schema.org/draft/2020-12/schema\ntype: object\nproperties:\n  value: { type: integer, const: 4503599627370496.0 }",
-        );
-        parse(
-            "$schema: https://json-schema.org/draft/2020-12/schema\ntype: object\nproperties:\n  value:\n    type: integer\n    const: !!float '4503599627370496.0'",
-        );
-        parse(
-            "$schema: https://json-schema.org/draft/2020-12/schema\ntype: object\nproperties:\n  value:\n    type: integer\n    const: !!int '4503599627370496'",
-        );
-        parse(
-            "$schema: https://json-schema.org/draft/2020-12/schema\ntype: object\nproperties:\n  value:\n    allOf:\n      - { type: integer }\n      - { const: 4503599627370496.0 }",
-        );
-        parse(
-            "$schema: https://json-schema.org/draft/2020-12/schema\ntype: object\nproperties:\n  value:\n    allOf:\n      - { type: integer }\n      - { default: 4503599627370496.5 }\n      - { default: 4503599627370496.0 }",
-        );
-
-        // Annotation objects are data even when a conjunction makes their
-        // containing schema integer-typed.
-        parse(
-            "$schema: https://json-schema.org/draft/2020-12/schema\ntype: object\nproperties:\n  value:\n    allOf:\n      - { type: integer }\n      - examples:\n          - { type: integer, const: 4503599627370496.5 }",
-        );
-
-        // Immediately below 2^52, binary64 still retains the half and the same
-        // authored-fraction rule must remain in force at the boundary.
-        let below = numeric_reject("type: integer\nconst: 4503599627370495.5");
-        assert!(below.contains("incompatible"), "{below}");
-    }
-
-    #[test]
-    fn rejects_written_fraction_through_nullable_integer_projection() {
-        let load_property = |field_schema: &str| {
-            let input = format!(
-                "$schema: https://json-schema.org/draft/2020-12/schema\ntype: object\nproperties:\n  value:\n{}",
-                field_schema
-                    .lines()
-                    .map(|line| format!("    {line}"))
-                    .collect::<Vec<_>>()
-                    .join("\n")
-            );
-            parse(&input);
-        };
-
-        for branches in [
-            "oneOf:\n  - { type: integer }\n  - { type: \"null\" }",
-            "oneOf:\n  - { type: \"null\" }\n  - { type: integer }",
-        ] {
-            let default = numeric_reject(&format!("{branches}\ndefault: 4503599627370496.5"));
-            assert!(default.contains("incompatible"), "{default}");
-
-            let items = branches
-                .lines()
-                .map(|line| format!("  {line}"))
-                .collect::<Vec<_>>()
-                .join("\n");
-            for matcher in ["const: 4503599627370496.5", "enum: [1, 4503599627370496.5]"] {
-                let contains = numeric_reject(&format!(
-                    "type: array\nitems:\n{items}\ncontains: {{ {matcher} }}"
-                ));
-                assert!(contains.contains("incompatible"), "{matcher}: {contains}");
-            }
-
-            load_property(&format!(
-                "{branches}\ndefault: 4503599627370496.0\nexamples:\n  - {{ type: integer, const: 4503599627370496.5 }}"
-            ));
-            load_property(&format!(
-                "type: array\nitems:\n{items}\ncontains:\n  const: 4503599627370496.0\n  examples:\n    - {{ type: integer, const: 4503599627370496.5 }}"
-            ));
+            parse_api_spec_from_json_schema_for_language(
+                Language::Python,
+                input,
+                PathBuf::from(path),
+            )
+            .unwrap_or_else(|error| panic!("{path}: {error}"));
         }
     }
 

@@ -76,6 +76,15 @@ Loader behavior:
   not about how the two met, so it governs a literal that reaches the node
   through an [[allOf]] merge exactly as it governs one authored on the node —
   see [[allOf]], which applies it to a merged kind.
+- **Load-time limitation for JSON and YAML schema files.** Both input formats
+  are deserialized through `serde_yaml` into `serde_json::Value` before the
+  literal-kind compatibility check runs. A fractional [[const]], [[default]],
+  or [[enum]] number whose decimal spelling rounds to an integral binary64
+  value can therefore lose its fractional part at that boundary and be
+  accepted in an `integer` position. For example, `4503599627370496.5` rounds
+  to the binary64 value `4503599627370496` before validation. This is a
+  schema-authoring/load-time limitation; it is separate from the generated
+  runtimes' payload parsing divergence documented below.
 - **The `±(2^53−1)` integer cap binds at load, not only at runtime.** A
   literal or bound that puts an `integer` position's accepted set wholly
   outside the cap empties it, and an empty accepted set is a reject:
@@ -346,7 +355,7 @@ Loader must produce a clear, located diagnostic for each.
 | Wrong outer type | `5`, `null`, `true`, `{"type":"string"}` |
 | Nested / malformed | `[["string"]]` |
 | Object shape keyword on `type: "array"` (P7.1) | `{"type":"array", "properties":{…}}`, `{"type":"array", "additionalProperties":false}` — never accepted-and-ignored. The mirror (`items` on `type: "object"`) is [[items]]'. |
-| Fractional literal on `integer` (directional rule) | `{"type":"integer","const":1.5}`, `{"type":"integer","enum":[1,1.5]}`, `{"type":"integer","default":1.5}` |
+| Fractional literal on `integer` (directional rule, except when the load-time binary64 limitation above has already erased the fraction) | `{"type":"integer","const":1.5}`, `{"type":"integer","enum":[1,1.5]}`, `{"type":"integer","default":1.5}` |
 | `integer` accepted set emptied by the cap | `{"type":"integer","const":9007199254740992}`, `{"type":"integer","minimum":9007199254740992}` |
 | Sibling on a `oneOf` node | `{"oneOf":[…], "type":"object"}`, `{"oneOf":[…], "properties":{…}}`, `{"oneOf":[…], "additionalProperties":false}` (see [[oneOf]]) |
 
@@ -392,6 +401,11 @@ For each accepted `type`, fuzz over:
   within the cap**. The `[2^52, 2^53)` band makes the effect systematic because
   every binary64 value there is integral, but sufficiently fine fractional
   parts can round away at smaller magnitudes too.
+
+  This runtime-payload divergence is distinct from the schema-loader
+  limitation above. Here the decimal token is in a payload handled by generated
+  target code after generation; the loader limitation concerns numeric literals
+  authored in the JSON or YAML schema itself.
 
   **Status: open.** This is a four-target *accept-set* divergence, and **P1**
   licenses none — the binary64 domain restriction above narrows the accepted

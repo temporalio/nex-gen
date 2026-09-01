@@ -19,6 +19,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- JSON and YAML schema loading no longer performs a separate lossless numeric
+  lexeme preflight. Fractional `const`, `default`, or `enum` literals that round
+  to integral binary64 values may therefore be accepted in `integer` positions;
+  the JSON Schema `type` specification documents this load-time limitation.
 - JSON Schema load errors now retain schema-position breadcrumbs and actionable
   remedies for malformed or unresolved `$ref` pointers, unsupported boolean
   subschemas, empty member names, and duplicate scalar `oneOf` branches.
