@@ -166,7 +166,6 @@ export const blockTransferTypeConverter =
       } else {
         if (!(typeof value.blockId === "string")) {
           violations.push({ path: "blockId", reason: "expected string" });
-        } else {
         }
         out["blockId"] = value.blockId;
       }
@@ -195,7 +194,6 @@ export const blockTransferTypeConverter =
         } else {
           if (!(typeof value.text === "string")) {
             violations.push({ path: "text", reason: "expected string" });
-          } else {
           }
           out["text"] = value.text;
         }
@@ -321,7 +319,6 @@ export const blockStyleTransferTypeConverter =
         } else {
           if (!(typeof value.bold === "boolean")) {
             violations.push({ path: "bold", reason: "expected boolean" });
-          } else {
           }
           out["bold"] = value.bold;
         }

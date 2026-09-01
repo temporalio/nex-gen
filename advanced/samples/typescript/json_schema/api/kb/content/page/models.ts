@@ -151,7 +151,6 @@ export const pageTransferTypeConverter =
       } else {
         if (!(typeof value.pageId === "string")) {
           violations.push({ path: "pageId", reason: "expected string" });
-        } else {
         }
         out["pageId"] = value.pageId;
       }
@@ -160,7 +159,6 @@ export const pageTransferTypeConverter =
       } else {
         if (!(typeof value.title === "string")) {
           violations.push({ path: "title", reason: "expected string" });
-        } else {
         }
         out["title"] = value.title;
       }
@@ -287,7 +285,6 @@ export const pageMetaTransferTypeConverter =
       } else {
         if (!(typeof value.author === "string")) {
           violations.push({ path: "author", reason: "expected string" });
-        } else {
         }
         out["author"] = value.author;
       }

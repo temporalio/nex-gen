@@ -1492,25 +1492,33 @@ fn render_ts_field_checks_at_depth(
         return;
     }
     if check_type && let Some((predicate, reason)) = ts_serialize_type_check(schema, value_expr) {
+        let inner_indent = format!("{indent}  ");
+        let mut body = String::new();
+        render_ts_field_checks_at_depth(
+            &mut body,
+            schema,
+            value_expr,
+            path_expr,
+            &inner_indent,
+            depth,
+            false,
+        );
         output.push_str(indent);
         output.push_str(&format!("if (!({predicate})) {{\n"));
         output.push_str(indent);
         output.push_str(&format!(
             "  violations.push({{ path: {path_expr}, reason: '{reason}' }});\n"
         ));
-        output.push_str(indent);
-        output.push_str("} else {\n");
-        render_ts_field_checks_at_depth(
-            output,
-            schema,
-            value_expr,
-            path_expr,
-            &format!("{indent}  "),
-            depth,
-            false,
-        );
-        output.push_str(indent);
-        output.push_str("}\n");
+        if body.is_empty() {
+            output.push_str(indent);
+            output.push_str("}\n");
+        } else {
+            output.push_str(indent);
+            output.push_str("} else {\n");
+            output.push_str(&body);
+            output.push_str(indent);
+            output.push_str("}\n");
+        }
         return;
     }
     if let Some(kind) = temporal_kind_direct(schema) {
