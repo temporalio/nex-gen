@@ -2218,10 +2218,10 @@ impl<'a> ApiPlanner<'a> {
         output.push_str("using System.CodeDom.Compiler;\n");
         output.push_str("using System.Threading.Tasks;\n");
         output.push_str("using Temporalio.Workflows;\n\n");
-        output.push_str("namespace Temporalio.Worker.Interceptors\n{\n\n");
+        output.push_str("namespace Temporalio.Worker.Interceptors\n{\n\n    ");
         output.push_str(GENERATED_CODE_ATTRIBUTE);
         output.push('\n');
-        output.push_str("public partial class WorkflowOutboundInterceptor\n{\n");
+        output.push_str("    public partial class WorkflowOutboundInterceptor\n    {\n");
         for service in &self.api_plan.services {
             for operation in &service.operations {
                 let request_type = if self.operation_has_input(operation) {
@@ -2230,19 +2230,19 @@ impl<'a> ApiPlanner<'a> {
                     "object".to_string()
                 };
                 let response_type = self.operation_registry_response_type(operation);
-                output.push_str("    /// <summary>\n");
-                output.push_str("    /// Intercept the ");
+                output.push_str("        /// <summary>\n");
+                output.push_str("        /// Intercept the ");
                 output.push_str(&operation.name);
                 output.push_str(" operation.\n");
-                output.push_str("    /// </summary>\n");
+                output.push_str("        /// </summary>\n");
                 output.push_str(
-                    "    /// <param name=\"request\">Request for the operation.</param>\n",
+                    "        /// <param name=\"request\">Request for the operation.</param>\n",
                 );
-                output.push_str("    /// <returns>Operation handle.</returns>\n");
-                output.push_str("    ");
+                output.push_str("        /// <returns>Operation handle.</returns>\n");
+                output.push_str("        ");
                 output.push_str(GENERATED_CODE_ATTRIBUTE);
                 output.push('\n');
-                output.push_str("    public virtual Task<NexusWorkflowOperationHandle<");
+                output.push_str("        public virtual Task<NexusWorkflowOperationHandle<");
                 output.push_str(&response_type);
                 output.push_str(">> ");
                 output.push_str(&csharp_type_name(&operation.name));
@@ -2253,32 +2253,34 @@ impl<'a> ApiPlanner<'a> {
                 output.push_str("Async(request);\n\n");
             }
         }
+        output.push_str("    }\n\n");
         output.push_str("}\n\n");
-        output.push_str("}\n\n");
-        output.push_str("namespace Temporalio.Worker\n{\n\n");
+        output.push_str("namespace Temporalio.Worker\n{\n\n    ");
         output.push_str(GENERATED_CODE_ATTRIBUTE);
         output.push('\n');
-        output.push_str("internal partial class WorkflowInstance\n{\n");
-        output.push_str("    private Task<NexusWorkflowOperationHandle<TResult>> StartSystemNexusOperationAsync<TResult>(\n        string service,\n        string operationName,\n        object? arg)\n    {\n");
+        output.push_str("    internal partial class WorkflowInstance\n    {\n");
+        output.push_str("        private Task<NexusWorkflowOperationHandle<TResult>> StartSystemNexusOperationAsync<TResult>(\n            string service,\n            string operationName,\n            object? arg)\n        {\n");
         for service in &self.api_plan.services {
             for operation in &service.operations {
                 if !self.operation_has_input(operation) {
                     continue;
                 }
                 let request_type = self.dotnet_erased_model_type(operation.input_model());
-                output.push_str("        if (service == ");
+                output.push_str("            if (service == ");
                 output.push_str(&csharp_string_literal(&service.wire_name));
-                output.push_str(" &&\n            operationName == ");
+                output.push_str(" &&\n                operationName == ");
                 output.push_str(&csharp_string_literal(&operation.wire_name));
-                output.push_str(" &&\n            arg is ");
+                output.push_str(" &&\n                arg is ");
                 output.push_str(&request_type);
-                output.push_str(" request)\n        {\n            var handle = outbound.Value.");
+                output.push_str(
+                    " request)\n            {\n                var handle = outbound.Value.",
+                );
                 output.push_str(&csharp_type_name(&operation.name));
-                output.push_str("Async(request);\n            return (Task<NexusWorkflowOperationHandle<TResult>>)(object)handle;\n        }\n");
+                output.push_str("Async(request);\n                return (Task<NexusWorkflowOperationHandle<TResult>>)(object)handle;\n            }\n");
             }
         }
-        output.push_str("        throw new System.ArgumentException($\"Unsupported System Nexus operation: {service}/{operationName}\");\n    }\n\n");
-        output.push_str("    internal partial class OutboundImpl\n    {\n");
+        output.push_str("            throw new System.ArgumentException($\"Unsupported System Nexus operation: {service}/{operationName}\");\n        }\n\n");
+        output.push_str("        internal partial class OutboundImpl\n        {\n");
         for service in &self.api_plan.services {
             for operation in &service.operations {
                 if !self.operation_has_input(operation) {
@@ -2286,7 +2288,7 @@ impl<'a> ApiPlanner<'a> {
                 }
                 let request_type = self.dotnet_erased_model_type(operation.input_model());
                 let response_type = self.operation_registry_response_type(operation);
-                output.push_str("        public override Task<NexusWorkflowOperationHandle<");
+                output.push_str("            public override Task<NexusWorkflowOperationHandle<");
                 output.push_str(&response_type);
                 output.push_str(">> ");
                 output.push_str(&csharp_type_name(&operation.name));
@@ -2294,18 +2296,18 @@ impl<'a> ApiPlanner<'a> {
                 output.push_str(&request_type);
                 output.push_str(" request) => ScheduleNexusOperationAsync<");
                 output.push_str(&response_type);
-                output.push_str(">(new(\n            Service: ");
+                output.push_str(">(new(\n                Service: ");
                 output.push_str(&csharp_string_literal(&service.wire_name));
-                output.push_str(",\n            ClientOptions: new(");
+                output.push_str(",\n                ClientOptions: new(");
                 output.push_str(&csharp_string_literal(
                     service.endpoint.as_deref().unwrap_or_default(),
                 ));
-                output.push_str("),\n            OperationName: ");
+                output.push_str("),\n                OperationName: ");
                 output.push_str(&csharp_string_literal(&operation.wire_name));
-                output.push_str(",\n            Arg: request,\n            Options: new(),\n            Headers: null));\n\n");
+                output.push_str(",\n                Arg: request,\n                Options: new(),\n                Headers: null));\n\n");
             }
         }
-        output.push_str("    }\n}\n}\n");
+        output.push_str("        }\n    }\n}\n");
         output
     }
 }
