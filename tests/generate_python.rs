@@ -748,6 +748,18 @@ fn assert_python_validation_exports(package_init: &str) {
     assert!(!package_init.contains("ValidationError"), "{package_init}");
 }
 
+fn assert_no_generated_python_diagnostic_suppressions(files: &BTreeMap<PathBuf, String>) {
+    for (path, source) in files {
+        for suppression in ["# pyright:", "# type: ignore"] {
+            assert!(
+                !source.contains(suppression),
+                "generated module {} contains {suppression}",
+                path.display()
+            );
+        }
+    }
+}
+
 fn render_output_files(files: BTreeMap<PathBuf, String>) -> String {
     files
         .into_iter()
@@ -1001,6 +1013,7 @@ fn python_json_examples_expose_expected_runtime_features() {
         generate_formatted_json_python_output(&root, example_id, &output_path, false);
         assert_python_310_syntax_compatible(&output_path);
         let rendered = read_python_package_files(&output_path);
+        assert_no_generated_python_diagnostic_suppressions(&rendered);
         let package_init = rendered
             .get(&PathBuf::from("__init__.py"))
             .expect("JSON Schema package should include a root __init__.py");
@@ -1073,6 +1086,7 @@ fn python_json_api_examples_expose_validation_exports() {
         generate_formatted_json_python_output(&root, example_id, &output_path, true);
         assert_python_310_syntax_compatible(&output_path);
         let rendered = read_python_package_files(&output_path);
+        assert_no_generated_python_diagnostic_suppressions(&rendered);
         let package_init = rendered
             .get(&PathBuf::from("__init__.py"))
             .expect("JSON Schema package should include a root __init__.py");
@@ -1702,10 +1716,12 @@ fn python_json_validates_non_object_union_branch_constraints() {
     // its unconstrained `number` still contributes the uniform finiteness guard
     // at the indexed path.
     assert!(
-        rendered.contains("for item_index_12, item_element_12 in enumerate(value.list_or_name):")
+        rendered
+            .contains("checked_array_8 = typing.cast(\"list[typing.Any]\", list_or_name_value)")
     );
+    assert!(rendered.contains("for item_index_8, item_element_8 in enumerate(checked_array_8):"));
     assert!(rendered.contains(
-        "Violation(path=f'listOrName[{item_index_12}]', reason=f\"must be a finite number, got {item_element_12}\")"
+        "Violation(path=f'listOrName[{item_index_8}]', reason=f\"must be a finite number, got {item_element_8}\")"
     ));
     fs::remove_dir_all(temp_dir).unwrap();
 }
@@ -1848,28 +1864,29 @@ fn python_json_union_serializer_validates_before_dispatching() {
         .expect("no serialize function for the `pick` union")
         .1;
     assert!(dispatch.starts_with(concat!(
+        "    runtime_value: typing.Any = value\n",
         "    violations: list[Violation] = []\n",
-        "    candidate = typing.cast(\"object\", value)\n",
-        "    if not (isinstance(candidate, Circle) or isinstance(candidate, Square)):\n",
+        "    if not (isinstance(runtime_value, Circle) or isinstance(runtime_value, Square)):\n",
         "        violations.append(Violation(path=\"\", reason=\"expected one of: Circle, Square\"))\n",
         "    if violations:\n",
         "        raise temporalio.converter.create_payload_validation_error(violations)\n",
-        "    if isinstance(value, Circle):\n",
+        "    if isinstance(runtime_value, Circle):\n",
     )),
     "the `pick` dispatch is not preceded by the no-branch-matched test:\n{dispatch}");
 
     // The enclosing member holds no copy of that test; it only gates the
     // conversion after its own checks and re-paths the converter's failure.
     let member = rendered
-        .split_once("        if value.pick is not None:\n")
+        .split_once("        pick_value: typing.Any = runtime_value.pick\n")
         .expect("no serialize block for the `pick` member")
         .1;
     assert!(
         member.starts_with(concat!(
+            "        if pick_value is not None:\n",
             "            pick_violation_count = len(violations)\n",
             "            if len(violations) == pick_violation_count:\n",
             "                try:\n",
-            "                    out[\"pick\"] = _bag_pick_to_transfer_type(value.pick)\n",
+            "                    out[\"pick\"] = _bag_pick_to_transfer_type(pick_value)\n",
             "                except temporalio.exceptions.ApplicationError as error:\n",
             "                    _collect(violations, \"pick\", error)\n",
         )),
@@ -2506,7 +2523,9 @@ fn python_json_model_properties_use_union_none_and_defaults_preserve_presence() 
     assert!(rendered.contains("def salutation(self) -> typing.Annotated[str,"));
     assert!(rendered.contains("value: typing.Annotated["));
     assert!(rendered.contains("@salutation.deleter\n    def salutation(self) -> None:"));
-    assert!(rendered.contains("if value._salutation is not None:"));
+    assert!(rendered.contains(
+        "salutation_value: typing.Any = runtime_value._salutation\n        if salutation_value is not None:"
+    ));
     assert!(!rendered.contains("DEFAULT_SALUTATION"));
     assert!(!rendered.contains("reportDeprecated=false"));
     assert!(!rendered.contains("reportPropertyTypeMismatch=false"));

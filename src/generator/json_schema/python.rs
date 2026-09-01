@@ -222,8 +222,7 @@ pub(crate) fn converter_class_name(model_name: &str) -> String {
     format!("_{model_name}TransferTypeConverter")
 }
 
-/// The converter body's local holding one declared property's parsed value,
-/// until the final keyword-argument construction reads it back.
+/// The converter body's local holding one declared property's untrusted value.
 ///
 /// The name is **not** the member identifier: `from_transfer_type` is one Python
 /// scope, so a property-derived local shares it with the converter's own locals
@@ -244,7 +243,7 @@ pub(crate) fn converter_class_name(model_name: &str) -> String {
 /// `_path`), none of which ends in `_value`, so no property's slot can be
 /// another property's temporary and distinct members (already one P15 scope)
 /// stay distinct here.
-fn parse_slot_local(field_name: &str) -> String {
+fn property_value_local(field_name: &str) -> String {
     format!("{field_name}_value")
 }
 
@@ -618,9 +617,6 @@ fn render_hoisted_models_module(hoists: &JsonModelHoistPlan) -> Result<String> {
 
     let mut output = String::new();
     render_generated_file_header(&mut output);
-    output.push_str(
-        "\n# pyright: reportUnnecessaryComparison=false, reportUnnecessaryIsInstance=false, reportUnreachable=false",
-    );
     output.push('\n');
     let wrote_imports =
         render_optional_python_imports(&mut output, &body, &model_fragments.module_imports, &[]);
@@ -936,7 +932,6 @@ pub(in crate::generator) fn render_external_models(
         export_sort_keys: BTreeMap::new(),
         declared_type_parameters: BTreeSet::new(),
         allows_private_wire_access: false,
-        has_dynamic_runtime_guards: true,
     })
 }
 
@@ -2277,6 +2272,43 @@ enum PyCheckSide {
     SerializeTypeChecked,
 }
 
+/// Emits serialize constraints after the caller has proved the value's outer
+/// runtime kind. Arrays get an explicit `list[Any]` view so their constraints
+/// and recursive element checks never inherit trust from `list[T]`.
+fn render_py_type_checked_field_checks(
+    output: &mut String,
+    schema: &Schema,
+    models: &[&PlannedJsonType],
+    value_expr: &str,
+    path_expr: &str,
+    indent: &str,
+) -> Result<()> {
+    let checked_array = (schema.ty.as_ref().and_then(Value::as_str) == Some("array"))
+        .then(|| format!("checked_array_{}", indent.len()));
+    let checked_expr = checked_array.as_deref().unwrap_or(value_expr);
+    let mut body = String::new();
+    render_py_field_checks(
+        &mut body,
+        schema,
+        models,
+        checked_expr,
+        path_expr,
+        indent,
+        PyCheckSide::SerializeTypeChecked,
+    )?;
+    if body.is_empty() {
+        return Ok(());
+    }
+    if let Some(checked_array) = checked_array {
+        output.push_str(indent);
+        output.push_str(&format!(
+            "{checked_array} = typing.cast(\"list[typing.Any]\", {value_expr})\n"
+        ));
+    }
+    output.push_str(&body);
+    Ok(())
+}
+
 fn py_serialize_type_check(schema: &Schema, value_expr: &str) -> Option<(String, &'static str)> {
     let schema = nullable_member_schema(schema).unwrap_or(schema);
     if let Some(kind) = temporal_kind_direct(schema) {
@@ -2352,14 +2384,13 @@ fn render_py_field_checks(
         && let Some((predicate, reason)) = py_serialize_type_check(schema, value_expr)
     {
         let mut body = String::new();
-        render_py_field_checks(
+        render_py_type_checked_field_checks(
             &mut body,
             schema,
             models,
             value_expr,
             path_expr,
             &format!("{indent}    "),
-            PyCheckSide::SerializeTypeChecked,
         )?;
         output.push_str(indent);
         output.push_str(&format!("if not ({predicate}):\n"));
@@ -3383,10 +3414,6 @@ fn render_py_union_object_branch(
     output.push_str("    return None\n");
 }
 
-/// The local a union's in-memory value is widened through before the
-/// no-branch-matched test. See [`render_py_union_value_checks`].
-const PY_UNION_CANDIDATE: &str = "candidate";
-
 /// Emits the constraint checks a union's **in-memory** value is held to, narrowed
 /// to the branch it holds: one guarded block per non-object branch that declares
 /// anything (P12), then the terminal test that *some* branch matched at all.
@@ -3402,14 +3429,13 @@ fn render_py_union_value_checks(
 ) -> Result<()> {
     for variant in union.variants.iter().filter(|variant| !variant.is_object) {
         let mut body = String::new();
-        render_py_field_checks(
+        render_py_type_checked_field_checks(
             &mut body,
             &variant.schema,
             models,
             value_expr,
             path_expr,
             &format!("{indent}    "),
-            PyCheckSide::Serialize,
         )?;
         if body.is_empty() {
             continue;
@@ -3425,28 +3451,23 @@ fn render_py_union_value_checks(
     // unreported it would serialize verbatim, emitting bytes every parser
     // (Python's own included) rejects, so it is the same aggregated violation the
     // parse side reports for an inadmissible wire token (P12: both directions run
-    // the same checks). The value is widened to `object` first: read through the
-    // declared union a closed set of guards can be provably exhaustive, which puts
-    // the violation in code pyright reports as unreachable — and the widening
-    // costs nothing, because the guards are the runtime tests either way. This
-    // test is also what makes the dispatch's unguarded last branch safe, so a
+    // the same checks). Serialize-side callers deliberately pass a `typing.Any`
+    // runtime-boundary local, so these guards test the value that actually arrived
+    // rather than trusting its annotation. This test is also what makes the
+    // dispatch's unguarded last branch safe, so a
     // union that has a serializer runs it inside that function rather than at the
     // enclosing member (see `render_union_serialize_function`).
     let mut guards: Vec<String> = union
         .variants
         .iter()
-        .map(|variant| py_negatable(&variant.memory_guard(PY_UNION_CANDIDATE)))
+        .map(|variant| py_negatable(&variant.memory_guard(value_expr)))
         .collect();
     if union.nullable {
-        guards.push(format!("{PY_UNION_CANDIDATE} is None"));
+        guards.push(format!("{value_expr} is None"));
     }
     if guards.is_empty() {
         return Ok(());
     }
-    output.push_str(indent);
-    output.push_str(&format!(
-        "{PY_UNION_CANDIDATE} = typing.cast(\"object\", {value_expr})\n"
-    ));
     output.push_str(indent);
     output.push_str(&format!("if not ({}):\n", guards.join(" or ")));
     output.push_str(indent);
@@ -3566,8 +3587,9 @@ fn render_union_serialize_function(
         "def {}(value: {member_type}) -> typing.Any:\n",
         union_serialize_fn(base)
     ));
+    output.push_str("    runtime_value: typing.Any = value\n");
     let mut checks = String::new();
-    render_py_union_value_checks(&mut checks, union, models, "value", "\"\"", "    ")?;
+    render_py_union_value_checks(&mut checks, union, models, "runtime_value", "\"\"", "    ")?;
     if !checks.is_empty() {
         output.push_str("    violations: list[Violation] = []\n");
         output.push_str(&checks);
@@ -3576,7 +3598,7 @@ fn render_union_serialize_function(
             "        raise temporalio.converter.create_payload_validation_error(violations)\n",
         );
     }
-    render_py_union_serialize(output, union, "value", "    ");
+    render_py_union_serialize(output, union, "runtime_value", "    ");
     Ok(())
 }
 
@@ -3936,10 +3958,10 @@ fn render_model_parser_body(
     output.push_str(&format!("return {}(\n", model.model_name));
     for field_name in &fields {
         // The member identifier names the keyword; the value comes off the
-        // property's slot local (see `parse_slot_local`).
+        // property's slot local (see `property_value_local`).
         output.push_str(&format!(
             "    {field_name}={},\n",
-            parse_slot_local(field_name)
+            property_value_local(field_name)
         ));
     }
     if open {
@@ -4008,8 +4030,9 @@ fn render_model_serializer_body(
     // the wire object — both directions over one set of check emitters. A nested
     // conversion aggregates into the same list, so the violations declared here
     // also hold everything the members below report (P11).
+    output.push_str("runtime_value: typing.Any = value\n");
     output.push_str(&format!(
-        "if not isinstance(value, {}):\n",
+        "if not isinstance(runtime_value, {}):\n",
         model.model_name
     ));
     output.push_str(
@@ -4023,11 +4046,17 @@ fn render_model_serializer_body(
     output.push_str("out: dict[str, typing.Any] = {}\n");
 
     if let Some(shape) = py_map_shape(schema)? {
-        output.push_str("if not isinstance(value.additional_properties, dict):\n");
+        output.push_str(
+            "additional_properties_value: typing.Any = runtime_value.additional_properties\n",
+        );
+        output.push_str("if not isinstance(additional_properties_value, dict):\n");
         output.push_str(
             "    raise temporalio.converter.create_payload_validation_error([Violation(path=\"\", reason=\"expected object\")])\n",
         );
-        output.push_str("for key, entry in value.additional_properties.items():\n");
+        output.push_str(
+            "checked_additional_properties = typing.cast(\"dict[str, typing.Any]\", additional_properties_value)\n",
+        );
+        output.push_str("for key, entry in checked_additional_properties.items():\n");
         if let Some(value_schema) = &shape.value_schema {
             if serialize_expr(value_schema, "entry", 0) != "entry" {
                 output.push_str("    member_violation_count = len(violations)\n");
@@ -4072,11 +4101,13 @@ fn render_model_serializer_body(
     if let Some(properties) = &schema.properties {
         for (json_name, property) in properties {
             let field_name = property.py_member_name(json_name);
-            let value_expr = if property.default.is_some() {
-                format!("value._{field_name}")
+            let value_expr = property_value_local(&field_name);
+            let source_expr = if property.default.is_some() {
+                format!("runtime_value._{field_name}")
             } else {
-                format!("value.{field_name}")
+                format!("runtime_value.{field_name}")
             };
+            output.push_str(&format!("{value_expr}: typing.Any = {source_expr}\n"));
             let key = python_string_literal(json_name);
             let target = format!("out[{key}]");
             let path_expr = python_violation_path_literal(json_name);
@@ -4129,7 +4160,13 @@ fn render_model_serializer_body(
                 output.push_str(&format!("{violation_count} = len(violations)\n"));
             }
             render_py_serialize_property_check(
-                output, json_name, property, models, guarded, indent,
+                output,
+                json_name,
+                property,
+                models,
+                &value_expr,
+                guarded,
+                indent,
             )?;
             let conversion_indent = if gates_conversion {
                 output.push_str(indent);
@@ -4161,7 +4198,17 @@ fn render_model_serializer_body(
         }
     }
     if is_open_object(schema) {
-        output.push_str("for key, entry in value.additional_properties.items():\n");
+        output.push_str(
+            "additional_properties_value: typing.Any = runtime_value.additional_properties\n",
+        );
+        output.push_str("if not isinstance(additional_properties_value, dict):\n");
+        output.push_str(
+            "    raise temporalio.converter.create_payload_validation_error([Violation(path=\"\", reason=\"expected object\")])\n",
+        );
+        output.push_str(
+            "checked_additional_properties = typing.cast(\"dict[str, typing.Any]\", additional_properties_value)\n",
+        );
+        output.push_str("for key, entry in checked_additional_properties.items():\n");
         output.push_str("    path = _member_path(key)\n");
         output.push_str(&format!(
             "    if key in {}:\n",
@@ -4292,12 +4339,6 @@ fn render_py_serialize_value(
     indent: &str,
     slot: &str,
 ) -> Result<()> {
-    if !py_serialize_can_raise(schema) {
-        output.push_str(indent);
-        output.push_str(&sink.statement(&serialize_expr(schema, value_expr, 0)));
-        output.push('\n');
-        return Ok(());
-    }
     // A nullability wrapper: `None` is the wire value, and the non-null branch
     // carries the conversion.
     if let Some(non_null) = nullable_member_schema(schema) {
@@ -4319,9 +4360,24 @@ fn render_py_serialize_value(
             slot,
         );
     }
-    if schema.ty.as_ref().and_then(Value::as_str) == Some("array")
-        && let Some(items) = schema.items.as_deref()
-    {
+    if schema.ty.as_ref().and_then(Value::as_str) == Some("array") {
+        let checked_local = format!("{slot}_checked");
+        output.push_str(indent);
+        output.push_str(&format!(
+            "{checked_local} = typing.cast(\"list[typing.Any]\", {value_expr})\n"
+        ));
+        let Some(items) = schema.items.as_deref() else {
+            output.push_str(indent);
+            output.push_str(&sink.statement(&checked_local));
+            output.push('\n');
+            return Ok(());
+        };
+        if !py_serialize_can_raise(items) {
+            output.push_str(indent);
+            output.push_str(&sink.statement(&serialize_expr(schema, &checked_local, 0)));
+            output.push('\n');
+            return Ok(());
+        }
         // Elementwise, so a bad element is reported at its own index and the rest
         // of the list is still converted (P11).
         let list_local = format!("{slot}_out");
@@ -4331,7 +4387,7 @@ fn render_py_serialize_value(
         output.push_str(&format!("{list_local}: list[typing.Any] = []\n"));
         output.push_str(indent);
         output.push_str(&format!(
-            "for {index_local}, {element_local} in enumerate({value_expr}):\n"
+            "for {index_local}, {element_local} in enumerate({checked_local}):\n"
         ));
         let loop_body = format!("{indent}    ");
         render_py_serialize_value(
@@ -4345,6 +4401,12 @@ fn render_py_serialize_value(
         )?;
         output.push_str(indent);
         output.push_str(&sink.statement(&list_local));
+        output.push('\n');
+        return Ok(());
+    }
+    if !py_serialize_can_raise(schema) {
+        output.push_str(indent);
+        output.push_str(&sink.statement(&serialize_expr(schema, value_expr, 0)));
         output.push('\n');
         return Ok(());
     }
@@ -4397,13 +4459,13 @@ fn render_py_serialize_property_check(
     json_name: &str,
     property: &Schema,
     models: &[&PlannedJsonType],
+    value_expr: &str,
     guarded: bool,
     indent: &str,
 ) -> Result<()> {
     if classify_py_union(property, models)?.is_some_and(|union| union.needs_serializer()) {
         return Ok(());
     }
-    let value_expr = format!("value.{}", property.py_member_name(json_name));
     let path_expr = python_violation_path_literal(json_name);
     let guard_null = allows_null(property) && !guarded;
     let body_indent = if guard_null {
@@ -4416,7 +4478,7 @@ fn render_py_serialize_property_check(
         &mut body,
         property,
         models,
-        &value_expr,
+        value_expr,
         &path_expr,
         &body_indent,
         PyCheckSide::Serialize,
@@ -4483,8 +4545,8 @@ fn render_property_parser(
     required: bool,
 ) -> Result<()> {
     // Every local this position binds hangs off the property's slot name, never
-    // off the member identifier itself (see `parse_slot_local`).
-    let slot = parse_slot_local(&property.py_member_name(json_name));
+    // off the member identifier itself (see `property_value_local`).
+    let slot = property_value_local(&property.py_member_name(json_name));
     let member_type = annotation(property)?;
     let key = python_string_literal(json_name);
     let path_expr = python_violation_path_literal(json_name);

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-# pyright: reportUnnecessaryComparison=false, reportUnnecessaryIsInstance=false, reportUnreachable=false
 import dataclasses
 import typing
 import typing_extensions
@@ -68,26 +67,29 @@ class _PageMetaTransferTypeConverter(
 
     @typing_extensions.override
     def to_transfer_type(self, value: "PageMeta") -> typing.Any:
-        if not isinstance(value, PageMeta):
+        runtime_value: typing.Any = value
+        if not isinstance(runtime_value, PageMeta):
             raise temporalio.converter.create_payload_validation_error(
                 [Violation(path="", reason="expected object")]
             )
         violations: list[Violation] = []
         out: dict[str, typing.Any] = {}
-        if value.author is None:
+        author_value: typing.Any = runtime_value.author
+        if author_value is None:
             violations.append(Violation(path="author", reason="required"))
         else:
-            if not (isinstance(value.author, str)):
+            if not (isinstance(author_value, str)):
                 violations.append(Violation(path="author", reason="expected string"))
-            out["author"] = value.author
-        if value.word_count is not None:
+            out["author"] = author_value
+        word_count_value: typing.Any = runtime_value.word_count
+        if word_count_value is not None:
             if not (
-                not isinstance(value.word_count, bool)
+                not isinstance(word_count_value, bool)
                 and (
-                    isinstance(value.word_count, int)
+                    isinstance(word_count_value, int)
                     or (
-                        isinstance(value.word_count, float)
-                        and value.word_count.is_integer()
+                        isinstance(word_count_value, float)
+                        and word_count_value.is_integer()
                     )
                 )
             ):
@@ -95,13 +97,13 @@ class _PageMetaTransferTypeConverter(
                     Violation(path="wordCount", reason="expected integer")
                 )
             else:
-                if abs(value.word_count) > 9007199254740991:
+                if abs(word_count_value) > 9007199254740991:
                     violations.append(
                         Violation(
                             path="wordCount", reason="exceeds ±(2^53-1) integer cap"
                         )
                     )
-            out["wordCount"] = value.word_count
+            out["wordCount"] = word_count_value
         if violations:
             raise temporalio.converter.create_payload_validation_error(violations)
         return out
