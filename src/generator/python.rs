@@ -287,7 +287,7 @@ fn insert_branch_index_file(
         path,
         contents,
         PathBuf::from(format!(
-            "<generated Python barrel for module {}>",
+            "<generated Python __init__.py for module {}>",
             branch.module_path.as_module_key()
         )),
     )
@@ -733,7 +733,7 @@ impl<'a> ApiPlanner<'a> {
             &mut origins,
             "__init__.py",
             render_init(root_package_imports),
-            PathBuf::from("<generated Python package barrel>"),
+            PathBuf::from("<generated Python package __init__.py>"),
         )?;
         // A module that declares nothing emits no models file. Emitting the file
         // anyway leaves a header and unused imports behind.
@@ -762,7 +762,7 @@ impl<'a> ApiPlanner<'a> {
                 &mut origins,
                 "_resources/__init__.py",
                 render_resources_package_init(services),
-                PathBuf::from("<generated Python resources barrel>"),
+                PathBuf::from("<generated Python resources __init__.py>"),
             )?;
         }
         if !services.is_empty() {
@@ -785,7 +785,7 @@ impl<'a> ApiPlanner<'a> {
                 &mut origins,
                 "operations/__init__.py",
                 render_operations_package_init(),
-                PathBuf::from("<generated Python operations barrel>"),
+                PathBuf::from("<generated Python operations __init__.py>"),
             )?;
         }
         if crate::nexgen_config::current().system_nexus && mode == GenerationMode::NativeApi {
@@ -3511,7 +3511,7 @@ fn render_support_package(
             origins,
             "_support/__init__.py",
             output,
-            PathBuf::from("<generated Python support barrel>"),
+            PathBuf::from("<generated Python support __init__.py>"),
         )?;
     }
 
