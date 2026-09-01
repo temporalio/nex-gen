@@ -7,7 +7,7 @@ use indexmap::IndexMap;
 use crate::SupportFiles;
 use crate::error::{Error, Result};
 use crate::generator::render_request_plan;
-use crate::generator::{ExternalModelBackend, GeneratedFiles, GenerationMode};
+use crate::generator::{ExternalModelBackend, GeneratedFileMap, GeneratedFiles, GenerationMode};
 use crate::language::Language;
 use crate::planning::{
     PlannedFamily, PlannedJsonType, PlannedProtoType, PlannedProtoTypeInfo, PlannedResource,
@@ -677,25 +677,27 @@ fn generate_single_leaf(
     options: &GoOptions,
 ) -> Result<GeneratedFiles> {
     let mut generated = generate(&leaf.spec, &support.fragments, options)?;
+    let mut files = GeneratedFileMap::default();
+    for (path, contents) in generated.files {
+        files.insert(
+            path,
+            contents,
+            leaf.source_path.display().to_string(),
+            "rename the conflicting declaration or input file so the generated Go paths differ",
+        )?;
+    }
     if go_tree_has_json_models(&[leaf]) {
         let package_name = GoPackageContext::new(&leaf.spec, options)?.package_name;
         let definitions_path = PathBuf::from("definitions.go");
-        if generated.files.contains_key(&definitions_path) {
-            return Err(Error::GeneratedFileOriginConflict {
-                path: definitions_path,
-                first_origin: leaf.source_path.clone(),
-                second_origin: PathBuf::from("<generated Go validation runtime>"),
-                remedy: "point `--output` at a directory whose derived Go package identifier is not `definitions`"
-                    .to_string(),
-            });
-        }
         let tree_models = collect_tree_json_models(&[leaf]);
-        insert_generated_file(
-            &mut generated.files,
+        files.insert(
             definitions_path,
             json::render_definitions_file(&package_name, &tree_models)?,
+            "<generated Go validation runtime>",
+            "point `--output` at a directory whose derived Go package identifier is not `definitions`",
         )?;
     }
+    generated.files = files.into_files();
     Ok(generated)
 }
 
@@ -727,8 +729,7 @@ fn generate_branch_tree(
 
     let tree_models = collect_tree_json_models(&leaves);
 
-    let mut files = BTreeMap::new();
-    let mut file_origins = BTreeMap::new();
+    let mut files = GeneratedFileMap::default();
     let mut warnings = Vec::new();
 
     for leaf in &leaves {
@@ -744,12 +745,11 @@ fn generate_branch_tree(
         // the flat package.
         let file_name = go_flat_module_file_name(&leaf.module_path);
         for (_, contents) in generated.files {
-            insert_generated_file_with_origin(
-                &mut files,
-                &mut file_origins,
+            files.insert(
                 file_name.clone(),
                 contents,
-                leaf.source_path.clone(),
+                leaf.source_path.display().to_string(),
+                "rename one input file or directory so their flattened Go file names differ",
             )?;
         }
     }
@@ -757,26 +757,28 @@ fn generate_branch_tree(
     // The schema-independent runtime lives once in this package as
     // `definitions.go`, in the same package as the models.
     if go_tree_has_json_models(&leaves) {
-        insert_generated_file(
-            &mut files,
+        files.insert(
             PathBuf::from("definitions.go"),
             json::render_definitions_file(&package_name, &tree_models)?,
+            "<generated Go validation runtime>",
+            "rename the input file or directory that conflicts with the generated Go runtime",
         )?;
     }
 
     // Hand-written support fragments (rare for JSON inputs) are emitted once.
     let support_fragments = support_fragments_for_plans(&leaves, support);
     if !support_fragments.is_empty() {
-        insert_generated_file(
-            &mut files,
+        files.insert(
             PathBuf::from("support.go"),
             render_support_file(&support_fragments, &package_name),
+            "<generated Go support fragments>",
+            "rename the input file or directory that conflicts with the generated Go support file",
         )?;
     }
 
     Ok(GeneratedFiles {
         layout: crate::generator::GeneratedOutputLayout::Directory,
-        files,
+        files: files.into_files(),
         warnings,
     })
 }
@@ -802,60 +804,6 @@ fn go_tree_has_json_models(leaves: &[&ApiSpecLeaf<PlannedFamily>]) -> bool {
             .map(|(_, binding)| binding)
             .any(|binding| binding.json_model().is_some())
     })
-}
-
-fn insert_generated_file(
-    files: &mut BTreeMap<PathBuf, String>,
-    path: PathBuf,
-    contents: String,
-) -> Result<()> {
-    if path.is_absolute()
-        || path
-            .components()
-            .any(|c| c == std::path::Component::ParentDir)
-    {
-        return Err(Error::InvalidGeneratedPath {
-            path,
-            reason: "generated Go tree paths must be relative and stay within the output directory"
-                .to_string(),
-        });
-    }
-    if files.insert(path.clone(), contents).is_some() {
-        return Err(Error::GeneratedFileConflict { path });
-    }
-    Ok(())
-}
-
-fn insert_generated_file_with_origin(
-    files: &mut BTreeMap<PathBuf, String>,
-    origins: &mut BTreeMap<PathBuf, PathBuf>,
-    path: PathBuf,
-    contents: String,
-    origin: PathBuf,
-) -> Result<()> {
-    if path.is_absolute()
-        || path
-            .components()
-            .any(|component| component == std::path::Component::ParentDir)
-    {
-        return Err(Error::InvalidGeneratedPath {
-            path,
-            reason: "generated Go tree paths must be relative and stay within the output directory"
-                .to_string(),
-        });
-    }
-    if let Some(first_origin) = origins.get(&path) {
-        return Err(Error::GeneratedFileOriginConflict {
-            path,
-            first_origin: first_origin.clone(),
-            second_origin: origin,
-            remedy: "rename one input file or directory so their flattened Go file names differ"
-                .to_string(),
-        });
-    }
-    origins.insert(path.clone(), origin);
-    files.insert(path, contents);
-    Ok(())
 }
 
 fn support_fragments_for_plans(

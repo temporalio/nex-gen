@@ -59,29 +59,60 @@ impl GeneratedFiles {
     }
 }
 
-/// Inserts one generated file while retaining enough provenance for P7.2's
-/// collision diagnostic. Origins are authored paths when a file comes from an
-/// input leaf/support fragment, or a descriptive virtual path for a fixed
-/// generator-owned artifact.
-pub(crate) fn insert_generated_file_with_origin(
-    files: &mut BTreeMap<PathBuf, String>,
-    origins: &mut BTreeMap<PathBuf, PathBuf>,
-    path: PathBuf,
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct GeneratedFile {
     contents: String,
-    origin: PathBuf,
-    remedy: &str,
-) -> Result<()> {
-    if let Some(first_origin) = origins.get(&path) {
-        return Err(Error::GeneratedFileOriginConflict {
-            path,
-            first_origin: first_origin.clone(),
-            second_origin: origin,
-            remedy: remedy.to_string(),
-        });
+    source: String,
+}
+
+/// Accumulates generated files together with the source labels used to explain
+/// collisions. The labels may name authored files or generator-owned output,
+/// so they are deliberately strings rather than filesystem paths.
+#[derive(Debug, Default)]
+pub(crate) struct GeneratedFileMap {
+    files: BTreeMap<PathBuf, GeneratedFile>,
+}
+
+impl GeneratedFileMap {
+    pub(crate) fn insert(
+        &mut self,
+        path: impl Into<PathBuf>,
+        contents: String,
+        source: impl Into<String>,
+        remedy: &str,
+    ) -> Result<()> {
+        let path = path.into();
+        if path.is_absolute()
+            || path
+                .components()
+                .any(|component| component == std::path::Component::ParentDir)
+        {
+            return Err(Error::InvalidGeneratedPath {
+                path,
+                reason:
+                    "generated file paths must be relative and stay within the output directory"
+                        .to_string(),
+            });
+        }
+        let source = source.into();
+        if let Some(first) = self.files.get(&path) {
+            return Err(Error::GeneratedFileSourceConflict {
+                path,
+                first_source: first.source.clone(),
+                second_source: source,
+                remedy: remedy.to_string(),
+            });
+        }
+        self.files.insert(path, GeneratedFile { contents, source });
+        Ok(())
     }
-    origins.insert(path.clone(), origin);
-    files.insert(path, contents);
-    Ok(())
+
+    pub(crate) fn into_files(self) -> BTreeMap<PathBuf, String> {
+        self.files
+            .into_iter()
+            .map(|(path, file)| (path, file.contents))
+            .collect()
+    }
 }
 
 pub(crate) trait ExternalModelBackend<ModelType = PlannedType> {
@@ -298,34 +329,31 @@ mod tests {
     use crate::language::Language;
 
     use super::{
-        GenerateFilesOptions, GenerationMode, generate_files_for_tree_with_mode_and_options,
-        insert_generated_file_with_origin,
+        GenerateFilesOptions, GeneratedFileMap, GenerationMode,
+        generate_files_for_tree_with_mode_and_options,
     };
     use crate::spec::ApiSpecTree;
 
     #[test]
-    fn generated_file_conflict_names_both_origins_and_remedy() {
-        let mut files = std::collections::BTreeMap::new();
-        let mut origins = std::collections::BTreeMap::new();
-        insert_generated_file_with_origin(
-            &mut files,
-            &mut origins,
-            PathBuf::from("models.py"),
-            "first".to_string(),
-            PathBuf::from("one.yaml"),
-            "rename an input",
-        )
-        .unwrap();
-        let error = insert_generated_file_with_origin(
-            &mut files,
-            &mut origins,
-            PathBuf::from("models.py"),
-            "second".to_string(),
-            PathBuf::from("two.yaml"),
-            "rename an input",
-        )
-        .unwrap_err()
-        .to_string();
+    fn generated_file_conflict_names_both_sources_and_remedy() {
+        let mut files = GeneratedFileMap::default();
+        files
+            .insert(
+                PathBuf::from("models.py"),
+                "first".to_string(),
+                "one.yaml",
+                "rename an input",
+            )
+            .unwrap();
+        let error = files
+            .insert(
+                PathBuf::from("models.py"),
+                "second".to_string(),
+                "two.yaml",
+                "rename an input",
+            )
+            .unwrap_err()
+            .to_string();
         assert!(error.contains("one.yaml"), "{error}");
         assert!(error.contains("two.yaml"), "{error}");
         assert!(error.contains("rename an input"), "{error}");
