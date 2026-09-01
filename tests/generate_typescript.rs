@@ -613,6 +613,19 @@ fn read_typescript_output_files(dir: &Path) -> BTreeMap<PathBuf, String> {
     files
 }
 
+fn assert_no_empty_else_blocks(files: &BTreeMap<PathBuf, String>) {
+    for (path, contents) in files {
+        let lines = contents.lines().collect::<Vec<_>>();
+        for pair in lines.windows(2) {
+            assert!(
+                pair[0].trim() != "} else {" || pair[1].trim() != "}",
+                "empty else block in {}",
+                path.display()
+            );
+        }
+    }
+}
+
 fn render_output_files(files: BTreeMap<PathBuf, String>) -> String {
     files
         .into_iter()
@@ -776,6 +789,7 @@ fn typescript_json_examples_render_expected_language_features() {
         let output_path = unique_output_path(&format!("typescript-json-{example_id}"));
         generate_formatted_json_typescript_output(&root, example_id, &output_path, false);
         let rendered = read_typescript_output_files(&output_path);
+        assert_no_empty_else_blocks(&rendered);
         if example_id == "showcase" {
             let all = rendered.values().cloned().collect::<Vec<_>>().join("\n");
             // Scalar defaults → emitted DEFAULT_<FIELD> module constants.
@@ -855,6 +869,8 @@ fn typescript_json_examples_render_expected_language_features() {
             false,
             Some(repr),
         );
+        let rendered = read_typescript_output_files(&output_path);
+        assert_no_empty_else_blocks(&rendered);
         fs::remove_dir_all(output_path).unwrap();
     }
 }
@@ -865,6 +881,8 @@ fn typescript_json_api_examples_render_successfully() {
     for example_id in ["chat", "kb", "showcase", "temporal"] {
         let output_path = unique_output_path(&format!("typescript-json-api-{example_id}"));
         generate_formatted_json_typescript_output(&root, example_id, &output_path, true);
+        let rendered = read_typescript_output_files(&output_path);
+        assert_no_empty_else_blocks(&rendered);
         fs::remove_dir_all(output_path).unwrap();
     }
     for (output_id, repr) in [("temporal-date", "date"), ("temporal-temporal", "temporal")] {
@@ -876,6 +894,8 @@ fn typescript_json_api_examples_render_successfully() {
             true,
             Some(repr),
         );
+        let rendered = read_typescript_output_files(&output_path);
+        assert_no_empty_else_blocks(&rendered);
         fs::remove_dir_all(output_path).unwrap();
     }
 }

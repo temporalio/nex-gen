@@ -84,7 +84,6 @@ export const getCategoryTreeInputTransferTypeConverter =
       } else {
         if (!(typeof value.rootId === "string")) {
           violations.push({ path: "rootId", reason: "expected string" });
-        } else {
         }
         out["rootId"] = value.rootId;
       }
@@ -152,7 +151,6 @@ export const getPageInputTransferTypeConverter =
       } else {
         if (!(typeof value.pageId === "string")) {
           violations.push({ path: "pageId", reason: "expected string" });
-        } else {
         }
         out["pageId"] = value.pageId;
       }
@@ -237,7 +235,6 @@ export const putBlockOutputTransferTypeConverter =
       } else {
         if (!(typeof value.blockId === "string")) {
           violations.push({ path: "blockId", reason: "expected string" });
-        } else {
         }
         out["blockId"] = value.blockId;
       }

@@ -120,7 +120,6 @@ export const categoryTransferTypeConverter =
       } else {
         if (!(typeof value.id === "string")) {
           violations.push({ path: "id", reason: "expected string" });
-        } else {
         }
         out["id"] = value.id;
       }
@@ -129,7 +128,6 @@ export const categoryTransferTypeConverter =
       } else {
         if (!(typeof value.name === "string")) {
           violations.push({ path: "name", reason: "expected string" });
-        } else {
         }
         out["name"] = value.name;
       }
@@ -242,7 +240,6 @@ export const paletteTransferTypeConverter =
                 path: `swatches[${index}]`,
                 reason: "expected string",
               });
-            } else {
             }
           });
         }

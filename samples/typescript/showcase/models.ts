@@ -836,7 +836,6 @@ export const addressTransferTypeConverter =
       } else {
         if (!(typeof value.street === "string")) {
           violations.push({ path: "street", reason: "expected string" });
-        } else {
         }
         out["street"] = value.street;
       }
@@ -846,7 +845,6 @@ export const addressTransferTypeConverter =
         } else {
           if (!(typeof value.city === "string")) {
             violations.push({ path: "city", reason: "expected string" });
-          } else {
           }
           out["city"] = value.city;
         }
@@ -1026,7 +1024,6 @@ export const attributesTransferTypeConverter =
         const path = __nexgenDefinitions.memberPath(key);
         if (!(typeof entry === "string")) {
           violations.push({ path: path, reason: "expected string" });
-        } else {
         }
         out[key] = entry;
       }
@@ -1115,7 +1112,6 @@ export const blobIndexTransferTypeConverter =
         const path = __nexgenDefinitions.memberPath(key);
         if (!(entry instanceof Uint8Array)) {
           violations.push({ path: path, reason: "expected bytes" });
-        } else {
         }
         if (violations.length === memberViolationCount) {
           out[key] = __nexgenDefinitions.bytesToBase64(entry);
@@ -1485,7 +1481,6 @@ export const contactTsTransferTypeConverter =
         } else {
           if (!(typeof value.email === "string")) {
             violations.push({ path: "email", reason: "expected string" });
-          } else {
           }
           out["email"] = value.email;
         }
@@ -1499,7 +1494,6 @@ export const contactTsTransferTypeConverter =
         } else {
           if (!(typeof value.shippingStreet === "string")) {
             violations.push({ path: "shippingStreet", reason: "expected string" });
-          } else {
           }
           out["shippingStreet"] = value.shippingStreet;
         }
@@ -1510,7 +1504,6 @@ export const contactTsTransferTypeConverter =
         } else {
           if (!(typeof value.shippingZip === "string")) {
             violations.push({ path: "shippingZip", reason: "expected string" });
-          } else {
           }
           out["shippingZip"] = value.shippingZip;
         }
@@ -1881,7 +1874,6 @@ export const labelsTransferTypeConverter =
         const path = __nexgenDefinitions.memberPath(key);
         if (!(typeof entry === "string")) {
           violations.push({ path: path, reason: "expected string" });
-        } else {
         }
         out[key] = entry;
       }
@@ -2404,7 +2396,6 @@ export const settingsTransferTypeConverter =
         } else {
           if (!(typeof value.theme === "string")) {
             violations.push({ path: "theme", reason: "expected string" });
-          } else {
           }
           out["theme"] = value.theme;
         }
@@ -3333,7 +3324,6 @@ export const showcaseTransferTypeConverter =
           payload = raw["payload"] as string;
           if (!(typeof (payload as string) === "string")) {
             violations.push({ path: "payload", reason: "expected string" });
-          } else {
           }
         } else {
           violations.push({
@@ -3365,7 +3355,6 @@ export const showcaseTransferTypeConverter =
           detail = raw["detail"] as string;
           if (!(typeof (detail as string) === "string")) {
             violations.push({ path: "detail", reason: "expected string" });
-          } else {
           }
         } else {
           violations.push({
@@ -4975,7 +4964,6 @@ export const showcaseTransferTypeConverter =
       } else {
         if (!(typeof value.active === "boolean")) {
           violations.push({ path: "active", reason: "expected boolean" });
-        } else {
         }
         out["active"] = value.active;
       }
@@ -5157,7 +5145,6 @@ export const showcaseTransferTypeConverter =
           const blobViolationCount = violations.length;
           if (!(value.blob instanceof Uint8Array)) {
             violations.push({ path: "blob", reason: "expected bytes" });
-          } else {
           }
           if (violations.length === blobViolationCount) {
             out["blob"] = __nexgenDefinitions.bytesToBase64(value.blob);
@@ -5171,7 +5158,6 @@ export const showcaseTransferTypeConverter =
           const urlBlobViolationCount = violations.length;
           if (!(value.urlBlob instanceof Uint8Array)) {
             violations.push({ path: "urlBlob", reason: "expected bytes" });
-          } else {
           }
           if (violations.length === urlBlobViolationCount) {
             out["urlBlob"] = __nexgenDefinitions.bytesToBase64Url(value.urlBlob);
@@ -5201,7 +5187,6 @@ export const showcaseTransferTypeConverter =
         } else {
           if (!(typeof value.verbose === "boolean")) {
             violations.push({ path: "verbose", reason: "expected boolean" });
-          } else {
           }
           out["verbose"] = value.verbose;
         }
@@ -5212,7 +5197,6 @@ export const showcaseTransferTypeConverter =
         } else {
           if (!(typeof value.greeting === "string")) {
             violations.push({ path: "greeting", reason: "expected string" });
-          } else {
           }
           out["greeting"] = value.greeting;
         }
@@ -5223,7 +5207,6 @@ export const showcaseTransferTypeConverter =
         } else {
           if (!(typeof value.debug === "boolean")) {
             violations.push({ path: "debug", reason: "expected boolean" });
-          } else {
           }
           out["debug"] = value.debug;
         }
@@ -5234,7 +5217,6 @@ export const showcaseTransferTypeConverter =
         } else {
           if (!(typeof value.legacyIdTs === "string")) {
             violations.push({ path: "legacyId", reason: "expected string" });
-          } else {
           }
           out["legacyId"] = value.legacyIdTs;
         }
@@ -5243,7 +5225,6 @@ export const showcaseTransferTypeConverter =
         if (value.middleName !== null) {
           if (!(typeof value.middleName === "string")) {
             violations.push({ path: "middleName", reason: "expected string" });
-          } else {
           }
         }
         out["middleName"] = value.middleName;
@@ -5251,7 +5232,6 @@ export const showcaseTransferTypeConverter =
       if (value.category !== null) {
         if (!(typeof value.category === "string")) {
           violations.push({ path: "category", reason: "expected string" });
-        } else {
         }
       }
       out["category"] = value.category;
@@ -5392,7 +5372,6 @@ export const showcaseTransferTypeConverter =
             value.tags.forEach((element, index) => {
               if (!(typeof element === "string")) {
                 violations.push({ path: `tags[${index}]`, reason: "expected string" });
-              } else {
               }
             });
             if (value.tags.length < 1) {
@@ -5424,7 +5403,6 @@ export const showcaseTransferTypeConverter =
                   path: `aliases[${index}]`,
                   reason: "expected string",
                 });
-              } else {
               }
             });
             {
@@ -5454,7 +5432,6 @@ export const showcaseTransferTypeConverter =
             value.roles.forEach((element, index) => {
               if (!(typeof element === "string")) {
                 violations.push({ path: `roles[${index}]`, reason: "expected string" });
-              } else {
               }
             });
             {
@@ -5583,7 +5560,6 @@ export const showcaseTransferTypeConverter =
           if (typeof value.payload === "string") {
             if (!(typeof (value.payload as string) === "string")) {
               violations.push({ path: "payload", reason: "expected string" });
-            } else {
             }
           }
           out["payload"] = value.payload;
@@ -5597,7 +5573,6 @@ export const showcaseTransferTypeConverter =
           if (typeof value.detail === "string") {
             if (!(typeof (value.detail as string) === "string")) {
               violations.push({ path: "detail", reason: "expected string" });
-            } else {
             }
           }
           if (violations.length === detailViolationCount) {
@@ -5970,7 +5945,6 @@ export const showcaseTransferTypeConverter =
             value.blobs.forEach((element, index) => {
               if (!(element instanceof Uint8Array)) {
                 violations.push({ path: `blobs[${index}]`, reason: "expected bytes" });
-              } else {
               }
             });
           }
@@ -6471,7 +6445,6 @@ export const showcaseTransferTypeConverter =
         if (value.nullableFlag !== null) {
           if (!(typeof value.nullableFlag === "boolean")) {
             violations.push({ path: "nullableFlag", reason: "expected boolean" });
-          } else {
           }
         }
         out["nullableFlag"] = value.nullableFlag;
@@ -6487,7 +6460,6 @@ export const showcaseTransferTypeConverter =
                   path: `nullableTags[${index}]`,
                   reason: "expected string",
                 });
-              } else {
               }
             });
             if (value.nullableTags.length < 1) {
@@ -6616,7 +6588,6 @@ export const showcaseTransferTypeConverter =
         } else {
           if (!(typeof value.quoted === "string")) {
             violations.push({ path: "quoted", reason: "expected string" });
-          } else {
           }
           out["quoted"] = value.quoted;
         }
@@ -6822,7 +6793,6 @@ export const showcaseDetailObjectTransferTypeConverter =
         } else {
           if (!(typeof value.hint === "string")) {
             violations.push({ path: "hint", reason: "expected string" });
-          } else {
           }
           out["hint"] = value.hint;
         }
@@ -7586,7 +7556,6 @@ export const getShowcaseInputTransferTypeConverter =
       } else {
         if (!(typeof value.id === "string")) {
           violations.push({ path: "id", reason: "expected string" });
-        } else {
         }
         out["id"] = value.id;
       }
@@ -8046,7 +8015,6 @@ export const widgetTransferTypeConverter =
       } else {
         if (!(typeof value.id === "string")) {
           violations.push({ path: "id", reason: "expected string" });
-        } else {
         }
         out["id"] = value.id;
       }
@@ -8056,7 +8024,6 @@ export const widgetTransferTypeConverter =
         } else {
           if (!(typeof value.kind === "string")) {
             violations.push({ path: "kind", reason: "expected string" });
-          } else {
           }
           out["kind"] = value.kind;
         }
@@ -8066,7 +8033,6 @@ export const widgetTransferTypeConverter =
       } else {
         if (!(typeof value.name === "string")) {
           violations.push({ path: "name", reason: "expected string" });
-        } else {
         }
         out["name"] = value.name;
       }
@@ -8188,7 +8154,6 @@ export const widgetBaseTransferTypeConverter =
       } else {
         if (!(typeof value.id === "string")) {
           violations.push({ path: "id", reason: "expected string" });
-        } else {
         }
         out["id"] = value.id;
       }
@@ -8198,7 +8163,6 @@ export const widgetBaseTransferTypeConverter =
         } else {
           if (!(typeof value.kind === "string")) {
             violations.push({ path: "kind", reason: "expected string" });
-          } else {
           }
           out["kind"] = value.kind;
         }

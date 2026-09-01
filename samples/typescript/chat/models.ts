@@ -120,7 +120,6 @@ export const getRoomInputTransferTypeConverter =
       } else {
         if (!(typeof value.roomId === "string")) {
           violations.push({ path: "roomId", reason: "expected string" });
-        } else {
         }
         out["roomId"] = value.roomId;
       }
@@ -190,7 +189,6 @@ export const labelsTransferTypeConverter =
         const path = __nexgenDefinitions.memberPath(key);
         if (!(typeof entry === "string")) {
           violations.push({ path: path, reason: "expected string" });
-        } else {
         }
         out[key] = entry;
       }
@@ -331,7 +329,6 @@ export const messageTransferTypeConverter =
       } else {
         if (!(typeof value.body === "string")) {
           violations.push({ path: "body", reason: "expected string" });
-        } else {
         }
         out["body"] = value.body;
       }
@@ -339,7 +336,6 @@ export const messageTransferTypeConverter =
         if (value.replyToId !== null) {
           if (!(typeof value.replyToId === "string")) {
             violations.push({ path: "replyToId", reason: "expected string" });
-          } else {
           }
         }
         out["replyToId"] = value.replyToId;
@@ -503,7 +499,6 @@ export const roomTransferTypeConverter =
       } else {
         if (!(typeof value.roomId === "string")) {
           violations.push({ path: "roomId", reason: "expected string" });
-        } else {
         }
         out["roomId"] = value.roomId;
       }
@@ -512,14 +507,12 @@ export const roomTransferTypeConverter =
       } else {
         if (!(typeof value.displayName === "string")) {
           violations.push({ path: "displayName", reason: "expected string" });
-        } else {
         }
         out["displayName"] = value.displayName;
       }
       if (value.topic !== null) {
         if (!(typeof value.topic === "string")) {
           violations.push({ path: "topic", reason: "expected string" });
-        } else {
         }
       }
       out["topic"] = value.topic;
@@ -536,7 +529,6 @@ export const roomTransferTypeConverter =
                   path: `members[${index}]`,
                   reason: "expected string",
                 });
-              } else {
               }
             });
           }
@@ -649,7 +641,6 @@ export const sendMessageInputTransferTypeConverter =
       } else {
         if (!(typeof value.roomId === "string")) {
           violations.push({ path: "roomId", reason: "expected string" });
-        } else {
         }
         out["roomId"] = value.roomId;
       }
@@ -732,7 +723,6 @@ export const sendMessageOutputTransferTypeConverter =
       } else {
         if (!(typeof value.messageId === "string")) {
           violations.push({ path: "messageId", reason: "expected string" });
-        } else {
         }
         out["messageId"] = value.messageId;
       }
