@@ -9114,8 +9114,7 @@ fn validate_service_file_scopes(
 /// emits into — or imports into — every module that carries models, and which
 /// therefore share the user type/service namespace. Only identifiers in the
 /// same case-class as user identifiers (which are normally `UpperCamelCase`) are
-/// listed. TypeScript's exported lower-camel helper is also included because it
-/// can collide with a service binding or generated converter value.
+/// listed.
 ///
 /// - Go (`src/generator/json/go.rs`): the exported runtime type `Violation`
 ///   lives in the models' own package; every other runtime
@@ -9124,14 +9123,13 @@ fn validate_service_file_scopes(
 /// - TypeScript (`src/generator/json/typescript.rs`): nexus-rpc's
 ///   `TransferTypeConverter` is a bare named import in every model module (the
 ///   contract each model's converter implements), so a user type of that name is
-///   an import-versus-local-declaration conflict. `Violation` (interface) and
-///   `payloadValidationError` reach `models.ts` only through the namespace
-///   import `__nexgenDefinitions`, but the package barrel re-exports them from
-///   `./definitions` beside `export *` of the model modules, so a user binding of
-///   the same name is silently shadowed out of the package surface (P7).
-///   `payloadValidationError` is also exported and can collide with lower-camel
-///   value bindings; the other runtime helpers (`isPlainObject`, `collect`, …)
-///   are `camelCase`.
+///   an import-versus-local-declaration conflict. `Violation` reaches
+///   `models.ts` only through the namespace import `__nexgenDefinitions`, but
+///   the package barrel re-exports it from `./definitions` beside `export *` of
+///   the model modules, so a user binding of the same name is silently shadowed
+///   out of the package surface (P7). The runtime helpers
+///   (`payloadValidationError`, `isPlainObject`, `collect`, …) remain internal to
+///   `definitions.ts` and are not re-exported from the package barrel.
 /// - Python (`src/generator/json/python.rs`): `Violation` (dataclass) is imported
 ///   by bare name into every model module and re-exported by the root package
 ///   barrel; the other runtime helpers
@@ -9144,11 +9142,7 @@ fn validate_service_file_scopes(
 fn boilerplate_idents(language: Language) -> &'static [&'static str] {
     match language {
         Language::Go | Language::Python => &["Violation"],
-        Language::TypeScript => &[
-            "Violation",
-            "payloadValidationError",
-            "TransferTypeConverter",
-        ],
+        Language::TypeScript => &["Violation", "TransferTypeConverter"],
         Language::Java => &["ApplicationFailure", "Violation", "SpecNumbers"],
         _ => &[],
     }
@@ -15253,6 +15247,26 @@ $defs:
 "##;
         let error = reject_for(Language::TypeScript, converter_clash);
         assert!(error.contains("thingTransferTypeConverter"), "{error}");
+    }
+
+    #[test]
+    fn typescript_service_may_use_internal_payload_validation_helper_name() {
+        let input = r##"
+$schema: https://json-schema.org/draft/2020-12/schema
+nexusrpc: "1.0.0"
+services:
+  PayloadValidationError:
+    operations:
+      validate:
+        input: { $ref: "#/$defs/Input" }
+$defs:
+  Input:
+    type: object
+    properties:
+      value: { type: string }
+"##;
+        parse_for(Language::TypeScript, input)
+            .expect("the internal payloadValidationError helper is not part of the package barrel");
     }
 
     /// A name synthesized *from a member* follows that member's override (P15).
