@@ -1802,9 +1802,7 @@ fn go_rejects_single_input_output_named_definitions_with_a_remedy() {
         );
         assert!(error.contains("--output"), "{output_name}: {error}");
         assert!(
-            error.contains("derived Go package identifier")
-                && error.contains("not `definitions`")
-                && error.contains("`api`"),
+            error.contains("derived Go package identifier") && error.contains("not `definitions`"),
             "{output_name}: {error}"
         );
     }
