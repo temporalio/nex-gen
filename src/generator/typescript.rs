@@ -53,6 +53,21 @@ pub(in crate::generator) struct RenderedExternalModelFragments {
     pub(in crate::generator) value_exported_names: BTreeSet<String>,
 }
 
+/// Target-specific support files together with the exports their root barrel
+/// must expose. The contributing backend owns the export names and paths.
+#[derive(Debug, Default)]
+pub(in crate::generator) struct RenderedTypeScriptSupport {
+    pub(in crate::generator) files: BTreeMap<PathBuf, String>,
+    pub(in crate::generator) root_exports: Vec<String>,
+}
+
+impl RenderedTypeScriptSupport {
+    fn extend(&mut self, other: Self) {
+        self.files.extend(other.files);
+        self.root_exports.extend(other.root_exports);
+    }
+}
+
 impl RenderedExternalModelFragments {
     fn extend(&mut self, other: Self) {
         if !other.imports.is_empty() {
@@ -72,19 +87,6 @@ impl RenderedExternalModelFragments {
     }
 }
 
-pub(crate) fn render_tree_support_files(
-    branch: &ApiSpecBranch<PlannedFamily>,
-) -> BTreeMap<PathBuf, String> {
-    if !branch_has_json_models(branch) {
-        return BTreeMap::new();
-    }
-
-    BTreeMap::from([(
-        PathBuf::from("definitions.ts"),
-        typescript_json::render_support_file(),
-    )])
-}
-
 fn generate_tree(
     branch: &ApiSpecBranch<PlannedFamily>,
     support: &crate::SupportFiles,
@@ -92,17 +94,15 @@ fn generate_tree(
 ) -> Result<GeneratedFiles> {
     let mut files = GeneratedFileMap::default();
     let mut warnings = Vec::new();
-    let additional_exports: &[&str] = if branch_has_json_models(branch) {
+    let rendered_support = TypeScriptExternalModels::render_tree_support(branch);
+    if !rendered_support.files.is_empty() {
         insert_files(
             &mut files,
-            render_tree_support_files(branch),
+            rendered_support.files,
             "<generated TypeScript JSON runtime>",
         )?;
-        &["export type { Violation } from './definitions';"]
-    } else {
-        &[]
-    };
-    insert_branch_index_file(&mut files, branch, additional_exports)?;
+    }
+    insert_branch_index_file(&mut files, branch, &rendered_support.root_exports)?;
     for node in branch.children.values() {
         generate_tree_node(node, support, ts_date_time_types, &mut files, &mut warnings)?;
     }
@@ -154,7 +154,7 @@ fn generate_tree_node(
 fn insert_branch_index_file(
     files: &mut GeneratedFileMap,
     branch: &ApiSpecBranch<PlannedFamily>,
-    additional_exports: &[&str],
+    additional_exports: &[String],
 ) -> Result<()> {
     let mut path = branch.module_path.to_path_buf();
     path.push("index.ts");
@@ -216,17 +216,6 @@ fn support_fragments_for_plan(
     }
 }
 
-fn branch_has_json_models(branch: &ApiSpecBranch<PlannedFamily>) -> bool {
-    branch.children.values().any(|node| match node {
-        ApiSpecNode::Leaf(leaf) => leaf
-            .spec
-            .external_types()
-            .map(|(_, binding)| binding)
-            .any(|binding| binding.json_model().is_some()),
-        ApiSpecNode::Branch(branch) => branch_has_json_models(branch),
-    })
-}
-
 #[derive(Debug, Default)]
 struct TypeScriptExternalModels {
     proto: typescript_proto::ModelBackend,
@@ -234,6 +223,12 @@ struct TypeScriptExternalModels {
 }
 
 impl TypeScriptExternalModels {
+    fn render_tree_support(branch: &ApiSpecBranch<PlannedFamily>) -> RenderedTypeScriptSupport {
+        let mut support = RenderedTypeScriptSupport::default();
+        support.extend(typescript_json::render_tree_support(branch));
+        support
+    }
+
     fn new(api_plan: &PlannedSpec, ts_date_time_types: TsDateTimeTypes) -> Result<Self> {
         let mut this = Self::default();
         this.json.ts_date_time_types = ts_date_time_types;
@@ -251,10 +246,10 @@ impl TypeScriptExternalModels {
             .render_model_wire_functions(output, model, planned_record)
     }
 
-    fn render_support_files(&self) -> Result<BTreeMap<PathBuf, String>> {
-        let mut files = BTreeMap::new();
-        files.extend(self.json.render_support_files()?);
-        Ok(files)
+    fn render_support(&self) -> Result<RenderedTypeScriptSupport> {
+        let mut support = RenderedTypeScriptSupport::default();
+        support.extend(self.json.render_support()?);
+        Ok(support)
     }
 
     /// The `TransferTypeConverter` instance a model reference converts through, if
@@ -3140,8 +3135,7 @@ fn render_module_files(
         .iter()
         .cloned()
         .collect();
-    let json_runtime_files = external_models.render_support_files()?;
-    let has_json_runtime_module = json_runtime_files.contains_key(&PathBuf::from("definitions.ts"));
+    let rendered_support = external_models.render_support()?;
     let mut files = BTreeMap::<PathBuf, String>::new();
     let models_source = render_models_module(
         enums,
@@ -3166,13 +3160,13 @@ fn render_module_files(
             render_index_module(
                 services,
                 &model_fragments.type_exported_names,
-                has_json_runtime_module,
+                &rendered_support.root_exports,
             )
         } else {
             render_definitions_only_index_module(
                 services,
-                has_json_runtime_module,
                 has_models_module,
+                &rendered_support.root_exports,
             )
         },
     );
@@ -3240,7 +3234,7 @@ fn render_module_files(
     if let Some(support_source) = support_source {
         files.insert("support.ts".into(), render_support_module(support_source));
     }
-    files.extend(json_runtime_files);
+    files.extend(rendered_support.files);
     Ok(GeneratedFiles::directory(files))
 }
 
@@ -3493,8 +3487,8 @@ fn is_blank_generated_module(source: &str) -> bool {
 
 fn render_definitions_only_index_module(
     services: &[RenderedService<'_>],
-    has_json_runtime_module: bool,
     has_models_module: bool,
+    additional_exports: &[String],
 ) -> String {
     let mut output = String::new();
     output.push_str(GENERATED_HEADER);
@@ -3508,8 +3502,9 @@ fn render_definitions_only_index_module(
     if services.iter().any(|service| !service.resources.is_empty()) {
         output.push_str("export * from './resources';\n");
     }
-    if has_json_runtime_module {
-        output.push_str("export type { Violation } from './definitions';\n");
+    for export in additional_exports {
+        output.push_str(export);
+        output.push('\n');
     }
     output
 }
@@ -3521,7 +3516,7 @@ fn render_support_module(support_source: &str) -> String {
 fn render_index_module(
     services: &[RenderedService<'_>],
     model_type_names: &BTreeSet<String>,
-    has_json_runtime_module: bool,
+    additional_exports: &[String],
 ) -> String {
     let mut body = String::new();
     for service in services {
@@ -3582,8 +3577,9 @@ fn render_index_module(
         );
         body.push_str(" } from './models';\n");
     }
-    if has_json_runtime_module {
-        body.push_str("export type { Violation } from './definitions';\n");
+    for export in additional_exports {
+        body.push_str(export);
+        body.push('\n');
     }
     render_generated_module(String::new(), body)
 }

@@ -14,8 +14,8 @@ use crate::generator::json_schema::{
     bare_ref_target, register_cross_module_ref_names, violation_member_segment,
 };
 use crate::generator::typescript::{
-    RenderedExternalModelFragments, WireValueConversion, render_typescript_doc_comment,
-    typescript_generated_field_name,
+    RenderedExternalModelFragments, RenderedTypeScriptSupport, WireValueConversion,
+    render_typescript_doc_comment, typescript_generated_field_name,
 };
 use crate::generator::{ExternalModelBackend, TsDateTimeTypes};
 use crate::json_schema::format::TemporalKind;
@@ -1767,6 +1767,10 @@ impl ModelBackend {
     ) -> String {
         ts_transfer_type_converter_name(&self.resolved_model_name(json_type))
     }
+
+    pub(in crate::generator) fn render_support(&self) -> Result<RenderedTypeScriptSupport> {
+        Ok(rendered_support(self.render_support_files()?))
+    }
 }
 
 impl ExternalModelBackend<PlannedJsonType> for ModelBackend {
@@ -1839,7 +1843,7 @@ impl ExternalModelBackend<PlannedJsonType> for ModelBackend {
 
         Ok(BTreeMap::from([(
             PathBuf::from("definitions.ts"),
-            render_support_file(),
+            render_json_runtime_module(),
         )]))
     }
 
@@ -1867,8 +1871,40 @@ impl ExternalModelBackend<PlannedJsonType> for ModelBackend {
     }
 }
 
-pub(in crate::generator) fn render_support_file() -> String {
-    render_json_runtime_module()
+pub(in crate::generator) fn render_tree_support(
+    branch: &crate::spec::ApiSpecBranch<PlannedFamily>,
+) -> RenderedTypeScriptSupport {
+    if !branch_has_json_models(branch) {
+        return RenderedTypeScriptSupport::default();
+    }
+
+    rendered_support(BTreeMap::from([(
+        PathBuf::from("definitions.ts"),
+        render_json_runtime_module(),
+    )]))
+}
+
+fn rendered_support(files: BTreeMap<PathBuf, String>) -> RenderedTypeScriptSupport {
+    let root_exports = if files.is_empty() {
+        Vec::new()
+    } else {
+        vec!["export type { Violation } from './definitions';".to_string()]
+    };
+    RenderedTypeScriptSupport {
+        files,
+        root_exports,
+    }
+}
+
+fn branch_has_json_models(branch: &crate::spec::ApiSpecBranch<PlannedFamily>) -> bool {
+    branch.children.values().any(|node| match node {
+        crate::spec::ApiSpecNode::Leaf(leaf) => leaf
+            .spec
+            .external_types()
+            .map(|(_, binding)| binding)
+            .any(|binding| binding.json_model().is_some()),
+        crate::spec::ApiSpecNode::Branch(branch) => branch_has_json_models(branch),
+    })
 }
 
 fn root_typescript_runtime_module(module_path: &ModulePath) -> String {
