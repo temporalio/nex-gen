@@ -233,7 +233,7 @@ fn dotnet_system_nexus_generation_emits_typed_outbound_interceptor() {
         "[GeneratedCode(\"nexgen\", null)]\n    internal partial class WorkflowInstance"
     ));
     assert!(interceptor.contains(
-        "private Task<NexusWorkflowOperationHandle<TResult>> StartSystemNexusOperationAsync<TResult>"
+        "[GeneratedCode(\"nexgen\", null)]\n        private Task<NexusWorkflowOperationHandle<TResult>> StartSystemNexusOperationAsync<TResult>"
     ));
     assert!(interceptor.contains("outbound.Value.SignalWithStartWorkflowAsync(request)"));
     assert!(interceptor.contains("if (arg is not SignalWithStartWorkflowRequest request)"));
@@ -249,7 +249,7 @@ fn dotnet_system_nexus_generation_emits_typed_outbound_interceptor() {
     assert!(interceptor.contains("internal partial class WorkflowInstance"));
     assert!(interceptor.contains("internal partial class OutboundImpl"));
     assert!(interceptor.contains(
-        "SignalWithStartWorkflowAsync(SignalWithStartWorkflowRequest request) => instance.outbound.Value.ScheduleSystemNexusOperationAsync<SignalWithStartWorkflowResponse>"
+        "[GeneratedCode(\"nexgen\", null)]\n            public override Task<NexusWorkflowOperationHandle<SignalWithStartWorkflowResponse>> SignalWithStartWorkflowAsync(SignalWithStartWorkflowRequest request) => instance.outbound.Value.ScheduleSystemNexusOperationAsync<SignalWithStartWorkflowResponse>"
     ));
     assert!(models.contains("/// Static metadata for a workflow execution."));
     assert!(models.contains("/// Result of signaling a workflow and starting it if needed."));

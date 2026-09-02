@@ -28,6 +28,7 @@ namespace Temporalio.Worker
 
     internal partial class WorkflowInstance
     {
+        [GeneratedCode("nexgen", null)]
         private Task<NexusWorkflowOperationHandle<TResult>> StartSystemNexusOperationAsync<TResult>(
             string service,
             string operationName,
@@ -52,6 +53,7 @@ namespace Temporalio.Worker
 
         internal partial class OutboundImpl
         {
+            [GeneratedCode("nexgen", null)]
             public override Task<NexusWorkflowOperationHandle<SignalWithStartWorkflowResponse>> SignalWithStartWorkflowAsync(SignalWithStartWorkflowRequest request) => instance.outbound.Value.ScheduleSystemNexusOperationAsync<SignalWithStartWorkflowResponse>(new(
                 Service: "temporal.api.workflowservice.v1.WorkflowService",
                 Operation: new(

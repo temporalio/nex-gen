@@ -2259,6 +2259,9 @@ impl<'a> ApiPlanner<'a> {
         output.push_str("    }\n\n");
         output.push_str("}\n\n");
         output.push_str("namespace Temporalio.Worker\n{\n\n    internal partial class WorkflowInstance\n    {\n");
+        output.push_str("        ");
+        output.push_str(GENERATED_CODE_ATTRIBUTE);
+        output.push('\n');
         output.push_str("        private Task<NexusWorkflowOperationHandle<TResult>> StartSystemNexusOperationAsync<TResult>(\n            string service,\n            string operationName,\n            object? arg)\n        {\n");
         for service in &self.api_plan.services {
             for operation in &service.operations {
@@ -2296,6 +2299,9 @@ impl<'a> ApiPlanner<'a> {
                 }
                 let request_type = self.dotnet_erased_model_type(operation.input_model());
                 let response_type = self.operation_registry_response_type(operation);
+                output.push_str("            ");
+                output.push_str(GENERATED_CODE_ATTRIBUTE);
+                output.push('\n');
                 output.push_str("            public override Task<NexusWorkflowOperationHandle<");
                 output.push_str(&response_type);
                 output.push_str(">> ");
