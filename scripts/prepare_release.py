@@ -212,7 +212,13 @@ def push_release_branch(repo_root: pathlib.Path, version: str) -> None:
     )
 
 
-def create_release_pr(repo_root: pathlib.Path, version: str) -> None:
+def create_release_pr(repo_root: pathlib.Path, version: str) -> tuple[str, bool]:
+    """Create the release PR, or return the existing open release PR.
+
+    Returns the PR URL and whether this invocation created it. A closed or
+    merged PR with the release branch is not resumable: continuing would
+    misleadingly report a usable PR when there is none.
+    """
     branch = f"chore/release-{version}"
     existing_prs = subprocess.run(
         [
@@ -226,16 +232,25 @@ def create_release_pr(repo_root: pathlib.Path, version: str) -> None:
             "--state",
             "all",
             "--json",
-            "url",
+            "url,state",
         ],
         cwd=repo_root,
         check=True,
         capture_output=True,
         text=True,
     )
-    if json.loads(existing_prs.stdout):
-        return
-    subprocess.run(
+    prs = json.loads(existing_prs.stdout)
+    open_prs = [pr for pr in prs if pr["state"] == "OPEN"]
+    if open_prs:
+        return open_prs[0]["url"], False
+    if prs:
+        prior_prs = ", ".join(f'{pr["state"].lower()} {pr["url"]}' for pr in prs)
+        raise RuntimeError(
+            f"Found {prior_prs} for release branch {branch!r}. "
+            "Reopen that PR or use a new release branch before resuming."
+        )
+
+    created_pr = subprocess.run(
         [
             "gh",
             "pr",
@@ -251,7 +266,13 @@ def create_release_pr(repo_root: pathlib.Path, version: str) -> None:
         ],
         cwd=repo_root,
         check=True,
+        capture_output=True,
+        text=True,
     )
+    url = created_pr.stdout.strip()
+    if not url:
+        raise RuntimeError("GitHub CLI created a PR but did not return its URL")
+    return url, True
 
 
 def _seeded_unreleased_lines() -> list[str]:
@@ -395,11 +416,10 @@ def main(argv: Sequence[str] | None = None) -> None:
     ensure_only_release_changes(repo_root)
     commit_release_changes(repo_root, version)
     push_release_branch(repo_root, version)
-    create_release_pr(repo_root, version)
-
-    print(
-        f"Prepared release {version} dated {release_date.isoformat()} and opened a PR"
-    )
+    pr_url, created_pr = create_release_pr(repo_root, version)
+    action = "Opened" if created_pr else "Found existing"
+    print(f"{action} release PR: {pr_url}")
+    print(f"Prepared release {version} dated {release_date.isoformat()}")
 
 
 if __name__ == "__main__":
