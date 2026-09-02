@@ -202,19 +202,6 @@ fn dotnet_msbuild_dir(path: &Path) -> String {
 }
 
 #[test]
-fn dotnet_examples_generation_matches_checked_in_output() {
-    let root = project_root();
-    for example_id in dotnet_example_ids(&root) {
-        let output_path = unique_output_path(&format!("dotnet-{example_id}"));
-        generate_dotnet_output(&root, &example_id, &output_path);
-        let rendered = read_dotnet_output_files(&output_path);
-        let expected = read_dotnet_output_files(&dotnet_output_path(&root, &example_id));
-        assert_eq!(rendered, expected, "snapshot mismatch for {example_id}");
-        fs::remove_dir_all(output_path).unwrap();
-    }
-}
-
-#[test]
 fn dotnet_system_nexus_generation_emits_typed_outbound_interceptor() {
     let root = project_root();
     let output_path = unique_output_path("dotnet-system-nexus-interceptor");

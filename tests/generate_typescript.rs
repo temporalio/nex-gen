@@ -750,29 +750,22 @@ fn unique_typescript_runtime_path(label: &str) -> PathBuf {
 }
 
 #[test]
-fn typescript_examples_generation_matches_checked_in_output() {
+fn generated_wit_examples_format_successfully() {
     let root = project_root();
     for example_id in typescript_example_ids(&root) {
         let output_path = unique_output_path(&format!("typescript-{example_id}"));
         generate_formatted_typescript_output(&root, &example_id, &output_path);
-        let rendered = read_typescript_output_files(&output_path);
-        let expected = read_typescript_output_files(&typescript_output_path(&root, &example_id));
-        assert_eq!(rendered, expected, "snapshot mismatch for {example_id}");
         fs::remove_dir_all(output_path).unwrap();
     }
 }
 
 #[test]
-fn typescript_json_example_generation_matches_checked_in_output() {
+fn typescript_json_examples_render_expected_language_features() {
     let root = project_root();
     for example_id in ["chat", "kb", "showcase", "temporal"] {
         let output_path = unique_output_path(&format!("typescript-json-{example_id}"));
         generate_formatted_json_typescript_output(&root, example_id, &output_path, false);
         let rendered = read_typescript_output_files(&output_path);
-        let expected = read_typescript_output_files(&typescript_json_definitions_output_path(
-            &root, example_id,
-        ));
-        assert_eq!(rendered, expected, "snapshot mismatch for {example_id}");
         if example_id == "showcase" {
             let all = rendered.values().cloned().collect::<Vec<_>>().join("\n");
             // Scalar defaults → emitted DEFAULT_<FIELD> module constants.
@@ -852,25 +845,16 @@ fn typescript_json_example_generation_matches_checked_in_output() {
             false,
             Some(repr),
         );
-        let rendered = read_typescript_output_files(&output_path);
-        let expected = read_typescript_output_files(&typescript_json_definitions_output_path(
-            &root, output_id,
-        ));
-        assert_eq!(rendered, expected, "snapshot mismatch for {output_id}");
         fs::remove_dir_all(output_path).unwrap();
     }
 }
 
 #[test]
-fn typescript_json_api_example_generation_matches_checked_in_output() {
+fn typescript_json_api_examples_render_successfully() {
     let root = project_root();
     for example_id in ["chat", "kb", "showcase", "temporal"] {
         let output_path = unique_output_path(&format!("typescript-json-api-{example_id}"));
         generate_formatted_json_typescript_output(&root, example_id, &output_path, true);
-        let rendered = read_typescript_output_files(&output_path);
-        let expected =
-            read_typescript_output_files(&typescript_json_api_output_path(&root, example_id));
-        assert_eq!(rendered, expected, "snapshot mismatch for {example_id}");
         fs::remove_dir_all(output_path).unwrap();
     }
     for (output_id, repr) in [("temporal-date", "date"), ("temporal-temporal", "temporal")] {
@@ -882,10 +866,6 @@ fn typescript_json_api_example_generation_matches_checked_in_output() {
             true,
             Some(repr),
         );
-        let rendered = read_typescript_output_files(&output_path);
-        let expected =
-            read_typescript_output_files(&typescript_json_api_output_path(&root, output_id));
-        assert_eq!(rendered, expected, "snapshot mismatch for {output_id}");
         fs::remove_dir_all(output_path).unwrap();
     }
 }

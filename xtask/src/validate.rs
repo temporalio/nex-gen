@@ -4,6 +4,8 @@ use std::process::Command;
 
 use nexgen::error::{Error, Result};
 
+use crate::build_examples::{BuildExamplesRequest, build_examples};
+
 #[derive(Clone, Copy)]
 pub enum ValidationLanguage {
     Rust,
@@ -64,6 +66,7 @@ fn validate_rust(repo_root: &Path) -> Result<()> {
 }
 
 fn validate_python(repo_root: &Path) -> Result<()> {
+    validate_generated_examples(repo_root, "python")?;
     for root in sample_roots(repo_root, "python") {
         run(&root, "uv", &["sync", "--locked"])?;
         run(&root, "uv", &["run", "ruff", "check", "."])?;
@@ -75,6 +78,7 @@ fn validate_python(repo_root: &Path) -> Result<()> {
 }
 
 fn validate_typescript(repo_root: &Path) -> Result<()> {
+    validate_generated_examples(repo_root, "typescript")?;
     for root in sample_roots(repo_root, "typescript") {
         run(&root, "npm", &["ci"])?;
         run(&root, "npm", &["exec", "--", "prettier", "--check", "."])?;
@@ -85,6 +89,7 @@ fn validate_typescript(repo_root: &Path) -> Result<()> {
 }
 
 fn validate_go(repo_root: &Path) -> Result<()> {
+    validate_generated_examples(repo_root, "go")?;
     for root in sample_roots(repo_root, "go") {
         let output = run_output(&root, "gofmt", &["-l", "."])?;
         if !output.is_empty() {
@@ -100,6 +105,7 @@ fn validate_go(repo_root: &Path) -> Result<()> {
 }
 
 fn validate_java(repo_root: &Path) -> Result<()> {
+    validate_generated_examples(repo_root, "java")?;
     for root in sample_roots(repo_root, "java") {
         run(&root, "./gradlew", &["build", "--no-daemon"])?;
     }
@@ -107,6 +113,7 @@ fn validate_java(repo_root: &Path) -> Result<()> {
 }
 
 fn validate_dotnet(repo_root: &Path) -> Result<()> {
+    validate_generated_examples(repo_root, "dotnet")?;
     for root in sample_roots(repo_root, "dotnet") {
         run(&root, "dotnet", &["test", "tests/", "--nologo"])?;
     }
@@ -121,6 +128,27 @@ fn validate_dotnet(repo_root: &Path) -> Result<()> {
         ],
     )?;
     Ok(())
+}
+
+fn validate_generated_examples(repo_root: &Path, language: &str) -> Result<()> {
+    let language = match language {
+        "python" => nexgen::language::Language::Python,
+        "typescript" => nexgen::language::Language::TypeScript,
+        "go" => nexgen::language::Language::Go,
+        "java" => nexgen::language::Language::Java,
+        "dotnet" => nexgen::language::Language::Dotnet,
+        _ => unreachable!("validation language must support generated examples"),
+    };
+    build_examples(&BuildExamplesRequest {
+        format: None,
+        languages: vec![language],
+        example_ids: Vec::new(),
+    })?;
+    run(
+        repo_root,
+        "git",
+        &["diff", "--exit-code", "--", "samples", "advanced/samples"],
+    )
 }
 
 fn run(cwd: &Path, program: &str, args: &[&str]) -> Result<()> {
