@@ -744,9 +744,11 @@ fn unique_output_path(label: &str) -> PathBuf {
     std::env::temp_dir().join(format!("nexgen-{label}-{unique}-{counter}"))
 }
 
-fn unique_typescript_runtime_path(label: &str) -> PathBuf {
-    let unique = unique_output_path(label);
-    samples_typescript_root(&project_root()).join(unique.file_name().unwrap())
+fn unique_typescript_runtime_dir(label: &str) -> tempfile::TempDir {
+    tempfile::Builder::new()
+        .prefix(&format!("nexgen-{label}-"))
+        .tempdir_in(samples_typescript_root(&project_root()))
+        .unwrap()
 }
 
 #[test]
@@ -1812,11 +1814,10 @@ fn typescript_json_service_module_without_own_types_imports_instead_of_reemittin
 
 #[test]
 fn typescript_json_emits_complete_matchers_and_typed_mixed_extras() {
-    let temp_dir = unique_typescript_runtime_path("ts-json-wave2-conformance");
-    fs::create_dir_all(&temp_dir).unwrap();
-    let input_path = temp_dir.join("probe.yaml");
+    let temp_dir = unique_typescript_runtime_dir("ts-json-wave2-conformance");
+    let input_path = temp_dir.path().join("probe.yaml");
     fs::write(&input_path, TYPESCRIPT_CONFORMANCE_SCHEMA).unwrap();
-    let output_path = temp_dir.join("probe");
+    let output_path = temp_dir.path().join("probe");
 
     generate_to_file(&GenerateRequest {
         config: Default::default(),
@@ -1931,7 +1932,7 @@ test("mixed extras, matchers, and wire-string constraints run both ways", () => 
     let sample_root = samples_typescript_root(&project_root());
     ensure_typescript_dependencies(&sample_root);
     let runtime_relative = runtime_test.strip_prefix(&sample_root).unwrap();
-    let runtime_config = temp_dir.join("vitest.config.ts");
+    let runtime_config = temp_dir.path().join("vitest.config.ts");
     fs::write(
         &runtime_config,
         format!(
@@ -1965,7 +1966,6 @@ test("mixed extras, matchers, and wire-string constraints run both ways", () => 
         runtime_status.success(),
         "focused TypeScript runtime test failed"
     );
-    fs::remove_dir_all(temp_dir).unwrap();
 }
 
 #[test]
@@ -2066,11 +2066,10 @@ fn typescript_json_deprecates_types_fields_services_and_operations() {
 
 #[test]
 fn typescript_json_wave3_pairwise_runtime_matrix() {
-    let temp_dir = unique_typescript_runtime_path("ts-json-wave3-matrix");
-    fs::create_dir_all(&temp_dir).unwrap();
-    let input_path = temp_dir.join("audit.yaml");
+    let temp_dir = unique_typescript_runtime_dir("ts-json-wave3-matrix");
+    let input_path = temp_dir.path().join("audit.yaml");
     fs::write(&input_path, TYPESCRIPT_WAVE3_MATRIX_SCHEMA).unwrap();
-    let output_path = temp_dir.join("audit");
+    let output_path = temp_dir.path().join("audit");
     generate_to_file(&GenerateRequest {
         config: Default::default(),
         language: nexgen::language::Language::TypeScript,
@@ -2231,7 +2230,7 @@ test("contains, propertyNames, arrays, and typed-extra counts aggregate both way
     let sample_root = samples_typescript_root(&project_root());
     ensure_typescript_dependencies(&sample_root);
     let runtime_relative = runtime_test.strip_prefix(&sample_root).unwrap();
-    let runtime_config = temp_dir.join("vitest.config.ts");
+    let runtime_config = temp_dir.path().join("vitest.config.ts");
     fs::write(
         &runtime_config,
         format!(
@@ -2262,7 +2261,6 @@ test("contains, propertyNames, arrays, and typed-extra counts aggregate both way
         .status()
         .unwrap();
     assert!(runtime_status.success(), "wave 3 runtime matrix failed");
-    fs::remove_dir_all(temp_dir).unwrap();
 }
 
 /// Runs the real compiler over generated output. `npm run typecheck` is scoped
@@ -2386,11 +2384,10 @@ $defs:
 
 #[test]
 fn typescript_json_wave7_discrete_defects_typecheck_and_run() {
-    let temp_dir = unique_typescript_runtime_path("ts-json-wave7");
-    fs::create_dir_all(&temp_dir).unwrap();
-    let input_path = temp_dir.join("probe.yaml");
+    let temp_dir = unique_typescript_runtime_dir("ts-json-wave7");
+    let input_path = temp_dir.path().join("probe.yaml");
     fs::write(&input_path, TYPESCRIPT_WAVE7_SCHEMA).unwrap();
-    let output_path = temp_dir.join("probe");
+    let output_path = temp_dir.path().join("probe");
     generate_to_file(&GenerateRequest {
         config: Default::default(),
         language: nexgen::language::Language::TypeScript,
@@ -2536,8 +2533,7 @@ test("length is the code-point count, early-exited against the bound", () => {
 "#,
     )
     .unwrap();
-    run_generated_typescript_test(&temp_dir, &runtime_test, "wave 7");
-    fs::remove_dir_all(temp_dir).unwrap();
+    run_generated_typescript_test(temp_dir.path(), &runtime_test, "wave 7");
 }
 
 const TYPESCRIPT_CROSS_MODULE_SHAPES: &str = r##"$schema: https://json-schema.org/draft/2020-12/schema
@@ -2572,13 +2568,12 @@ properties:
 /// current module silently collapses the union to its first local branch.
 #[test]
 fn typescript_json_dispatches_cross_module_ref_union_branches() {
-    let temp_dir = unique_typescript_runtime_path("ts-json-cross-module-union");
-    fs::create_dir_all(&temp_dir).unwrap();
-    let shapes_path = temp_dir.join("shapes.yaml");
+    let temp_dir = unique_typescript_runtime_dir("ts-json-cross-module-union");
+    let shapes_path = temp_dir.path().join("shapes.yaml");
     fs::write(&shapes_path, TYPESCRIPT_CROSS_MODULE_SHAPES).unwrap();
-    let main_path = temp_dir.join("main.yaml");
+    let main_path = temp_dir.path().join("main.yaml");
     fs::write(&main_path, TYPESCRIPT_CROSS_MODULE_MAIN).unwrap();
-    let output_path = temp_dir.join("closure");
+    let output_path = temp_dir.path().join("closure");
     generate_to_file(&GenerateRequest {
         config: Default::default(),
         language: nexgen::language::Language::TypeScript,
@@ -2625,8 +2620,7 @@ test("every cross-file branch round-trips", () => {
 "#,
     )
     .unwrap();
-    run_generated_typescript_test(&temp_dir, &runtime_test, "cross-module union");
-    fs::remove_dir_all(temp_dir).unwrap();
+    run_generated_typescript_test(temp_dir.path(), &runtime_test, "cross-module union");
 }
 
 /// Decision **D2**: a nullable *scalar* element (`items: {oneOf: [T, null]}`) is
@@ -2660,11 +2654,10 @@ properties:
 
 #[test]
 fn typescript_json_guards_nullable_elements_in_array_keywords() {
-    let temp_dir = unique_typescript_runtime_path("ts-json-nullable-elements");
-    fs::create_dir_all(&temp_dir).unwrap();
-    let input_path = temp_dir.join("bag.yaml");
+    let temp_dir = unique_typescript_runtime_dir("ts-json-nullable-elements");
+    let input_path = temp_dir.path().join("bag.yaml");
     fs::write(&input_path, TYPESCRIPT_NULLABLE_ELEMENT_SCHEMA).unwrap();
-    let output_path = temp_dir.join("bag");
+    let output_path = temp_dir.path().join("bag");
     generate_to_file(&GenerateRequest {
         config: Default::default(),
         language: nexgen::language::Language::TypeScript,
@@ -2749,8 +2742,7 @@ test("a nullable element round-trips alongside a matching one", () => {
 "#,
     )
     .unwrap();
-    run_generated_typescript_test(&temp_dir, &runtime_test, "nullable elements");
-    fs::remove_dir_all(temp_dir).unwrap();
+    run_generated_typescript_test(temp_dir.path(), &runtime_test, "nullable elements");
 }
 
 /// A `const` member is emitted `readonly`, but an **optional** member is assigned
@@ -2758,9 +2750,8 @@ test("a nullable element round-trips alongside a matching one", () => {
 /// generated module did not compile for any optional `const`, materialized or not.
 #[test]
 fn typescript_json_optional_const_members_typecheck() {
-    let temp_dir = unique_typescript_runtime_path("ts-json-optional-const");
-    fs::create_dir_all(&temp_dir).unwrap();
-    let input_path = temp_dir.join("pin.yaml");
+    let temp_dir = unique_typescript_runtime_dir("ts-json-optional-const");
+    let input_path = temp_dir.path().join("pin.yaml");
     fs::write(
         &input_path,
         r##"$schema: https://json-schema.org/draft/2020-12/schema
@@ -2773,7 +2764,7 @@ properties:
 "##,
     )
     .unwrap();
-    let output_path = temp_dir.join("pin");
+    let output_path = temp_dir.path().join("pin");
     generate_to_file(&GenerateRequest {
         config: Default::default(),
         language: nexgen::language::Language::TypeScript,
@@ -2819,8 +2810,7 @@ test("an optional const member round-trips and stays absent when omitted", () =>
 "#,
     )
     .unwrap();
-    run_generated_typescript_test(&temp_dir, &runtime_test, "optional const");
-    fs::remove_dir_all(temp_dir).unwrap();
+    run_generated_typescript_test(temp_dir.path(), &runtime_test, "optional const");
 }
 
 const TYPESCRIPT_FRACTIONAL_SECOND_SCHEMA: &str = r##"$schema: https://json-schema.org/draft/2020-12/schema
@@ -2858,11 +2848,10 @@ fn typescript_json_truncates_over_capacity_fractional_seconds() {
     ];
     for (repr, expected) in expectations {
         let label = format!("{repr:?}").to_lowercase();
-        let temp_dir = unique_typescript_runtime_path(&format!("ts-json-fraction-{label}"));
-        fs::create_dir_all(&temp_dir).unwrap();
-        let input_path = temp_dir.join("clock.yaml");
+        let temp_dir = unique_typescript_runtime_dir(&format!("ts-json-fraction-{label}"));
+        let input_path = temp_dir.path().join("clock.yaml");
         fs::write(&input_path, TYPESCRIPT_FRACTIONAL_SECOND_SCHEMA).unwrap();
-        let output_path = temp_dir.join("clock");
+        let output_path = temp_dir.path().join("clock");
         generate_to_file(&GenerateRequest {
             config: Default::default(),
             language: nexgen::language::Language::TypeScript,
@@ -2928,7 +2917,6 @@ test("an over-capacity fraction truncates instead of throwing", () => {{
             ),
         )
         .unwrap();
-        run_generated_typescript_test(&temp_dir, &runtime_test, &format!("{label} fraction"));
-        fs::remove_dir_all(temp_dir).unwrap();
+        run_generated_typescript_test(temp_dir.path(), &runtime_test, &format!("{label} fraction"));
     }
 }
