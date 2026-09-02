@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import datetime
+import json
 import pathlib
 import re
 import subprocess
@@ -60,8 +61,11 @@ def finalize_changelog_release(
     validate_version(version)
     lines = text.splitlines()
 
+    # A previous invocation may have completed the changelog update before
+    # failing later (for example, while pushing or opening the PR). Preserve
+    # that completed step so the command can safely resume.
     if _find_version_section(lines, version) is not None:
-        raise RuntimeError(f"Changelog already has a section for {version!r}")
+        return text
 
     unreleased = _find_version_section(lines, "Unreleased")
     if unreleased is None:
@@ -106,11 +110,29 @@ def replace_lock_package_version(text: str, version: str) -> str:
 
 def create_release_branch(repo_root: pathlib.Path, version: str) -> None:
     subprocess.run(["git", "fetch", "origin", "main"], cwd=repo_root, check=True)
-    subprocess.run(
-        ["git", "switch", "--create", f"chore/release-{version}", "origin/main"],
+    branch = f"chore/release-{version}"
+    current_branch = subprocess.run(
+        ["git", "branch", "--show-current"],
         cwd=repo_root,
         check=True,
-    )
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    if current_branch == branch:
+        return
+
+    branch_exists = subprocess.run(
+        ["git", "show-ref", "--verify", "--quiet", f"refs/heads/{branch}"],
+        cwd=repo_root,
+    ).returncode == 0
+    if branch_exists:
+        subprocess.run(["git", "switch", branch], cwd=repo_root, check=True)
+    else:
+        subprocess.run(
+            ["git", "switch", "--create", branch, "origin/main"],
+            cwd=repo_root,
+            check=True,
+        )
 
 
 def changed_files(repo_root: pathlib.Path) -> set[str]:
@@ -173,11 +195,12 @@ def commit_release_changes(repo_root: pathlib.Path, version: str) -> None:
         cwd=repo_root,
         check=True,
     )
-    subprocess.run(
-        ["git", "commit", "-m", f"Prepare release {version}"],
-        cwd=repo_root,
-        check=True,
-    )
+    if changed_files(repo_root):
+        subprocess.run(
+            ["git", "commit", "-m", f"Prepare release {version}"],
+            cwd=repo_root,
+            check=True,
+        )
 
 
 def push_release_branch(repo_root: pathlib.Path, version: str) -> None:
@@ -191,6 +214,27 @@ def push_release_branch(repo_root: pathlib.Path, version: str) -> None:
 
 def create_release_pr(repo_root: pathlib.Path, version: str) -> None:
     branch = f"chore/release-{version}"
+    existing_prs = subprocess.run(
+        [
+            "gh",
+            "pr",
+            "list",
+            "--base",
+            "main",
+            "--head",
+            branch,
+            "--state",
+            "all",
+            "--json",
+            "url",
+        ],
+        cwd=repo_root,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    if json.loads(existing_prs.stdout):
+        return
     subprocess.run(
         [
             "gh",
