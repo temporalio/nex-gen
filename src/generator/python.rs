@@ -90,14 +90,15 @@ fn generate_tree(
     insert_files(
         &mut files,
         render_tree_support_files(branch),
-        "<generated Python JSON runtime>",
+        &source_paths_label(&tree_json_source_paths(branch)),
     )?;
+    let hoist_sources = source_paths_label(model_hoists.source_paths());
     for (path, contents) in model_hoists.files() {
         insert_generated_file(
             &mut files,
             path.clone(),
             contents.clone(),
-            "<generated Python recursive-model hoist>",
+            hoist_sources.clone(),
         )?;
     }
     let mut child_exports = BTreeMap::new();
@@ -2934,6 +2935,7 @@ pub(crate) struct PythonModelHoists {
     hoisted: BTreeMap<ModulePath, BTreeSet<String>>,
     runtime_imports: BTreeMap<ModulePath, BTreeSet<String>>,
     files: BTreeMap<PathBuf, String>,
+    source_paths: BTreeSet<PathBuf>,
     exported_names: BTreeSet<String>,
 }
 
@@ -2951,6 +2953,10 @@ impl PythonModelHoists {
 
     pub(in crate::generator) fn add_file(&mut self, path: PathBuf, contents: String) {
         self.files.insert(path, contents);
+    }
+
+    pub(in crate::generator) fn add_source_paths(&mut self, paths: BTreeSet<PathBuf>) {
+        self.source_paths.extend(paths);
     }
 
     pub(in crate::generator) fn add_runtime_imports(
@@ -2989,6 +2995,10 @@ impl PythonModelHoists {
         &self.files
     }
 
+    pub(crate) fn source_paths(&self) -> &BTreeSet<PathBuf> {
+        &self.source_paths
+    }
+
     pub(crate) fn exported_names(&self) -> &BTreeSet<String> {
         &self.exported_names
     }
@@ -3009,6 +3019,34 @@ fn branch_has_json_models(branch: &ApiSpecBranch<PlannedFamily>) -> bool {
             .any(|binding| binding.json_model().is_some()),
         ApiSpecNode::Branch(branch) => branch_has_json_models(branch),
     })
+}
+
+fn tree_json_source_paths(branch: &ApiSpecBranch<PlannedFamily>) -> BTreeSet<PathBuf> {
+    let mut paths = BTreeSet::new();
+    for node in branch.children.values() {
+        match node {
+            ApiSpecNode::Leaf(leaf) => {
+                if leaf
+                    .spec
+                    .external_types()
+                    .map(|(_, binding)| binding)
+                    .any(|binding| binding.json_model().is_some())
+                {
+                    paths.insert(leaf.source_path.clone());
+                }
+            }
+            ApiSpecNode::Branch(branch) => paths.extend(tree_json_source_paths(branch)),
+        }
+    }
+    paths
+}
+
+fn source_paths_label(paths: &BTreeSet<PathBuf>) -> String {
+    paths
+        .iter()
+        .map(|path| path.display().to_string())
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 fn python_function_result_annotation(result: &FunctionResultSpec<PlannedFamily>) -> String {
@@ -7916,6 +7954,19 @@ mod tests {
                     BTreeSet::from(["Support".to_string()]),
                 ),
             ])
+        );
+    }
+
+    #[test]
+    fn generated_tree_source_label_names_every_input() {
+        let paths = BTreeSet::from([
+            PathBuf::from("schemas/a.yaml"),
+            PathBuf::from("schemas/nested/b.yaml"),
+        ]);
+
+        assert_eq!(
+            super::source_paths_label(&paths),
+            "schemas/a.yaml, schemas/nested/b.yaml"
         );
     }
 

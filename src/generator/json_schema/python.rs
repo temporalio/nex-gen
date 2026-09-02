@@ -437,17 +437,18 @@ impl ModelBackend {
 struct JsonModelHoistPlan {
     hoisted: BTreeMap<ModulePath, BTreeSet<String>>,
     hoisted_models: Vec<PlannedJsonType>,
+    source_paths: BTreeSet<PathBuf>,
     runtime_imports: BTreeMap<ModulePath, BTreeSet<String>>,
     dependency_imports: BTreeMap<ModulePath, BTreeSet<String>>,
 }
 
 impl JsonModelHoistPlan {
     fn for_tree(branch: &ApiSpecBranch<PlannedFamily>) -> Self {
-        let mut models = BTreeMap::<String, (ModulePath, PlannedJsonType)>::new();
+        let mut models = BTreeMap::<String, (ModulePath, PathBuf, PlannedJsonType)>::new();
         collect_tree_json_models(branch, &mut models);
 
         let mut graph = BTreeMap::<String, BTreeSet<String>>::new();
-        for (full_name, (_, model)) in &models {
+        for (full_name, (_, _, model)) in &models {
             let mut refs = BTreeSet::new();
             collect_json_schema_model_refs(&model.schema, &models, &mut refs);
             graph.insert(full_name.clone(), refs);
@@ -469,7 +470,7 @@ impl JsonModelHoistPlan {
                 .collect::<BTreeSet<_>>();
             let modules = component
                 .iter()
-                .filter_map(|name| models.get(name).map(|(module, _)| module))
+                .filter_map(|name| models.get(name).map(|(module, _, _)| module))
                 .collect::<BTreeSet<_>>();
             if modules.len() > 1 {
                 hoisted_full_names.extend(component);
@@ -490,7 +491,7 @@ impl JsonModelHoistPlan {
                             .iter()
                             .any(|target| hoisted_full_names.contains(target))
                 })
-                .filter_map(|(source, _)| models.get(source).map(|(module, _)| module.clone()))
+                .filter_map(|(source, _)| models.get(source).map(|(module, _, _)| module.clone()))
                 .collect::<BTreeSet<_>>();
             let additions = hoisted_full_names
                 .iter()
@@ -499,7 +500,7 @@ impl JsonModelHoistPlan {
                 .filter(|target| {
                     models
                         .get(*target)
-                        .is_some_and(|(module, _)| consumer_modules.contains(module))
+                        .is_some_and(|(module, _, _)| consumer_modules.contains(module))
                 })
                 .cloned()
                 .collect::<BTreeSet<_>>();
@@ -511,8 +512,9 @@ impl JsonModelHoistPlan {
 
         let mut hoisted = BTreeMap::<ModulePath, BTreeSet<String>>::new();
         let mut hoisted_models = Vec::new();
+        let mut source_paths = BTreeSet::new();
         for full_name in &hoisted_full_names {
-            let Some((module_path, model)) = models.get(full_name) else {
+            let Some((module_path, source_path, model)) = models.get(full_name) else {
                 continue;
             };
             hoisted
@@ -520,6 +522,7 @@ impl JsonModelHoistPlan {
                 .or_default()
                 .insert(model.model_name.clone());
             hoisted_models.push(model.clone());
+            source_paths.insert(source_path.clone());
         }
 
         let mut dependency_imports = BTreeMap::<ModulePath, BTreeSet<String>>::new();
@@ -528,7 +531,7 @@ impl JsonModelHoistPlan {
                 if hoisted_full_names.contains(target_name) {
                     continue;
                 }
-                let Some((module_path, model)) = models.get(target_name) else {
+                let Some((module_path, _, model)) = models.get(target_name) else {
                     continue;
                 };
                 dependency_imports
@@ -547,14 +550,14 @@ impl JsonModelHoistPlan {
             if hoisted_full_names.contains(source_name) {
                 continue;
             }
-            let Some((source_module, _)) = models.get(source_name) else {
+            let Some((source_module, _, _)) = models.get(source_name) else {
                 continue;
             };
             for target_name in targets {
                 if !hoisted_full_names.contains(target_name) {
                     continue;
                 }
-                let Some((_, target)) = models.get(target_name) else {
+                let Some((_, _, target)) = models.get(target_name) else {
                     continue;
                 };
                 runtime_imports
@@ -567,6 +570,7 @@ impl JsonModelHoistPlan {
         Self {
             hoisted,
             hoisted_models,
+            source_paths,
             runtime_imports,
             dependency_imports,
         }
@@ -595,6 +599,7 @@ pub(in crate::generator) fn tree_model_hoists(
         PathBuf::from("_recursive.py"),
         render_hoisted_models_module(&plan)?,
     );
+    hoists.add_source_paths(plan.source_paths);
     hoists.add_exported_names(
         plan.hoisted_models
             .iter()
@@ -673,7 +678,7 @@ fn render_hoisted_models_module(hoists: &JsonModelHoistPlan) -> Result<String> {
 
 fn collect_tree_json_models(
     branch: &ApiSpecBranch<PlannedFamily>,
-    models: &mut BTreeMap<String, (ModulePath, PlannedJsonType)>,
+    models: &mut BTreeMap<String, (ModulePath, PathBuf, PlannedJsonType)>,
 ) {
     for node in branch.children.values() {
         match node {
@@ -682,7 +687,11 @@ fn collect_tree_json_models(
                     if let Some(json_type) = binding.json_model() {
                         models.insert(
                             json_type.full_name.clone(),
-                            (leaf.module_path.clone(), json_type.clone()),
+                            (
+                                leaf.module_path.clone(),
+                                leaf.source_path.clone(),
+                                json_type.clone(),
+                            ),
                         );
                     }
                 }
@@ -694,7 +703,7 @@ fn collect_tree_json_models(
 
 fn collect_json_schema_model_refs(
     value: &serde_json::Value,
-    models: &BTreeMap<String, (ModulePath, PlannedJsonType)>,
+    models: &BTreeMap<String, (ModulePath, PathBuf, PlannedJsonType)>,
     refs: &mut BTreeSet<String>,
 ) {
     match value {
