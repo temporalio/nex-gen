@@ -1717,18 +1717,29 @@ fn go_rejects_inputs_flattening_to_the_same_module_file() {
         ts_date_time_types: Default::default(),
     });
 
-    let error = result
-        .expect_err("inputs flattening to the same Go module file should be rejected")
-        .to_string();
-    assert!(error.contains("full_name.go"), "{error}");
+    let error =
+        result.expect_err("inputs flattening to the same Go module file should be rejected");
+    let nexgen::error::Error::GeneratedFileSourceConflict {
+        path,
+        first_source,
+        second_source,
+        remedy,
+    } = error
+    else {
+        panic!("expected generated-file source conflict, got {error}");
+    };
+    assert_eq!(path, PathBuf::from("full_name.go"));
     assert!(
-        error.contains("full_name.json") && error.contains("full/name.json"),
-        "{error}"
+        first_source.contains("full/name.json") || first_source.contains("full_name.json"),
+        "{first_source}"
     );
     assert!(
-        error.contains("rename one input file or directory"),
-        "{error}"
+        second_source.contains("full/name.json") || second_source.contains("full_name.json"),
+        "{second_source}"
     );
+    assert_ne!(first_source, second_source);
+    assert!(remedy.contains("full/name.json"), "{remedy}");
+    assert!(remedy.contains("full_name.json"), "{remedy}");
     fs::remove_dir_all(temp_dir).unwrap();
 }
 
@@ -1737,8 +1748,8 @@ fn go_rejects_reserved_generated_name_collision() {
     // An input file whose module segment is `definitions` would collide with the
     // schema-independent runtime file `definitions.go`. The loader rejects it up
     // front as a reserved module name (before the Go emit layer would raise a
-    // `GeneratedFileConflict`). Two inputs are used so the reserved file carries a
-    // real module segment rather than flattening to the root `api.go`.
+    // generated-file source conflict). Two inputs are used so the reserved file
+    // carries a real module segment rather than flattening to the root `api.go`.
     let temp_dir = unique_output_path("go-json-reserved-name");
     fs::create_dir_all(&temp_dir).unwrap();
     let schema =
@@ -1795,14 +1806,14 @@ fn go_rejects_single_input_output_named_definitions_with_a_remedy() {
             .expect_err("the model file must not overwrite the generated runtime")
             .to_string();
         assert!(error.contains("definitions.go"), "{output_name}: {error}");
-        assert!(error.contains("other.json"), "{output_name}: {error}");
+        assert!(error.contains("output directory"), "{output_name}: {error}");
         assert!(
             error.contains("generated Go validation runtime"),
             "{output_name}: {error}"
         );
         assert!(error.contains("--output"), "{output_name}: {error}");
         assert!(
-            error.contains("derived Go package identifier") && error.contains("not `definitions`"),
+            error.contains("name generates a different Go file path"),
             "{output_name}: {error}"
         );
     }
@@ -1810,6 +1821,157 @@ fn go_rejects_single_input_output_named_definitions_with_a_remedy() {
     generate_to_file(&request("api")).expect("a non-conflicting derived package name should load");
     assert!(temp_dir.join("api/api.go").is_file());
     assert!(temp_dir.join("api/definitions.go").is_file());
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+#[test]
+fn go_rejects_multi_input_module_colliding_with_support_file() {
+    let temp_dir = unique_output_path("go-json-module-support-collision");
+    fs::create_dir_all(&temp_dir).unwrap();
+    fs::write(
+        temp_dir.join("support.json"),
+        r#"{"title":"SupportModel","type":"object","properties":{"id":{"type":"string"}}}"#,
+    )
+    .unwrap();
+    fs::write(
+        temp_dir.join("other.json"),
+        r#"{"title":"OtherModel","type":"object","properties":{"id":{"type":"string"}}}"#,
+    )
+    .unwrap();
+    let support_path = temp_dir.join("custom.go");
+    fs::write(&support_path, "package generated\n").unwrap();
+
+    let error = generate_to_file(&GenerateRequest {
+        config: Default::default(),
+        language: nexgen::language::Language::Go,
+        input_paths: vec![temp_dir.clone()],
+        support_paths: vec![support_path],
+        descriptor_paths: Vec::new(),
+        output_path: temp_dir.join("output"),
+        format: false,
+        java_package_name: None,
+        ts_date_time_types: Default::default(),
+    })
+    .expect_err("the input module must not be overwritten by support.go");
+
+    let nexgen::error::Error::GeneratedFileSourceConflict {
+        path,
+        first_source,
+        second_source,
+        remedy,
+    } = error
+    else {
+        panic!("expected generated-file source conflict, got {error}");
+    };
+    assert_eq!(path, PathBuf::from("support.go"));
+    assert!(first_source.contains("support.json"), "{first_source}");
+    assert_eq!(second_source, "generated Go support file");
+    assert!(remedy.contains("support.json"), "{remedy}");
+    assert!(!remedy.contains("custom.go"), "{remedy}");
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+#[test]
+fn go_rejects_single_json_output_name_colliding_with_support_file() {
+    let temp_dir = unique_output_path("go-json-output-support-collision");
+    fs::create_dir_all(&temp_dir).unwrap();
+    let input_path = temp_dir.join("model.json");
+    fs::write(
+        &input_path,
+        r#"{"title":"Model","type":"object","properties":{"id":{"type":"string"}}}"#,
+    )
+    .unwrap();
+    let support_path = temp_dir.join("custom.go");
+    fs::write(&support_path, "package generated\n").unwrap();
+
+    let error = generate_to_file(&GenerateRequest {
+        config: Default::default(),
+        language: nexgen::language::Language::Go,
+        input_paths: vec![input_path],
+        support_paths: vec![support_path],
+        descriptor_paths: Vec::new(),
+        output_path: temp_dir.join("support"),
+        format: false,
+        java_package_name: None,
+        ts_date_time_types: Default::default(),
+    })
+    .expect_err("the output-named module must not be overwritten by support.go");
+    let nexgen::error::Error::GeneratedFileSourceConflict {
+        path,
+        first_source,
+        second_source,
+        remedy,
+    } = error
+    else {
+        panic!("expected generated-file source conflict, got {error}");
+    };
+    assert_eq!(path, PathBuf::from("support.go"));
+    assert_eq!(
+        first_source,
+        "Go module derived from output directory `support`"
+    );
+    assert_eq!(second_source, "generated Go support file");
+    assert!(remedy.contains("--output"), "{remedy}");
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+#[test]
+fn go_rejects_single_wit_service_name_colliding_with_support_file() {
+    let temp_dir = unique_output_path("go-wit-service-support-collision");
+    fs::create_dir_all(&temp_dir).unwrap();
+    let input_path = temp_dir.join("support.wit");
+    fs::write(
+        &input_path,
+        r#"
+package temporal:collision@1.0.0;
+
+world system {
+  export support;
+}
+
+/// @nexus.endpoint "support"
+interface support {
+  record request { value: string }
+  run: func(request: request);
+}
+"#,
+    )
+    .unwrap();
+    let support_path = temp_dir.join("custom.go");
+    fs::write(&support_path, "package generated\n").unwrap();
+
+    let error = generate_to_file(&GenerateRequest {
+        config: Default::default(),
+        language: nexgen::language::Language::Go,
+        input_paths: vec![input_path.clone()],
+        support_paths: vec![support_path],
+        descriptor_paths: Vec::new(),
+        output_path: temp_dir.join("output"),
+        format: false,
+        java_package_name: None,
+        ts_date_time_types: Default::default(),
+    })
+    .expect_err("the service-named module must not be overwritten by support.go");
+    let nexgen::error::Error::GeneratedFileSourceConflict {
+        path,
+        first_source,
+        second_source,
+        remedy,
+    } = error
+    else {
+        panic!("expected generated-file source conflict, got {error}");
+    };
+    assert_eq!(path, PathBuf::from("support.go"));
+    assert!(
+        first_source.contains("service declaration `Support`"),
+        "{first_source}"
+    );
+    assert!(
+        first_source.contains(&input_path.display().to_string()),
+        "{first_source}"
+    );
+    assert_eq!(second_source, "generated Go support file");
+    assert!(remedy.contains("rename service `Support`"), "{remedy}");
     fs::remove_dir_all(temp_dir).unwrap();
 }
 

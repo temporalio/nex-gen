@@ -966,6 +966,69 @@ fn typescript_rejects_support_namespace() {
 }
 
 #[test]
+fn typescript_generated_operation_path_collision_names_both_operations() {
+    let root = project_root();
+    let temp_dir = unique_output_path("typescript-operation-path-collision");
+    fs::create_dir_all(&temp_dir).unwrap();
+    let input_path = temp_dir.join("operations-collision.wit");
+    fs::write(
+        &input_path,
+        r#"
+package temporal:collision@1.0.0;
+
+world system {
+  export first-service;
+  export second-service;
+}
+
+/// @nexus.endpoint "first"
+interface first-service {
+  record first-request { value: string }
+  collide: func(request: first-request);
+}
+
+/// @nexus.endpoint "second"
+interface second-service {
+  record second-request { value: string }
+  collide: func(request: second-request);
+}
+"#,
+    )
+    .unwrap();
+    let spec = nexgen::parser::load_api_spec_from_wit_for_language_with_inputs(
+        nexgen::language::Language::TypeScript,
+        &[input_path],
+    )
+    .unwrap();
+    let descriptors = nexgen::descriptors::DescriptorIndex::load(&descriptor_path(&root)).unwrap();
+    let error = generate_source(
+        nexgen::language::Language::TypeScript,
+        spec,
+        &descriptors,
+        &SupportFiles::default(),
+    )
+    .unwrap_err();
+    let nexgen::error::Error::GeneratedFileSourceConflict {
+        path,
+        first_source,
+        second_source,
+        remedy,
+    } = error
+    else {
+        panic!("expected generated-file source conflict, got {error}");
+    };
+    assert_eq!(path, PathBuf::from("operations/collide.ts"));
+    assert_eq!(first_source, "TypeScript operation `FirstService.Collide`");
+    assert_eq!(
+        second_source,
+        "TypeScript operation `SecondService.Collide`"
+    );
+    assert!(remedy.contains("operation `Collide` in service `FirstService`"));
+    assert!(remedy.contains("operation `Collide` in service `SecondService`"));
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+#[test]
 fn typescript_renders_required_fields_and_custom_message_types() {
     let root = project_root();
     let rendered = generate_typescript_to_string(

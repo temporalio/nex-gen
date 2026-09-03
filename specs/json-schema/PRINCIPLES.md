@@ -143,6 +143,12 @@ its backing slot together. Python emits no module-level `DEFAULT_*` identifier.
 
 ## Java
 
+The generated runtime class names `Violation`, `SpecNumbers`,
+`TemporalSupport`, and `Base64Support` are reserved in every Java module scope.
+`TemporalSupport` and `Base64Support` remain reserved even when that run does
+not materialize the corresponding runtime class, so later use of a temporal
+format or content encoding cannot introduce a new name collision.
+
 1. **Java 8 baseline; POJOs, not records.** Targets Java 8 to match the Temporal Java SDK's own minimum — emitted code must never impose a stricter floor than the SDK it plugs into (P3/P4). Records require Java 16+, which would exclude the large Java 8/11 install base, so models are emitted as **POJOs** (private final fields, constructor, getters, `equals`/`hashCode`/`toString`). The boilerplate stays hidden behind a hand-written-feeling API (P2).
 2. **Jackson typed binding into POJOs.** Jackson handles structural (de)serialization. No reflection-based schema library beyond Jackson itself (P4).
 3. **Primitive for required, boxed for optional; JSpecify for reference nullness.** Required scalar fields use primitives (`long`/`double`/`boolean`); optional ones box (`Long`/`Double`/`Boolean`) so absence is `null`. Reference types (`String`, `List<T>`, object types) carry a non-null validator instead. Emitted packages are `@NullMarked` (JSpecify; non-null by default) and optional reference fields are `@Nullable`, restoring for reference types the same in-memory absence signal `long`-vs-`Long` gives scalars (P2). The annotation tracks **in-memory post-construction nullness** (required vs optional), **not** the wire-level nullable distinction — that stays a validator concern (§4, [[nullability]]). Generated Java source imports these annotations, so `org.jspecify:jspecify:1.0.0` is a required compile-time dependency, configured as `compileOnly` in Gradle or `provided` in Maven. JSpecify annotations have runtime retention but enforce nothing at runtime; `@Nullable` targets type uses, while `@NullMarked` targets declarations including packages and types. Consumers that reflect over these annotations must provide JSpecify themselves. Chosen over the abandoned JSR-305; it is the cross-tool consensus (Google, JetBrains, Spring, Kotlin, NullAway, Checker Framework).

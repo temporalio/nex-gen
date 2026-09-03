@@ -115,10 +115,15 @@ All output lands at the package root (no per-input subdirectory, no
 | **Go** | one `<package>.go` (types and services) + the shared `definitions.go` |
 | **Java** | one `.java` per public class + the runtime classes and root `package-info.java`; nothing to aggregate |
 
+Java reserves the runtime class identifiers `Violation`, `SpecNumbers`,
+`TemporalSupport`, and `Base64Support` in every module scope. The temporal and
+base64 helpers remain reserved even when no schema in the run requires their
+class to be materialized.
+
 Go derives `<package>` by converting the `--output` directory basename to a Go
 package identifier. Because that model file shares the directory with
 `definitions.go`, a single-input output whose **derived identifier** is
-`definitions` is rejected with both claimants and the remedy to choose an
+`definitions` is rejected with both generated-file sources and the remedy to choose an
 output deriving a different identifier. This includes basenames such as
 `Definitions` and `definitions-`, not only the literal `definitions`.
 
@@ -349,6 +354,13 @@ the module segment they share, and the flattened generated-file conflict names
 both inputs. A reject caused by a `$ref` — a reference that raises the input
 root, or pulls a colliding file into the closure — names that reference, not
 only the entry file, which may not have changed at all.
+
+Generated-file assembly retains a classified origin for every path. When two
+paths collide, the diagnostic names both origins and derives a separate
+path-changing action from each mutable origin. A fixed generated artifact
+contributes no rename action, so a mutable/fixed collision offers only the
+author-controlled change; a fixed/fixed collision is reported as an internal
+generator defect naming both artifacts.
 
 ## Recursion: hoist types, not files
 

@@ -27,11 +27,8 @@ pub enum Error {
     #[error("generated file path `{path}` is invalid: {reason}")]
     InvalidGeneratedPath { path: PathBuf, reason: String },
 
-    #[error("generated file path `{path}` conflicts with another generated file")]
-    GeneratedFileConflict { path: PathBuf },
-
     #[error(
-        "generated file path `{path}` is claimed by both `{first_source}` and `{second_source}`; {remedy}"
+        "generated file path `{path}` is produced by both {first_source} and {second_source}; {remedy}"
     )]
     GeneratedFileSourceConflict {
         path: PathBuf,
@@ -367,4 +364,25 @@ pub enum Error {
         property: &'static str,
         conflicting_property: &'static str,
     },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Error;
+    use std::path::PathBuf;
+
+    #[test]
+    fn generated_file_source_conflict_does_not_nest_origin_code_spans() {
+        let error = Error::GeneratedFileSourceConflict {
+            path: PathBuf::from("models.py"),
+            first_source: "Python operation `First.collide`".to_string(),
+            second_source: "Python operation `Second.collide`".to_string(),
+            remedy: "rename either operation".to_string(),
+        };
+
+        assert_eq!(
+            error.to_string(),
+            "generated file path `models.py` is produced by both Python operation `First.collide` and Python operation `Second.collide`; rename either operation"
+        );
+    }
 }

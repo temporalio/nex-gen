@@ -9129,15 +9129,21 @@ fn validate_service_file_scopes(
 ///   barrel; the other runtime helpers
 ///   are `_`-prefixed.
 /// - Java (`src/generator/java.rs`): the root-package runtime classes
-///   `Violation` and `SpecNumbers`, each emitted as its own always-present public
-///   file and imported into model files. The SDK's `ApplicationFailure` is also
-///   imported into every model file.
-///   (`TemporalSupport`/`Base64Support` are schema-dependent, so excluded.)
+///   `Violation`, `SpecNumbers`, `TemporalSupport`, and `Base64Support`. The
+///   latter two are emitted only when used, but remain reserved so adding a
+///   format or content encoding cannot retroactively invalidate another model's
+///   name. The SDK's `ApplicationFailure` is also imported into model files.
 fn boilerplate_idents(language: Language) -> &'static [&'static str] {
     match language {
         Language::Go | Language::Python => &["Violation"],
         Language::TypeScript => &["Violation", "TransferTypeConverter"],
-        Language::Java => &["ApplicationFailure", "Violation", "SpecNumbers"],
+        Language::Java => &[
+            "ApplicationFailure",
+            "Violation",
+            "SpecNumbers",
+            "TemporalSupport",
+            "Base64Support",
+        ],
         _ => &[],
     }
 }
@@ -18729,6 +18735,72 @@ $defs:
             error.contains("collision") && error.contains("Violation"),
             "{error}"
         );
+    }
+
+    #[test]
+    fn java_unconditionally_reserves_optional_runtime_class_names_for_models() {
+        for reserved in ["TemporalSupport", "Base64Support"] {
+            let input = format!(
+                r##"
+$schema: https://json-schema.org/draft/2020-12/schema
+type: object
+properties:
+  helper: {{ $ref: "#/$defs/{reserved}" }}
+$defs:
+  {reserved}:
+    type: object
+    properties: {{ value: {{ type: string }} }}
+"##
+            );
+            let error = reject_for(Language::Java, &input);
+            assert!(
+                error.contains("collision")
+                    && error.contains(reserved)
+                    && error.contains("x-java-name"),
+                "{error}"
+            );
+
+            let renamed = input.replace(
+                "    type: object\n    properties:",
+                &format!("    x-java-name: Renamed{reserved}\n    type: object\n    properties:"),
+            );
+            parse_for(Language::Java, &renamed)
+                .expect("a different emitted Java model name resolves the collision");
+        }
+    }
+
+    #[test]
+    fn java_unconditionally_reserves_optional_runtime_class_names_for_services() {
+        for reserved in ["TemporalSupport", "Base64Support"] {
+            let input = format!(
+                r##"
+$schema: https://json-schema.org/draft/2020-12/schema
+nexusrpc: "1.0.0"
+services:
+  {reserved}:
+    fqn: example.v1.{reserved}
+    operations:
+      ping:
+        input:
+          type: object
+          properties: {{ value: {{ type: string }} }}
+"##
+            );
+            let error = reject_for(Language::Java, &input);
+            assert!(
+                error.contains("collision")
+                    && error.contains(reserved)
+                    && error.contains("x-java-name"),
+                "{error}"
+            );
+
+            let renamed = input.replace(
+                &format!("  {reserved}:\n    fqn:"),
+                &format!("  {reserved}:\n    x-java-name: Renamed{reserved}\n    fqn:"),
+            );
+            parse_for(Language::Java, &renamed)
+                .expect("a different emitted Java service name resolves the collision");
+        }
     }
 
     #[test]

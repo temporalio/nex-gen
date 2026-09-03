@@ -1669,14 +1669,132 @@ fn python_support_fragments_with_same_module_name_collide() {
         path,
         first_source,
         second_source,
-        remedy: _,
+        remedy,
     } = error
     else {
         panic!("expected generated-file source conflict, got {error}");
     };
     assert_eq!(path, PathBuf::from("_support/helpers.py"));
-    assert_eq!(first_source, "first/helpers.py");
-    assert_eq!(second_source, "second/helpers.py");
+    assert_eq!(first_source, "Python support file `first/helpers.py`");
+    assert_eq!(second_source, "Python support file `second/helpers.py`");
+    assert!(
+        remedy.contains("support file `first/helpers.py`"),
+        "{remedy}"
+    );
+    assert!(
+        remedy.contains("support file `second/helpers.py`"),
+        "{remedy}"
+    );
+}
+
+#[test]
+fn python_support_fragment_colliding_with_support_initializer_has_one_remedy() {
+    let root = project_root();
+    let spec = nexgen::parser::load_api_spec_from_wit_for_language_with_inputs(
+        nexgen::language::Language::Python,
+        &example_input_paths(&root, PRIMARY_EXAMPLE_ID),
+    )
+    .unwrap();
+    let descriptors = nexgen::descriptors::DescriptorIndex::load(&descriptor_path(&root)).unwrap();
+    let error = generate_source(
+        nexgen::language::Language::Python,
+        spec,
+        &descriptors,
+        &SupportFiles {
+            fragments: vec![SupportFragmentSpec {
+                path: "custom/__init__.py".to_string(),
+                contents: String::new(),
+                namespace: None,
+            }],
+        },
+    )
+    .unwrap_err();
+
+    let nexgen::error::Error::GeneratedFileSourceConflict {
+        path,
+        first_source,
+        second_source,
+        remedy,
+    } = error
+    else {
+        panic!("expected generated-file source conflict, got {error}");
+    };
+    assert_eq!(path, PathBuf::from("_support/__init__.py"));
+    assert_eq!(first_source, "Python support file `custom/__init__.py`");
+    assert_eq!(
+        second_source,
+        "generated Python support package initializer"
+    );
+    assert_eq!(
+        remedy,
+        "rename support file `custom/__init__.py` so it generates a different Python path"
+    );
+}
+
+#[test]
+fn python_generated_standalone_operation_path_collision_names_both_operations() {
+    let root = project_root();
+    let temp_dir = unique_output_path("python-operation-path-collision");
+    fs::create_dir_all(&temp_dir).unwrap();
+    let input_path = temp_dir.join("operations-collision.wit");
+    fs::write(
+        &input_path,
+        r#"
+package temporal:collision@1.0.0;
+
+world system {
+  export first-service;
+  export second-service;
+}
+
+/// @nexus.endpoint "first"
+interface first-service {
+  record first-request {
+    value: string,
+  }
+  collide: func(request: first-request);
+}
+
+/// @nexus.endpoint "second"
+interface second-service {
+  record second-request {
+    value: string,
+  }
+  collide: func(request: second-request);
+}
+"#,
+    )
+    .unwrap();
+    let spec = nexgen::parser::load_api_spec_from_wit_for_language_with_inputs(
+        nexgen::language::Language::Python,
+        &[input_path],
+    )
+    .unwrap();
+    let descriptors = nexgen::descriptors::DescriptorIndex::load(&descriptor_path(&root)).unwrap();
+    let error = generate_source(
+        nexgen::language::Language::Python,
+        spec,
+        &descriptors,
+        &SupportFiles::default(),
+    )
+    .unwrap_err();
+
+    let nexgen::error::Error::GeneratedFileSourceConflict {
+        path,
+        first_source,
+        second_source,
+        remedy,
+    } = error
+    else {
+        panic!("expected generated-file source conflict, got {error}");
+    };
+    assert_eq!(path, PathBuf::from("operations/collide.py"));
+    assert_eq!(first_source, "Python operation `FirstService.Collide`");
+    assert_eq!(second_source, "Python operation `SecondService.Collide`");
+    assert!(remedy.contains("operation `Collide` in service `FirstService`"));
+    assert!(remedy.contains("operation `Collide` in service `SecondService`"));
+    assert!(!remedy.contains("generated output"));
+    fs::remove_dir_all(temp_dir).unwrap();
 }
 
 /// An inline **structured** object `oneOf` branch on a property: the branch is

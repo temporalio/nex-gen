@@ -6,7 +6,9 @@ use heck::{ToLowerCamelCase, ToUpperCamelCase};
 use crate::error::{Error, Result};
 use crate::generator::json_schema::dotnet as dotnet_json;
 use crate::generator::proto::dotnet as dotnet_proto;
-use crate::generator::{ExternalModelBackend, GeneratedFiles, GenerationMode};
+use crate::generator::{
+    ExternalModelBackend, GeneratedFileMap, GeneratedFileOrigin, GeneratedFiles, GenerationMode,
+};
 use crate::language::Language;
 use crate::planning::{
     PlannedFamily, PlannedOperationResourceFieldBinding, PlannedProtoType, PlannedResource,
@@ -2151,19 +2153,34 @@ pub(crate) fn generate(
     tree: &crate::spec::ApiSpecTree<PlannedFamily>,
     support: &crate::SupportFiles,
 ) -> Result<GeneratedFiles> {
-    match &tree.root {
+    let generated = match &tree.root {
         ApiSpecNode::Leaf(leaf) => {
             let support_fragments = support_fragments_for_plan(&leaf.spec, support);
-            generate_leaf(&leaf.spec, &support_fragments)
+            generate_leaf(
+                &leaf.spec,
+                &support_fragments,
+                GeneratedFileOrigin::fixed("generated .NET package module"),
+            )
         }
         ApiSpecNode::Branch(branch) => generate_tree(branch, support),
-    }
+    }?;
+    Ok(GeneratedFiles {
+        layout: crate::generator::GeneratedOutputLayout::Directory,
+        files: generated.files.into_files(),
+        warnings: generated.warnings,
+    })
+}
+
+struct DotnetGenerationResult {
+    files: GeneratedFileMap,
+    warnings: Vec<String>,
 }
 
 fn generate_leaf(
     api_plan: &PlannedSpec,
     support_fragments: &[SupportFragmentSpec],
-) -> Result<GeneratedFiles> {
+    module_origin: GeneratedFileOrigin,
+) -> Result<DotnetGenerationResult> {
     let mode = crate::nexgen_config::current().mode;
     let support_namespace = dotnet_support_namespace(support_fragments)?;
     let generator = ApiPlanner::new(api_plan, support_namespace.as_deref())?;
@@ -2173,13 +2190,18 @@ fn generate_leaf(
         support_namespace.as_deref(),
     )?;
     let namespace = dotnet_namespace(api_plan);
-    let mut files = BTreeMap::<PathBuf, String>::new();
-    files.insert("Models.cs".into(), generator.render_models_file(&namespace));
+    let mut files = GeneratedFileMap::default();
+    files.insert(
+        "Models.cs",
+        generator.render_models_file(&namespace),
+        module_origin.clone(),
+    )?;
     if !api_plan.services.is_empty() {
         files.insert(
-            "Services.cs".into(),
+            "Services.cs",
             generator.render_service_file(&namespace, mode == GenerationMode::NativeApi),
-        );
+            module_origin.clone(),
+        )?;
     }
     if mode == GenerationMode::NativeApi
         && api_plan
@@ -2188,15 +2210,17 @@ fn generate_leaf(
             .any(|service| service.endpoint.is_some() && !service.operations.is_empty())
     {
         files.insert(
-            "Operations.cs".into(),
+            "Operations.cs",
             generator.render_operations_file(&namespace),
-        );
+            module_origin.clone(),
+        )?;
     }
     if mode == GenerationMode::NativeApi && crate::nexgen_config::current().system_nexus {
         files.insert(
-            "SystemNexusWorkflowOutboundInterceptor.cs".into(),
+            "SystemNexusWorkflowOutboundInterceptor.cs",
             generator.render_system_nexus_workflow_outbound_interceptor_file(),
-        );
+            module_origin.clone(),
+        )?;
     }
     if api_plan
         .services
@@ -2204,17 +2228,22 @@ fn generate_leaf(
         .any(|service| !service.resources.is_empty())
     {
         files.insert(
-            "Resources.cs".into(),
+            "Resources.cs",
             generator.render_resources_file(&namespace),
-        );
+            module_origin,
+        )?;
     }
     for fragment in support_fragments {
         files.insert(
             support_fragment_path(fragment)?,
             render_support_file(&fragment.contents),
-        );
+            GeneratedFileOrigin::support_fragment(Language::Dotnet, &fragment.path),
+        )?;
     }
-    Ok(GeneratedFiles::directory(files))
+    Ok(DotnetGenerationResult {
+        files,
+        warnings: Vec::new(),
+    })
 }
 
 impl<'a> ApiPlanner<'a> {
@@ -2333,34 +2362,32 @@ impl<'a> ApiPlanner<'a> {
 fn generate_tree(
     branch: &ApiSpecBranch<PlannedFamily>,
     support: &crate::SupportFiles,
-) -> Result<GeneratedFiles> {
-    let mut files = BTreeMap::new();
+) -> Result<DotnetGenerationResult> {
+    let mut files = GeneratedFileMap::default();
     let mut warnings = Vec::new();
     for node in branch.children.values() {
         generate_tree_node(node, support, &mut files, &mut warnings)?;
     }
-    Ok(GeneratedFiles {
-        layout: crate::generator::GeneratedOutputLayout::Directory,
-        files,
-        warnings,
-    })
+    Ok(DotnetGenerationResult { files, warnings })
 }
 
 fn generate_tree_node(
     node: &ApiSpecNode<PlannedFamily>,
     support: &crate::SupportFiles,
-    files: &mut BTreeMap<PathBuf, String>,
+    files: &mut GeneratedFileMap,
     warnings: &mut Vec<String>,
 ) -> Result<()> {
     match node {
         ApiSpecNode::Leaf(leaf) => {
             let support_fragments = support_fragments_for_plan(&leaf.spec, support);
-            let generated = generate_leaf(&leaf.spec, &support_fragments)?;
+            let generated = generate_leaf(
+                &leaf.spec,
+                &support_fragments,
+                GeneratedFileOrigin::input_module(Language::Dotnet, &leaf.source_path),
+            )?;
             warnings.extend(generated.warnings);
             let prefix = leaf.module_path.to_path_buf();
-            for (path, contents) in generated.files {
-                insert_generated_file(files, prefix.join(path), contents)?;
-            }
+            files.extend(generated.files.prefix(prefix)?)?;
             Ok(())
         }
         ApiSpecNode::Branch(branch) => {
@@ -2370,17 +2397,6 @@ fn generate_tree_node(
             Ok(())
         }
     }
-}
-
-fn insert_generated_file(
-    files: &mut BTreeMap<PathBuf, String>,
-    path: PathBuf,
-    contents: String,
-) -> Result<()> {
-    if files.insert(path.clone(), contents).is_some() {
-        return Err(Error::GeneratedFileConflict { path });
-    }
-    Ok(())
 }
 
 fn support_fragments_for_plan(

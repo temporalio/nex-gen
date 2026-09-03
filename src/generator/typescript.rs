@@ -13,7 +13,8 @@ use crate::generator::proto::typescript::{
 };
 use crate::generator::render_request_plan;
 use crate::generator::{
-    ExternalModelBackend, GeneratedFileMap, GeneratedFiles, GenerationMode, TsDateTimeTypes,
+    ExternalModelBackend, GeneratedFileMap, GeneratedFileOrigin, GeneratedFiles, GenerationMode,
+    TsDateTimeTypes,
 };
 use crate::language::Language;
 use crate::planning::{
@@ -91,26 +92,21 @@ fn generate_tree(
     branch: &ApiSpecBranch<PlannedFamily>,
     support: &crate::SupportFiles,
     ts_date_time_types: TsDateTimeTypes,
-) -> Result<GeneratedFiles> {
+) -> Result<TypeScriptGenerationResult> {
     let mut files = GeneratedFileMap::default();
     let mut warnings = Vec::new();
     let rendered_support = TypeScriptExternalModels::render_tree_support(branch);
     if !rendered_support.files.is_empty() {
-        insert_files(
-            &mut files,
+        files.insert_multi(
             rendered_support.files,
-            "<generated TypeScript JSON runtime>",
+            GeneratedFileOrigin::fixed("generated TypeScript JSON runtime"),
         )?;
     }
     insert_branch_index_file(&mut files, branch, &rendered_support.root_exports)?;
     for node in branch.children.values() {
         generate_tree_node(node, support, ts_date_time_types, &mut files, &mut warnings)?;
     }
-    Ok(GeneratedFiles {
-        layout: crate::generator::GeneratedOutputLayout::Directory,
-        files: files.into_files(),
-        warnings,
-    })
+    Ok(TypeScriptGenerationResult { files, warnings })
 }
 
 fn generate_tree_node(
@@ -123,22 +119,20 @@ fn generate_tree_node(
     match node {
         ApiSpecNode::Leaf(leaf) => {
             let support_fragments = support_fragments_for_plan(&leaf.spec, support);
-            let generated = generate_leaf(&leaf.spec, &support_fragments, ts_date_time_types)?;
+            let mut generated = generate_leaf(
+                &leaf.spec,
+                &support_fragments,
+                ts_date_time_types,
+                GeneratedFileOrigin::input_module(Language::TypeScript, &leaf.source_path),
+            )?;
             warnings.extend(generated.warnings);
             let prefix = leaf.module_path.to_path_buf();
-            for (path, mut contents) in generated.files {
-                if path == PathBuf::from("index.ts")
-                    && !typescript_module_has_import_or_export(&contents)
-                {
-                    contents.push_str("export {};\n");
-                }
-                files.insert(
-                    prefix.join(path),
-                    contents,
-                    leaf.source_path.display().to_string(),
-                    "rename one input file or directory so the generated module paths differ",
-                )?;
+            if let Some(contents) = generated.files.contents_mut("index.ts")
+                && !typescript_module_has_import_or_export(contents)
+            {
+                contents.push_str("export {};\n");
             }
+            files.extend(generated.files.prefix(prefix)?)?;
             Ok(())
         }
         ApiSpecNode::Branch(branch) => {
@@ -172,28 +166,11 @@ fn insert_branch_index_file(
     files.insert(
         path,
         contents,
-        format!(
-            "<generated TypeScript barrel for module {}>",
+        GeneratedFileOrigin::fixed(format!(
+            "generated TypeScript barrel for module `{}`",
             branch.module_path.as_module_key()
-        ),
-        "rename one input file or directory so a module and barrel do not claim the same path",
+        )),
     )
-}
-
-fn insert_files(
-    files: &mut GeneratedFileMap,
-    generated: BTreeMap<PathBuf, String>,
-    source: &str,
-) -> Result<()> {
-    for (path, contents) in generated {
-        files.insert(
-            path,
-            contents,
-            source,
-            "rename the input module that conflicts with the generated TypeScript runtime file",
-        )?;
-    }
-    Ok(())
 }
 
 fn typescript_module_has_import_or_export(contents: &str) -> bool {
@@ -1899,13 +1876,28 @@ pub(crate) fn generate(
     // tree-wide model registry the JSON backend consults for a cross-module
     // `oneOf` branch is populated here, before any leaf renders.
     typescript_json::set_tree_json_models(collect_tree_json_models(&tree.root));
-    match &tree.root {
+    let generated = match &tree.root {
         ApiSpecNode::Leaf(leaf) => {
             let support_fragments = support_fragments_for_plan(&leaf.spec, support);
-            generate_leaf(&leaf.spec, &support_fragments, ts_date_time_types)
+            generate_leaf(
+                &leaf.spec,
+                &support_fragments,
+                ts_date_time_types,
+                GeneratedFileOrigin::fixed("generated TypeScript package module"),
+            )
         }
         ApiSpecNode::Branch(branch) => generate_tree(branch, support, ts_date_time_types),
-    }
+    }?;
+    Ok(GeneratedFiles {
+        layout: crate::generator::GeneratedOutputLayout::Directory,
+        files: generated.files.into_files(),
+        warnings: generated.warnings,
+    })
+}
+
+struct TypeScriptGenerationResult {
+    files: GeneratedFileMap,
+    warnings: Vec<String>,
 }
 
 /// Every JSON model declared anywhere in the spec tree, keyed by `full_name`.
@@ -1941,7 +1933,8 @@ fn generate_leaf(
     api_plan: &PlannedSpec,
     support_fragments: &[SupportFragmentSpec],
     ts_date_time_types: TsDateTimeTypes,
-) -> Result<GeneratedFiles> {
+    module_origin: GeneratedFileOrigin,
+) -> Result<TypeScriptGenerationResult> {
     reject_support_namespaces(Language::TypeScript, support_fragments)?;
     let language_imports = collect_typescript_language_imports(api_plan);
     let mut planner = ApiPlanner::new(api_plan, ts_date_time_types)?;
@@ -2007,7 +2000,12 @@ fn generate_leaf(
         &language_imports,
         support_source.as_deref(),
         api_plan,
+        module_origin,
     )
+    .map(|files| TypeScriptGenerationResult {
+        files,
+        warnings: Vec::new(),
+    })
 }
 
 fn collect_typescript_language_imports(api_plan: &PlannedSpec) -> Vec<LanguageImportSpec> {
@@ -3124,7 +3122,8 @@ fn render_module_files(
     language_imports: &[LanguageImportSpec],
     support_source: Option<&str>,
     api_plan: &PlannedSpec,
-) -> Result<GeneratedFiles> {
+    module_origin: GeneratedFileOrigin,
+) -> Result<GeneratedFileMap> {
     let mode = crate::nexgen_config::current().mode;
     let model_requirements = collect_typescript_model_requirements(variants, models);
     let resource_requirements = collect_typescript_resource_requirements(services);
@@ -3136,7 +3135,7 @@ fn render_module_files(
         .cloned()
         .collect();
     let rendered_support = external_models.render_support()?;
-    let mut files = BTreeMap::<PathBuf, String>::new();
+    let mut files = GeneratedFileMap::default();
     let models_source = render_models_module(
         enums,
         flags,
@@ -3155,7 +3154,7 @@ fn render_module_files(
     // outright (TS2306, "is not a module").
     let has_models_module = !is_blank_generated_module(&models_source);
     files.insert(
-        "index.ts".into(),
+        "index.ts",
         if mode == GenerationMode::NativeApi {
             render_index_module(
                 services,
@@ -3169,13 +3168,14 @@ fn render_module_files(
                 &rendered_support.root_exports,
             )
         },
-    );
+        module_origin.clone(),
+    )?;
     if has_models_module {
-        files.insert("models.ts".into(), models_source);
+        files.insert("models.ts", models_source, module_origin.clone())?;
     }
     if !services.is_empty() {
         files.insert(
-            "services.ts".into(),
+            "services.ts",
             render_service_module(
                 enums,
                 flags,
@@ -3187,11 +3187,12 @@ fn render_module_files(
                 mode == GenerationMode::NativeApi,
                 api_plan,
             ),
-        );
+            module_origin.clone(),
+        )?;
     }
     if services.iter().any(|service| !service.resources.is_empty()) {
         files.insert(
-            "resources.ts".into(),
+            "resources.ts",
             render_resources_module(
                 enums,
                 flags,
@@ -3204,7 +3205,8 @@ fn render_module_files(
                 support_exports.as_ref(),
                 api_plan,
             ),
-        );
+            module_origin.clone(),
+        )?;
     }
     if mode == GenerationMode::NativeApi {
         for service in services {
@@ -3213,7 +3215,7 @@ fn render_module_files(
             }
             for operation in &service.operations {
                 files.insert(
-                    format!("operations/{}.ts", operation_file_name(operation)).into(),
+                    format!("operations/{}.ts", operation_file_name(operation)),
                     render_operation_module(
                         enums,
                         flags,
@@ -3227,15 +3229,27 @@ fn render_module_files(
                         support_exports.as_ref(),
                         api_plan,
                     ),
-                );
+                    GeneratedFileOrigin::operation(
+                        Language::TypeScript,
+                        service.name,
+                        operation.name,
+                    ),
+                )?;
             }
         }
     }
     if let Some(support_source) = support_source {
-        files.insert("support.ts".into(), render_support_module(support_source));
+        files.insert(
+            "support.ts",
+            render_support_module(support_source),
+            GeneratedFileOrigin::fixed("generated TypeScript support module"),
+        )?;
     }
-    files.extend(rendered_support.files);
-    Ok(GeneratedFiles::directory(files))
+    files.insert_multi(
+        rendered_support.files,
+        GeneratedFileOrigin::fixed("generated TypeScript external-model runtime"),
+    )?;
+    Ok(files)
 }
 
 fn support_source(support_fragments: &[SupportFragmentSpec]) -> Option<String> {

@@ -9,7 +9,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, MutexGuard};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use nexgen::{GenerateRequest, generate_to_file};
+use nexgen::generator::generate_source;
+use nexgen::spec::SupportFragmentSpec;
+use nexgen::{GenerateRequest, SupportFiles, generate_to_file};
 
 const WORKFLOW_SERVICE_EXAMPLE_ID: &str = "workflow-service";
 const TYPE_SHOWCASE_EXAMPLE_ID: &str = "type-showcase";
@@ -377,6 +379,51 @@ fn cli_generates_dotnet_support_file_from_parameter() {
             .contains("public static class CustomSupport")
     );
     fs::remove_dir_all(temp_dir).unwrap();
+}
+
+#[test]
+fn dotnet_support_fragments_with_same_file_name_collide() {
+    let root = project_root();
+    let spec = nexgen::parser::load_api_spec_from_wit_for_language_with_inputs(
+        nexgen::language::Language::Dotnet,
+        &example_input_paths(&root, WORKFLOW_SERVICE_EXAMPLE_ID),
+    )
+    .unwrap();
+    let descriptors = nexgen::descriptors::DescriptorIndex::load(&descriptor_path(&root)).unwrap();
+    let error = generate_source(
+        nexgen::language::Language::Dotnet,
+        spec,
+        &descriptors,
+        &SupportFiles {
+            fragments: vec![
+                SupportFragmentSpec {
+                    path: "first/Helpers.cs".to_string(),
+                    contents: String::new(),
+                    namespace: None,
+                },
+                SupportFragmentSpec {
+                    path: "second/Helpers.cs".to_string(),
+                    contents: String::new(),
+                    namespace: None,
+                },
+            ],
+        },
+    )
+    .unwrap_err();
+    let nexgen::error::Error::GeneratedFileSourceConflict {
+        path,
+        first_source,
+        second_source,
+        remedy,
+    } = error
+    else {
+        panic!("expected generated-file source conflict, got {error}");
+    };
+    assert_eq!(path, PathBuf::from("Support/Helpers.cs"));
+    assert_eq!(first_source, ".NET support file `first/Helpers.cs`");
+    assert_eq!(second_source, ".NET support file `second/Helpers.cs`");
+    assert!(remedy.contains("support file `first/Helpers.cs`"));
+    assert!(remedy.contains("support file `second/Helpers.cs`"));
 }
 
 #[test]
