@@ -1796,9 +1796,9 @@ fn typescript_json_cross_module_ts_name_override_moves_every_reference() {
 
 #[test]
 fn typescript_json_bare_ref_root_alias_typechecks_and_uses_target_converter() {
-    let temp_dir = unique_typescript_runtime_path("ts-json-bare-ref-alias");
-    let input = write_bare_ref_alias_closure(&temp_dir);
-    let output_path = temp_dir.join("output");
+    let temp_dir = unique_typescript_runtime_dir("ts-json-bare-ref-alias");
+    let input = write_bare_ref_alias_closure(temp_dir.path());
+    let output_path = temp_dir.path().join("output");
     generate_to_file(&GenerateRequest {
         language: nexgen::language::Language::TypeScript,
         input_paths: vec![input],
@@ -1853,15 +1853,13 @@ describe("bare-ref alias", () => {
     )
     .unwrap();
     typecheck_generated_typescript(&output_path, "bare-ref alias");
-    run_generated_typescript_test(&temp_dir, &runtime, "bare-ref alias");
-    fs::remove_dir_all(temp_dir).unwrap();
+    run_generated_typescript_test(temp_dir.path(), &runtime, "bare-ref alias");
 }
 
 #[test]
 fn typescript_json_same_module_alias_chain_orders_converter_values() {
-    let temp_dir = unique_typescript_runtime_path("ts-json-same-module-alias-chain");
-    fs::create_dir_all(&temp_dir).unwrap();
-    let input_path = temp_dir.join("chain.yaml");
+    let temp_dir = unique_typescript_runtime_dir("ts-json-same-module-alias-chain");
+    let input_path = temp_dir.path().join("chain.yaml");
     fs::write(
         &input_path,
         r##"$schema: https://json-schema.org/draft/2020-12/schema
@@ -1887,7 +1885,7 @@ $defs:
 "##,
     )
     .unwrap();
-    let output_path = temp_dir.join("output");
+    let output_path = temp_dir.path().join("output");
     generate_to_file(&GenerateRequest {
         language: nexgen::language::Language::TypeScript,
         input_paths: vec![input_path],
@@ -1941,8 +1939,11 @@ test("same-module alias chains delegate after initialization", () => {
     )
     .unwrap();
     typecheck_generated_typescript(&output_path, "same-module bare-ref alias chain");
-    run_generated_typescript_test(&temp_dir, &runtime, "same-module bare-ref alias chain");
-    fs::remove_dir_all(temp_dir).unwrap();
+    run_generated_typescript_test(
+        temp_dir.path(),
+        &runtime,
+        "same-module bare-ref alias chain",
+    );
 }
 
 #[test]
