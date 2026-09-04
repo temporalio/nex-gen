@@ -86,19 +86,13 @@ export const operationRegistry = [
   {
     service: "example.chat.v1.ChatService",
     operation: "SendMessage",
-    inputType: "SendMessageInput",
-    outputType: "SendMessageOutput",
   },
   {
     service: "example.chat.v1.ChatService",
     operation: "GetRoom",
-    inputType: "ChatService.GetRoomInput",
-    outputType: "Room",
   },
   {
     service: "example.chat.v1.ChatService",
     operation: "Ping",
-    inputType: "void",
-    outputType: "void",
   },
 ] as const;

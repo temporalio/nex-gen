@@ -13,7 +13,5 @@ export const operationRegistry = [
   {
     service: "GenericModelService",
     operation: "Complete",
-    inputType: "generic-model-service.generic-request",
-    outputType: "generic-model-service.generic-response",
   },
 ] as const;

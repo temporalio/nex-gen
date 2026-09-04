@@ -24,37 +24,25 @@ export const operationRegistry = [
   {
     service: "TypeShowcase",
     operation: "GetUser",
-    inputType: "type-showcase.get-user-request",
-    outputType: "User",
   },
   {
     service: "TypeShowcase",
     operation: "UpdateEmail",
-    inputType: "type-showcase.update-email-request",
-    outputType: "User",
   },
   {
     service: "TypeShowcase",
     operation: "Rename",
-    inputType: "type-showcase.rename-request",
-    outputType: "User",
   },
   {
     service: "TypeShowcase",
     operation: "SetProfile",
-    inputType: "type-showcase.set-profile-request",
-    outputType: "User",
   },
   {
     service: "TypeShowcase",
     operation: "RecordSync",
-    inputType: "type-showcase.record-sync-request",
-    outputType: "void",
   },
   {
     service: "TypeShowcase",
     operation: "Deactivate",
-    inputType: "type-showcase.deactivate-request",
-    outputType: "void",
   },
 ] as const;
